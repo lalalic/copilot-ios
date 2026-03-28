@@ -36,15 +36,13 @@ public final class InteractionEngine {
             return "Tapped \(ref) [\(element.kind)] \"\(element.label)\""
         }
 
-        // Method 3: Trigger first UITapGestureRecognizer
-        if let tap = view.gestureRecognizers?.first(where: { $0 is UITapGestureRecognizer && $0.isEnabled }) {
-            // Simulate by changing state - this is a limited approach
-            // For gesture recognizers, we use the accessibility path instead
-            _ = tap // acknowledge the gesture exists
+        // Method 3: Walk accessibility elements on the view (SwiftUI hosting views)
+        let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
+        if activateAccessibilityElement(in: view, at: center) {
+            return "Tapped \(ref) [\(element.kind)] \"\(element.label)\" (via a11y element)"
         }
 
         // Method 4: Hit-test based approach as fallback
-        let center = CGPoint(x: element.frame.midX, y: element.frame.midY)
         if let window = view.window,
            let hitView = window.hitTest(center, with: nil) {
             if let control = hitView as? UIControl {
@@ -54,9 +52,15 @@ public final class InteractionEngine {
             if hitView.accessibilityActivate() {
                 return "Tapped \(ref) [\(element.kind)] \"\(element.label)\" (via hitTest)"
             }
+            // Try a11y elements on the hit-tested view too
+            if activateAccessibilityElement(in: hitView, at: center) {
+                return "Tapped \(ref) [\(element.kind)] \"\(element.label)\" (via hitTest a11y)"
+            }
         }
 
-        return "Warning: tapped \(ref) but activation may not have triggered"
+        // Method 5: Gesture recognizer force-trigger
+        synthesizeTouch(at: center, in: view.window ?? Self.keyWindow!)
+        return "Warning: tapped \(ref) via synthesized touch — may not have triggered"
     }
 
     // MARK: - Tap XY (coordinate-based)
@@ -81,15 +85,62 @@ public final class InteractionEngine {
             return "Tapped (\(Int(x)), \(Int(y))) → UIControl [\(Swift.type(of: control))]"
         }
 
-        // Method 2: Accessibility activate
+        // Method 2: Accessibility activate on the view itself
         if hitView.accessibilityActivate() {
             return "Tapped (\(Int(x)), \(Int(y))) → activated [\(Swift.type(of: hitView))]"
         }
 
-        // Method 3: Synthesize full touch event sequence on the window
-        // This works for SwiftUI gesture recognizers on the hosting view
+        // Method 3: Walk accessibility elements on the hit view and its ancestors
+        // This is critical for SwiftUI — buttons are accessibility elements on the hosting view
+        var current: UIView? = hitView
+        while let view = current {
+            if activateAccessibilityElement(in: view, at: point) {
+                return "Tapped (\(Int(x)), \(Int(y))) → a11y element on [\(Swift.type(of: view))]"
+            }
+            current = view.superview
+        }
+
+        // Method 4: Synthesize full touch event sequence on the window
         synthesizeTouch(at: point, in: window)
         return "Tapped (\(Int(x)), \(Int(y))) → synthesized touch on [\(Swift.type(of: hitView))]"
+    }
+
+    // MARK: - Accessibility Element Activation
+
+    /// Walk the accessibility element tree of a view to find and activate
+    /// the element at the given point. This is essential for SwiftUI views
+    /// where buttons exist as accessibility elements on a hosting view.
+    private func activateAccessibilityElement(in view: UIView, at point: CGPoint) -> Bool {
+        // Check direct accessibility elements
+        if let elements = view.accessibilityElements {
+            for element in elements {
+                if let axElement = element as? NSObject {
+                    let frame = axElement.accessibilityFrame
+                    if frame.contains(point) {
+                        if axElement.accessibilityActivate() {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check via accessibilityElementCount / accessibilityElement(at:)
+        let count = view.accessibilityElementCount()
+        if count != NSNotFound && count > 0 {
+            for i in 0..<count {
+                if let axElement = view.accessibilityElement(at: i) as? NSObject {
+                    let frame = axElement.accessibilityFrame
+                    if frame.contains(point) {
+                        if axElement.accessibilityActivate() {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+
+        return false
     }
 
     /// Synthesize a touch-down → touch-up sequence at the given point.
