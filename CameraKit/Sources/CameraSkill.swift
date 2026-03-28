@@ -30,7 +30,7 @@ public enum CameraSkill: String, Sendable, CaseIterable {
                     "set_zoom", "set_camera", "switch_camera", "detect_faces",
                     "analyze_shot", "detect_horizon", "detect_blur", "classify_shot",
                     "classify_scene", "set_slow_motion", "get_audio_levels",
-                    "track_subject", "generate_image", "wait"]
+                    "track_subject", "generate_image", "animate_camera", "wait"]
         case .portraitPhotographer:
             return ["observe_camera", "speak", "listen", "capture_photo",
                     "set_zoom", "set_camera", "set_exposure", "set_manual_exposure",
@@ -51,7 +51,7 @@ public enum CameraSkill: String, Sendable, CaseIterable {
                     "set_zoom", "set_camera", "set_exposure", "set_manual_exposure",
                     "set_focus", "set_flash", "set_white_balance",
                     "detect_objects", "analyze_shot", "detect_blur",
-                    "detect_rectangles", "generate_image", "wait"]
+                    "detect_rectangles", "generate_image", "animate_camera", "wait"]
         }
     }
 
@@ -61,7 +61,7 @@ public enum CameraSkill: String, Sendable, CaseIterable {
         case .filmDirector:
             return ["observe_camera", "configure_camera", "analyze_vision", "speak", "listen",
                     "start_recording", "stop_recording", "pause_recording", "resume_recording",
-                    "track_subject", "get_audio_levels", "generate_image", "wait"]
+                    "track_subject", "get_audio_levels", "generate_image", "animate_camera", "wait"]
         case .portraitPhotographer:
             return ["observe_camera", "configure_camera", "analyze_vision", "speak", "listen",
                     "capture_photo", "wait"]
@@ -102,6 +102,7 @@ public enum CameraSkill: String, Sendable, CaseIterable {
             - Switch lenses for variety (set_camera with wide/ultraWide/telephoto)
             - Aim for 4-6 shots with varied compositions (wide, medium, close-up)
             - Use observe_camera frequently to stay aware of the scene
+            - Use animate_camera for smooth cinematic moves (zoom ramps, focus pulls, exposure shifts)
             - After all shots are captured, use send_response to summarize what was filmed
             """
 

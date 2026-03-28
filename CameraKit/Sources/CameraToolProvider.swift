@@ -22,6 +22,9 @@ public final class CameraToolProvider {
     private var recordingStartTime: Date?
     private var shotCount = 0
 
+    /// Camera animation engine for keyframed parameter changes.
+    public private(set) lazy var animator = CameraAnimator(camera: camera)
+
     /// Callbacks for external event handling (e.g., UI updates).
     public var onRecordStart: (() -> Void)?
     public var onRecordStop: ((URL?, TimeInterval) -> Void)?
@@ -75,6 +78,7 @@ public final class CameraToolProvider {
             setSlowMotionTool,
             getAudioLevelsTool,
             generateImageTool,
+            animateCameraTool,
             waitTool,
         ]
     }
@@ -100,6 +104,7 @@ public final class CameraToolProvider {
             trackSubjectTool,
             getAudioLevelsTool,
             generateImageTool,
+            animateCameraTool,
             waitTool,
         ]
     }
@@ -1132,6 +1137,176 @@ public final class CameraToolProvider {
         }
     }
     #endif
+
+    // MARK: - Camera Animation Tool
+
+    /// Animate camera parameters over time using keyframes with easing curves.
+    public var animateCameraTool: ToolDefinition {
+        let animator = self.animator
+        let cam = self.camera
+        return ToolDefinition(
+            name: "animate_camera",
+            description: """
+            Animate camera parameters over time using keyframes. Each keyframe defines a point in time \
+            with target parameter values and an easing curve for the transition TO the next keyframe. \
+            Supports: zoom, exposure, focus_x, focus_y, white_balance, iso, shutter_speed. \
+            Easing: "linear", "ease_in", "ease_out", "ease_in_out", "spring". \
+            Optionally auto-starts recording for the animation duration. \
+            Blocks until the animation completes.
+            """,
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "keyframes": .object([
+                        "type": .string("array"),
+                        "description": .string("Array of keyframe objects. Each has 'time' (seconds) and optional parameter values."),
+                        "items": .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "time": .object(["type": .string("number"), "description": .string("Time in seconds from animation start")]),
+                                "easing": .object(["type": .string("string"), "description": .string("Easing curve: linear, ease_in, ease_out, ease_in_out, spring")]),
+                                "zoom": .object(["type": .string("number"), "description": .string("Zoom level (1.0 = normal)")]),
+                                "exposure": .object(["type": .string("number"), "description": .string("Exposure compensation EV (-2 to +2)")]),
+                                "focus_x": .object(["type": .string("number"), "description": .string("Focus point X (0-1)")]),
+                                "focus_y": .object(["type": .string("number"), "description": .string("Focus point Y (0-1)")]),
+                                "white_balance": .object(["type": .string("number"), "description": .string("Color temperature in Kelvin")]),
+                                "iso": .object(["type": .string("number"), "description": .string("ISO sensitivity")]),
+                                "shutter_speed": .object(["type": .string("number"), "description": .string("Shutter speed in seconds")]),
+                            ]),
+                            "required": .array([.string("time")]),
+                        ]),
+                    ]),
+                    "duration": .object([
+                        "type": .string("number"),
+                        "description": .string("Total animation duration in seconds (default: last keyframe time)"),
+                    ]),
+                    "record": .object([
+                        "type": .string("boolean"),
+                        "description": .string("If true, automatically record video during the animation (default: false)"),
+                    ]),
+                ]),
+                "required": .array([.string("keyframes")]),
+            ]),
+            skipPermission: true,
+            handler: { args in
+                guard case .object(let dict) = args,
+                      case .array(let kfArray) = dict["keyframes"] else {
+                    return "Error: 'keyframes' array required"
+                }
+
+                // Parse keyframes
+                var keyframes: [CameraKeyframe] = []
+                for item in kfArray {
+                    guard case .object(let kf) = item else { continue }
+
+                    let time: Double = {
+                        if case .double(let t) = kf["time"] { return t }
+                        if case .int(let t) = kf["time"] { return Double(t) }
+                        return 0
+                    }()
+
+                    let easingStr: String = {
+                        if case .string(let e) = kf["easing"] { return e }
+                        return "linear"
+                    }()
+                    let easing = AnimationEasing.from(string: easingStr)
+
+                    let zoom: Double? = {
+                        if case .double(let v) = kf["zoom"] { return v }
+                        if case .int(let v) = kf["zoom"] { return Double(v) }
+                        return nil
+                    }()
+                    let exposure: Double? = {
+                        if case .double(let v) = kf["exposure"] { return v }
+                        if case .int(let v) = kf["exposure"] { return Double(v) }
+                        return nil
+                    }()
+                    let focusX: Double? = {
+                        if case .double(let v) = kf["focus_x"] { return v }
+                        if case .int(let v) = kf["focus_x"] { return Double(v) }
+                        return nil
+                    }()
+                    let focusY: Double? = {
+                        if case .double(let v) = kf["focus_y"] { return v }
+                        if case .int(let v) = kf["focus_y"] { return Double(v) }
+                        return nil
+                    }()
+                    let wb: Double? = {
+                        if case .double(let v) = kf["white_balance"] { return v }
+                        if case .int(let v) = kf["white_balance"] { return Double(v) }
+                        return nil
+                    }()
+                    let iso: Double? = {
+                        if case .double(let v) = kf["iso"] { return v }
+                        if case .int(let v) = kf["iso"] { return Double(v) }
+                        return nil
+                    }()
+                    let shutter: Double? = {
+                        if case .double(let v) = kf["shutter_speed"] { return v }
+                        return nil
+                    }()
+
+                    keyframes.append(CameraKeyframe(
+                        time: time,
+                        easing: easing,
+                        zoom: zoom,
+                        exposure: exposure,
+                        focusX: focusX,
+                        focusY: focusY,
+                        whiteBalance: wb,
+                        iso: iso,
+                        shutterSpeed: shutter
+                    ))
+                }
+
+                guard !keyframes.isEmpty else {
+                    return "Error: No valid keyframes provided"
+                }
+
+                // Parse duration
+                let duration: Double? = {
+                    if case .double(let d) = dict["duration"] { return d }
+                    if case .int(let d) = dict["duration"] { return Double(d) }
+                    return nil
+                }()
+
+                // Parse record flag
+                let shouldRecord: Bool = {
+                    if case .bool(let r) = dict["record"] { return r }
+                    return false
+                }()
+
+                // Start recording if requested
+                if shouldRecord {
+                    await MainActor.run { cam.startRecording() }
+                    // Small delay to let recording stabilize
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+
+                // Run animation (blocks until complete)
+                let animDuration = duration ?? (keyframes.last?.time ?? 0)
+
+                // Bridge to MainActor for the animation (CADisplayLink must run on main)
+                let kfs = keyframes
+                let dur = duration
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    Task { @MainActor in
+                        await animator.animate(keyframes: kfs, duration: dur)
+                        cont.resume()
+                    }
+                }
+
+                // Stop recording if we started it
+                if shouldRecord {
+                    let url = await cam.stopRecording()
+                    let fileName = url?.lastPathComponent ?? "unknown"
+                    return "Animation complete (\(String(format: "%.1f", animDuration))s, \(kfs.count) keyframes). Recording saved: \(fileName)"
+                }
+
+                return "Animation complete (\(String(format: "%.1f", animDuration))s, \(kfs.count) keyframes)"
+            }
+        )
+    }
 
     // MARK: - Unified Tools (Compact Mode)
 
