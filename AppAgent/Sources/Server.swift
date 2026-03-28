@@ -135,8 +135,13 @@ public final class MCPServer {
     }
 
     private func receiveHTTPRequest(connection: NWConnection) {
-        // Accumulate all data for the HTTP request.
-        // First receive gets headers; if Content-Length indicates more body data, continue receiving.
+        // Start accumulating TCP segments until we have the full HTTP request.
+        accumulateHTTPData(connection: connection, accumulated: Data())
+    }
+
+    /// Recursively accumulate TCP segments until the full HTTP body (per Content-Length) is received.
+    /// This handles WiFi TCP fragmentation where a single HTTP request arrives across multiple segments.
+    private func accumulateHTTPData(connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) { [weak self] content, _, isComplete, error in
             Task { @MainActor in
                 guard let self else { return }
@@ -147,63 +152,41 @@ public final class MCPServer {
                     return
                 }
 
-                guard let data = content, !data.isEmpty else {
-                    connection.cancel()
-                    return
+                var data = accumulated
+                if let content, !content.isEmpty {
+                    data.append(content)
                 }
 
-                // Check if we need more data based on Content-Length
+                // Check if we have a complete HTTP request
                 if let raw = String(data: data, encoding: .utf8),
                    let headerEnd = raw.range(of: "\r\n\r\n") {
                     // Parse Content-Length from headers
                     let headers = String(raw[raw.startIndex..<headerEnd.lowerBound])
                     var expectedContentLength = 0
                     for line in headers.split(separator: "\r\n") {
-                        let lower = line.lowercased()
-                        if lower.hasPrefix("content-length:") {
+                        if line.lowercased().hasPrefix("content-length:") {
                             let valStr = line.split(separator: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
                             expectedContentLength = Int(valStr) ?? 0
                             break
                         }
                     }
 
-                    let bodyData = data[data.index(data.startIndex, offsetBy: raw.distance(from: raw.startIndex, to: headerEnd.upperBound))...]
-                    let receivedBodyLength = bodyData.count
+                    let headerEndOffset = raw.distance(from: raw.startIndex, to: headerEnd.upperBound)
+                    let bodyLength = data.count - headerEndOffset
 
-                    if expectedContentLength > 0 && receivedBodyLength < expectedContentLength {
-                        // Need more data — accumulate
-                        var accumulated = data
-                        let remaining = expectedContentLength - receivedBodyLength
-                        self.receiveRemaining(connection: connection, accumulated: accumulated, remaining: remaining)
+                    if expectedContentLength == 0 || bodyLength >= expectedContentLength {
+                        // Complete request — process it
+                        await self.handleHTTPRequest(raw: String(data: data, encoding: .utf8) ?? raw, connection: connection)
                         return
                     }
+                    // Body incomplete — fall through to continue accumulating
                 }
 
-                guard let raw = String(data: data, encoding: .utf8) else {
-                    connection.cancel()
-                    return
-                }
-
-                await self.handleHTTPRequest(raw: raw, connection: connection)
-            }
-        }
-    }
-
-    /// Continue receiving data until we have the full Content-Length body.
-    private func receiveRemaining(connection: NWConnection, accumulated: Data, remaining: Int) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: min(remaining, 1_048_576)) { [weak self] content, _, _, error in
-            Task { @MainActor in
-                guard let self else { return }
-
-                if let error {
-                    self.log("Receive error (continuation): \(error)")
-                    connection.cancel()
-                    return
-                }
-
-                guard let data = content, !data.isEmpty else {
-                    // No more data — process what we have
-                    if let raw = String(data: accumulated, encoding: .utf8) {
+                // If connection closed or no new data arrived on an empty buffer, give up
+                if isComplete || (content == nil && accumulated.isEmpty) {
+                    if data.isEmpty {
+                        connection.cancel()
+                    } else if let raw = String(data: data, encoding: .utf8) {
                         await self.handleHTTPRequest(raw: raw, connection: connection)
                     } else {
                         connection.cancel()
@@ -211,21 +194,8 @@ public final class MCPServer {
                     return
                 }
 
-                var newAccumulated = accumulated
-                newAccumulated.append(data)
-                let newRemaining = remaining - data.count
-
-                if newRemaining > 0 {
-                    // Still need more data
-                    self.receiveRemaining(connection: connection, accumulated: newAccumulated, remaining: newRemaining)
-                } else {
-                    // Got everything
-                    if let raw = String(data: newAccumulated, encoding: .utf8) {
-                        await self.handleHTTPRequest(raw: raw, connection: connection)
-                    } else {
-                        connection.cancel()
-                    }
-                }
+                // Not enough data yet — keep accumulating
+                self.accumulateHTTPData(connection: connection, accumulated: data)
             }
         }
     }
