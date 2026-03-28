@@ -135,7 +135,9 @@ public final class MCPServer {
     }
 
     private func receiveHTTPRequest(connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) { [weak self] content, _, _, error in
+        // Accumulate all data for the HTTP request.
+        // First receive gets headers; if Content-Length indicates more body data, continue receiving.
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) { [weak self] content, _, isComplete, error in
             Task { @MainActor in
                 guard let self else { return }
 
@@ -145,13 +147,85 @@ public final class MCPServer {
                     return
                 }
 
-                guard let data = content, !data.isEmpty,
-                      let raw = String(data: data, encoding: .utf8) else {
+                guard let data = content, !data.isEmpty else {
+                    connection.cancel()
+                    return
+                }
+
+                // Check if we need more data based on Content-Length
+                if let raw = String(data: data, encoding: .utf8),
+                   let headerEnd = raw.range(of: "\r\n\r\n") {
+                    // Parse Content-Length from headers
+                    let headers = String(raw[raw.startIndex..<headerEnd.lowerBound])
+                    var expectedContentLength = 0
+                    for line in headers.split(separator: "\r\n") {
+                        let lower = line.lowercased()
+                        if lower.hasPrefix("content-length:") {
+                            let valStr = line.split(separator: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                            expectedContentLength = Int(valStr) ?? 0
+                            break
+                        }
+                    }
+
+                    let bodyData = data[data.index(data.startIndex, offsetBy: raw.distance(from: raw.startIndex, to: headerEnd.upperBound))...]
+                    let receivedBodyLength = bodyData.count
+
+                    if expectedContentLength > 0 && receivedBodyLength < expectedContentLength {
+                        // Need more data — accumulate
+                        var accumulated = data
+                        let remaining = expectedContentLength - receivedBodyLength
+                        self.receiveRemaining(connection: connection, accumulated: accumulated, remaining: remaining)
+                        return
+                    }
+                }
+
+                guard let raw = String(data: data, encoding: .utf8) else {
                     connection.cancel()
                     return
                 }
 
                 await self.handleHTTPRequest(raw: raw, connection: connection)
+            }
+        }
+    }
+
+    /// Continue receiving data until we have the full Content-Length body.
+    private func receiveRemaining(connection: NWConnection, accumulated: Data, remaining: Int) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: min(remaining, 1_048_576)) { [weak self] content, _, _, error in
+            Task { @MainActor in
+                guard let self else { return }
+
+                if let error {
+                    self.log("Receive error (continuation): \(error)")
+                    connection.cancel()
+                    return
+                }
+
+                guard let data = content, !data.isEmpty else {
+                    // No more data — process what we have
+                    if let raw = String(data: accumulated, encoding: .utf8) {
+                        await self.handleHTTPRequest(raw: raw, connection: connection)
+                    } else {
+                        connection.cancel()
+                    }
+                    return
+                }
+
+                var newAccumulated = accumulated
+                newAccumulated.append(data)
+                let newRemaining = remaining - data.count
+
+                if newRemaining > 0 {
+                    // Still need more data
+                    self.receiveRemaining(connection: connection, accumulated: newAccumulated, remaining: newRemaining)
+                } else {
+                    // Got everything
+                    if let raw = String(data: newAccumulated, encoding: .utf8) {
+                        await self.handleHTTPRequest(raw: raw, connection: connection)
+                    } else {
+                        connection.cancel()
+                    }
+                }
             }
         }
     }
