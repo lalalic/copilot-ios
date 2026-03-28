@@ -382,6 +382,93 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         print("[Relay] Agent with clientId responses: \(msgs)")
         XCTAssertGreaterThanOrEqual(msgs.count, 1, "Agent with clientId should deliver responses")
     }
+
+    // MARK: - Identity / Persona in System Prompt
+
+    /// Verify agent respects persona identity set in instructions.
+    func testAgent_Identity_StaysInCharacter() async throws {
+        try await skipIfNoRelay()
+
+        let responses = AgentResponseCollector()
+
+        let agent = try await client.createAgent(config: AgentConfig(
+            instructions: """
+            You are Piggy, a cute toy pig living on the user's iPhone.
+            You are affectionate, child-safe, playful, and emotionally warm.
+            You speak like a tiny best friend with a gentle piggy personality.
+            You MUST always refer to yourself as Piggy. Never break character.
+            Keep answers under 2 sentences. No markdown.
+            """,
+            onResponse: { message in
+                Task { await responses.add(message) }
+            },
+            onAskUser: { _ in "stop" }
+        ))
+
+        let agentTask = Task {
+            try await agent.start(prompt: "What is your name?")
+        }
+
+        for _ in 0..<60 {
+            try await Task.sleep(for: .seconds(2))
+            let msgs = await responses.messages
+            if !msgs.isEmpty {
+                agent.stop()
+                break
+            }
+        }
+
+        agentTask.cancel()
+        try? await Task.sleep(for: .seconds(1))
+
+        let msgs = await responses.messages
+        print("[Identity] Piggy responses: \(msgs)")
+
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Piggy should respond")
+        let allText = msgs.joined().lowercased()
+        XCTAssertTrue(allText.contains("piggy"), "Agent should identify as Piggy, got: \(allText)")
+    }
+
+    /// Verify agent identity with custom persona (pirate) stays in character.
+    func testAgent_Identity_CustomPersona() async throws {
+        try await skipIfNoRelay()
+
+        let responses = AgentResponseCollector()
+
+        let agent = try await client.createAgent(config: AgentConfig(
+            instructions: """
+            You are Captain Blackbeard, a fierce pirate. You end every response with "Arrr!"
+            Never break character. Stay in pirate mode at all times.
+            """,
+            onResponse: { message in
+                Task { await responses.add(message) }
+            },
+            onAskUser: { _ in "stop" }
+        ))
+
+        let agentTask = Task {
+            try await agent.start(prompt: "Greet me.")
+        }
+
+        for _ in 0..<60 {
+            try await Task.sleep(for: .seconds(2))
+            let msgs = await responses.messages
+            if !msgs.isEmpty {
+                agent.stop()
+                break
+            }
+        }
+
+        agentTask.cancel()
+        try? await Task.sleep(for: .seconds(1))
+
+        let msgs = await responses.messages
+        print("[Identity] Pirate responses: \(msgs)")
+
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Pirate should respond")
+        let allText = msgs.joined().lowercased()
+        XCTAssertTrue(allText.contains("arrr"), "Pirate should say Arrr, got: \(allText)")
+    }
 }
 
 // MARK: - Local Agent Integration Tests (via Copilot CLI stdio)
@@ -715,6 +802,50 @@ final class LocalAgentIntegrationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(calls, 1, "Tool should be called")
         XCTAssertNotNil(response)
         XCTAssertTrue(response?.contains("99") == true, "Response should include '99'")
+    }
+
+    // MARK: - Local Agent Identity
+
+    /// Verify local agent respects persona identity in instructions.
+    func testLocalAgent_Identity() async throws {
+        try await skipIfNoCLI()
+
+        let responses = AgentResponseCollector()
+
+        let agent = try await client.createAgent(config: AgentConfig(
+            instructions: """
+            You are Robo, a friendly robot toy. You always start your responses with "Beep boop!"
+            Never break character. You speak in short, enthusiastic sentences.
+            """,
+            onResponse: { message in
+                Task { await responses.add(message) }
+            },
+            onAskUser: { _ in "stop" }
+        ))
+
+        let agentTask = Task {
+            try await agent.start(prompt: "Hello, who are you?")
+        }
+
+        for _ in 0..<60 {
+            try await Task.sleep(for: .seconds(2))
+            let msgs = await responses.messages
+            if !msgs.isEmpty {
+                agent.stop()
+                break
+            }
+        }
+
+        agentTask.cancel()
+        try? await Task.sleep(for: .seconds(1))
+
+        let msgs = await responses.messages
+        print("[LocalAgent] Identity responses: \(msgs)")
+
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Robo should respond")
+        let allText = msgs.joined().lowercased()
+        XCTAssertTrue(allText.contains("beep") || allText.contains("boop") || allText.contains("robo"),
+                      "Agent should stay in character as Robo, got: \(allText)")
     }
 }
 
