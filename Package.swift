@@ -9,6 +9,10 @@ let package = Package(
         .library(name: "CameraKit", targets: ["CameraKit"]),
         .library(name: "WebKitAgent", targets: ["WebKitAgent"]),
         .library(name: "AppAgent", targets: ["AppAgent"]),
+        .library(name: "MediaKit", targets: ["MediaKit"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/yangliu-1995/ffmpeg-kit-spm.git", exact: "6.0.0"),
     ],
     targets: [
         // MARK: - CopilotSDK (leaf, no dependencies)
@@ -55,6 +59,21 @@ let package = Package(
             name: "WebKitAgentTests",
             dependencies: ["WebKitAgent"],
             path: "WebKitAgent/Tests"
+        ),
+
+        // MARK: - MediaKit (depends on CopilotSDK + ffmpeg-kit)
+        .target(
+            name: "MediaKit",
+            dependencies: [
+                "CopilotSDK",
+                .product(name: "FFmpegKit-SPM", package: "ffmpeg-kit-spm"),
+            ],
+            path: "MediaKit/Sources"
+        ),
+        .testTarget(
+            name: "MediaKitTests",
+            dependencies: ["MediaKit"],
+            path: "MediaKit/Tests"
         ),
     ]
 )
