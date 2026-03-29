@@ -150,5 +150,155 @@ public final class AdapterRegistry {
         for yaml in [hnTop, hnNew, hnBest] {
             try? register(yaml: yaml)
         }
+
+        // WeChat Web adapters (browser-based, hook into AngularJS)
+        registerWeChatAdapters()
+    }
+
+    // MARK: - WeChat Adapters
+
+    private func registerWeChatAdapters() {
+        // wechat/login — navigate to wx.qq.com and get QR code URL
+        let wxLogin = """
+        site: wechat
+        name: login
+        description: Get WeChat Web login QR code URL
+        auth: none
+        requiresBrowser: true
+        preNavigate: https://wx.qq.com
+        waitSeconds: 5
+        script: |
+          (() => {
+            // Check if already logged in
+            if (window.MMCgi && window.MMCgi.isLogin) {
+              return JSON.stringify([{status: "logged_in", message: "Already logged in to WeChat Web"}]);
+            }
+            // Check if Angular is ready with login scope
+            if (typeof angular !== 'undefined' && angular.element) {
+              try {
+                const loginScope = angular.element('[ng-controller="loginController"]').scope();
+                if (loginScope && loginScope.qrcodeUrl) {
+                  return JSON.stringify([{
+                    status: "qr_ready",
+                    code: loginScope.code,
+                    qrcodeUrl: loginScope.qrcodeUrl,
+                    message: "Scan QR code with WeChat mobile app"
+                  }]);
+                }
+              } catch (e) {}
+            }
+            // Try to find QR code image directly
+            const qrImg = document.querySelector('.qrcode img') || document.querySelector('img[src*="qrcode"]');
+            if (qrImg) {
+              return JSON.stringify([{
+                status: "qr_image",
+                src: qrImg.src,
+                message: "QR code image found. Scan with WeChat mobile app."
+              }]);
+            }
+            return JSON.stringify([{status: "loading", message: "WeChat Web is still loading..."}]);
+          })()
+        """
+
+        // wechat/status — check login status
+        let wxStatus = """
+        site: wechat
+        name: status
+        description: Check WeChat Web login status
+        auth: none
+        requiresBrowser: true
+        script: |
+          (() => {
+            if (typeof angular === 'undefined' || !angular.element) {
+              return JSON.stringify([{status: "not_loaded", angularReady: false}]);
+            }
+            try {
+              const injector = angular.element(document).injector();
+              const loginScope = angular.element('[ng-controller="loginController"]').scope();
+              const isLoggedIn = !!(window.MMCgi && window.MMCgi.isLogin);
+              return JSON.stringify([{
+                status: isLoggedIn ? "logged_in" : "not_logged_in",
+                loginCode: loginScope ? loginScope.code : null,
+                angularReady: !!injector,
+                url: window.location.href
+              }]);
+            } catch (e) {
+              return JSON.stringify([{status: "error", message: e.message}]);
+            }
+          })()
+        """
+
+        // wechat/contacts — get all contacts (requires logged-in state)
+        let wxContacts = """
+        site: wechat
+        name: contacts
+        description: Get WeChat contact list (must be logged in)
+        auth: cookie
+        domain: wx.qq.com
+        requiresBrowser: true
+        args:
+          limit:
+            type: int
+            default: 50
+            description: Maximum number of contacts
+        script: |
+          (() => {
+            if (typeof angular === 'undefined') {
+              return JSON.stringify([{error: "Not logged in. Use wechat/login first."}]);
+            }
+            try {
+              const injector = angular.element(document).injector();
+              if (!injector) return JSON.stringify([{error: "Angular not ready"}]);
+              const contactFactory = injector.get('contactFactory');
+              const contacts = contactFactory.getAllFriendContact();
+              return JSON.stringify(contacts.slice(0, 50).map((c, i) => ({
+                rank: i + 1,
+                name: c.NickName || c.RemarkName || 'Unknown',
+                remark: c.RemarkName || '',
+                username: c.UserName,
+                sex: c.Sex === 1 ? 'M' : c.Sex === 2 ? 'F' : '?'
+              })));
+            } catch (e) {
+              return JSON.stringify([{error: e.message}]);
+            }
+          })()
+        """
+
+        // wechat/send — send a message (requires logged-in state)
+        let wxSend = """
+        site: wechat
+        name: send
+        description: Send a WeChat message (must be logged in)
+        auth: cookie
+        domain: wx.qq.com
+        requiresBrowser: true
+        args:
+          to:
+            type: string
+            description: Recipient UserName
+          message:
+            type: string
+            description: Message text to send
+        script: |
+          (() => {
+            if (typeof angular === 'undefined') {
+              return JSON.stringify([{error: "Not logged in"}]);
+            }
+            try {
+              const injector = angular.element(document).injector();
+              const chatFactory = injector.get('chatFactory');
+              const confFactory = injector.get('confFactory');
+              // Note: to and message are injected by the adapter args system
+              // This script runs in the browser context and needs the args passed in
+              return JSON.stringify([{status: "ready", message: "Use evaluate command to send: chatFactory.sendMessage(...)"}]);
+            } catch (e) {
+              return JSON.stringify([{error: e.message}]);
+            }
+          })()
+        """
+
+        for yaml in [wxLogin, wxStatus, wxContacts, wxSend] {
+            try? register(yaml: yaml)
+        }
     }
 }

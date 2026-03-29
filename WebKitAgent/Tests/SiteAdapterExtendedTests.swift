@@ -216,7 +216,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testBundledAdaptersCount() {
         let registry = AdapterRegistry()
         registry.loadBundledAdapters()
-        XCTAssertEqual(registry.adapterCount, 3)
+        XCTAssertEqual(registry.adapterCount, 7) // 3 HN + 4 WeChat
     }
 
     func testBundledAdaptersHavePipelines() {
@@ -247,6 +247,68 @@ final class SiteAdapterExtendedTests: XCTestCase {
         XCTAssertTrue(output.contains("top"))
         XCTAssertTrue(output.contains("new"))
         XCTAssertTrue(output.contains("best"))
+        XCTAssertTrue(output.contains("wechat"))
+        XCTAssertTrue(output.contains("login"))
+        XCTAssertTrue(output.contains("contacts"))
+    }
+
+    // MARK: - Bundled WeChat Adapters
+
+    func testBundledWeChatAdaptersExist() {
+        let registry = AdapterRegistry()
+        registry.loadBundledAdapters()
+        XCTAssertNotNil(registry.find(site: "wechat", action: "login"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "status"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "contacts"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "send"))
+    }
+
+    func testWeChatLoginAdapterProperties() {
+        let registry = AdapterRegistry()
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "wechat", action: "login")!
+        XCTAssertTrue(adapter.requiresBrowser, "WeChat login requires browser")
+        XCTAssertEqual(adapter.preNavigate, "https://wx.qq.com")
+        XCTAssertEqual(adapter.waitSeconds, 5)
+        XCTAssertNotNil(adapter.script, "Login adapter should have script")
+        XCTAssertTrue(adapter.script!.contains("qrcodeUrl"), "Script should reference qrcodeUrl")
+    }
+
+    func testWeChatContactsAdapterProperties() {
+        let registry = AdapterRegistry()
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "wechat", action: "contacts")!
+        XCTAssertTrue(adapter.requiresBrowser)
+        if case .cookie(let domain) = adapter.auth {
+            XCTAssertEqual(domain, "wx.qq.com")
+        } else {
+            XCTFail("Contacts adapter should use cookie auth")
+        }
+        let limitArg = adapter.args.first { $0.name == "limit" }
+        XCTAssertNotNil(limitArg)
+        XCTAssertEqual(limitArg?.type, .int)
+    }
+
+    func testWeChatStatusAdapterHasScript() {
+        let registry = AdapterRegistry()
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "wechat", action: "status")!
+        XCTAssertNotNil(adapter.script)
+        XCTAssertTrue(adapter.script!.contains("MMCgi"), "Status script should check MMCgi.isLogin")
+    }
+
+    func testSiteCommandListsWeChatAdapters() async throws {
+        let manager = WebViewManager()
+        let provider = WebAgentToolProvider(manager: manager)
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("wechat")
+        ]))
+        XCTAssertTrue(result.contains("login"))
+        XCTAssertTrue(result.contains("contacts"))
+        XCTAssertTrue(result.contains("status"))
+        XCTAssertTrue(result.contains("send"))
     }
 
     // MARK: - WebAgentToolProvider: Evaluate Command

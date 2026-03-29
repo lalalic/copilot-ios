@@ -207,7 +207,7 @@ final class WebAgentToolProviderTests: XCTestCase {
     }
 
     func testBundledAdaptersLoaded() {
-        // Provider should auto-load bundled adapters
-        XCTAssertGreaterThan(provider.registry.adapterCount, 0)
+        // Provider should auto-load bundled adapters (3 HN + 4 WeChat)
+        XCTAssertEqual(provider.registry.adapterCount, 7)
     }
 }
