@@ -31,7 +31,9 @@ public final class WebAgentToolProvider {
     - `type` — Type into an input/textarea. Params: `ref` (required), `text` (required), `clear` (optional, default true).
     - `download` — Download a file. Params: `ref` (element with href) OR `url` (direct URL), `filename` (optional override).
     - `upload` — Upload file to <input type="file">. Params: `ref` (required), `filePath` (required).
-    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name). Use action="list" to see available adapters. Example: site=hackernews action=top.
+    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name). Use action="list" to see available adapters.
+    - `evaluate` — Run JavaScript on the current page. Params: `script` (required). Returns the result.
+    - `screenshot` — Take a screenshot of the current page. Returns base64 JPEG.
 
     Workflow: navigate → snapshot → read refs → click/type/download as needed → snapshot again after page changes.
     For known sites, prefer `site` command over manual navigation — it's faster and deterministic.
@@ -55,7 +57,7 @@ public final class WebAgentToolProvider {
                         "enum": .array([
                             .string("navigate"), .string("snapshot"), .string("click"),
                             .string("type"), .string("download"), .string("upload"),
-                            .string("site")
+                            .string("site"), .string("evaluate"), .string("screenshot")
                         ]),
                         "description": .string("The sub-command to execute")
                     ]),
@@ -90,6 +92,10 @@ public final class WebAgentToolProvider {
                     "action": .object([
                         "type": .string("string"),
                         "description": .string("Action name for site command (e.g. top, list)")
+                    ]),
+                    "script": .object([
+                        "type": .string("string"),
+                        "description": .string("JavaScript code to evaluate (for evaluate command)")
                     ])
                 ]),
                 "required": .array([.string("command")])
@@ -154,6 +160,18 @@ public final class WebAgentToolProvider {
 
         case "site":
             return try await dispatchSite(args: args)
+
+        case "evaluate":
+            guard case .string(let script) = args["script"] else {
+                return "Error: 'script' parameter required for evaluate"
+            }
+            return try await manager.evaluateJSPublic(script)
+
+        case "screenshot":
+            if let base64 = await manager.screenshot() {
+                return "data:image/jpeg;base64,\(base64)"
+            }
+            return "Error: screenshot failed"
 
         default:
             return "Error: unknown command '\(command)'. Use: navigate, snapshot, click, type, download, upload, site"
