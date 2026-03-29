@@ -668,6 +668,33 @@ try await Task.sleep(for: .seconds(300))
 agent.stop()
 ```
 
+### Request-Response Pattern (One-Shot)
+
+For apps that need ask-and-answer (not a continuous loop), use `agent.session.sendAndWait()`:
+
+```swift
+// Create agent once (registers send_response + ask_user tools on the session)
+let agent = try await client.createAgent(config: AgentConfig(
+    instructions: "You are a helpful assistant.",
+    onResponse: { [weak self] message in
+        self?.capturedResponse = message   // relay delivers via send_response tool
+    },
+    onAskUser: { _ in return "" }
+))
+
+// For each user message, use the dual-capture pattern:
+capturedResponse = nil
+let directReply = try await agent.session.sendAndWait(prompt: "What is 2+2?", timeout: 30)
+let response = directReply ?? capturedResponse
+```
+
+**Why dual capture?** Through the relay, the model calls the `send_response` tool instead of returning
+content directly. `sendAndWait` returns the `assistant.message` content (empty when relay is used),
+while `onResponse` captures the tool call result. The `??` fallback handles both paths.
+
+This pattern is used by Toybox (PiggyAgent), Intento (AIDirectorService, AgentLoop), and
+any app that needs one-shot interactions rather than a continuous autonomous loop.
+
 ### Agent vs Loop Mode
 
 | Feature | `session.loop()` | `CopilotAgent` |
@@ -779,6 +806,7 @@ class ChatService {
     private var client: CopilotClient?
     private var agent: CopilotAgent?
     private let synthesizer = AVSpeechSynthesizer()
+    private var capturedResponse: String?
     
     func connect() async throws {
         let transport = WebSocketTransport()  // defaults to wss://relay.ai.qili2.com
@@ -789,6 +817,7 @@ class ChatService {
             instructions: "You are a friendly assistant. Keep responses concise.",
             clientId: UIDevice.current.identifierForVendor?.uuidString,
             onResponse: { [weak self] message in
+                self?.capturedResponse = message
                 self?.speak(message)
             },
             onAskUser: { question in
@@ -797,8 +826,11 @@ class ChatService {
         ))
     }
     
-    func send(_ text: String) async throws {
-        try await agent?.run(prompt: text)
+    /// Send a message and get a response (one-shot, not continuous loop).
+    func send(_ text: String) async throws -> String? {
+        capturedResponse = nil
+        let directReply = try await agent?.session.sendAndWait(prompt: text, timeout: 60)
+        return directReply?.isEmpty == false ? directReply : capturedResponse
     }
     
     private func speak(_ text: String) {
@@ -837,8 +869,8 @@ let agent = try await client.createAgent(config: AgentConfig(
     onAskUser: { _ in return "" }
 ))
 
-try await agent.run(prompt: "What's the weather in Tokyo?")
-// Agent calls get_weather(city: "Tokyo"), then send_response with the result
+try await agent.start(prompt: "What's the weather in Tokyo?")
+// Agent calls get_weather(city: "Tokyo"), then send_response → onResponse prints result
 ```
 
 ### Persona / Identity
