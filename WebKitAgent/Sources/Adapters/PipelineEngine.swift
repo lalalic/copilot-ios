@@ -94,6 +94,12 @@ public final class PipelineEngine {
     private func evaluateFilterExpression(_ expression: String, item: Any) -> Bool {
         let expr = expression.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
 
+        // Compound expressions with && (must be checked first)
+        if expr.contains("&&") {
+            let parts = expr.components(separatedBy: "&&").map { $0.trimmingCharacters(in: .whitespaces) }
+            return parts.allSatisfy { evaluateFilterExpression($0, item: item) }
+        }
+
         // item.key != nil
         if expr.hasSuffix("!= nil") {
             let keyPath = expr.replacingOccurrences(of: " != nil", with: "")
@@ -124,12 +130,6 @@ public final class PipelineEngine {
                 return dict[key] == nil
             }
             return true
-        }
-
-        // Compound expressions with &&
-        if expr.contains("&&") {
-            let parts = expr.components(separatedBy: "&&").map { $0.trimmingCharacters(in: .whitespaces) }
-            return parts.allSatisfy { evaluateFilterExpression($0, item: item) }
         }
 
         // Default: true (unknown expressions pass)
