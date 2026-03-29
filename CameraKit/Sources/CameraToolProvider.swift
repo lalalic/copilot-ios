@@ -124,6 +124,22 @@ public final class CameraToolProvider {
         }
     }
 
+    /// Get all compact tools — union of every skill's compact tool set.
+    /// Use this when the agent decides its own approach based on user intent.
+    public var allCompactTools: [ToolDefinition] {
+        let combined = allTools + [configureCameraTool, analyzeVisionTool]
+        var seen = Set<String>()
+        var result = [ToolDefinition]()
+        for skill in CameraSkill.allCases {
+            for name in skill.compactToolNames {
+                if seen.insert(name).inserted, let tool = combined.first(where: { $0.name == name }) {
+                    result.append(tool)
+                }
+            }
+        }
+        return result
+    }
+
     // MARK: - Observation Tools
 
     public var observeCameraTool: ToolDefinition {
