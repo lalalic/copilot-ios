@@ -24,6 +24,9 @@ public final class WebViewManager: NSObject, ObservableObject {
     /// Navigation continuation for async load waiting.
     private var navigationContinuation: CheckedContinuation<Void, any Error>?
 
+    /// Callback-based navigation completion (used with timeout).
+    var onNavigationComplete: (() -> Void)?
+
     /// Download handling.
     private var downloadContinuation: CheckedContinuation<URL?, Never>?
     private var downloadDestination: URL?
@@ -64,7 +67,7 @@ public final class WebViewManager: NSObject, ObservableObject {
 
     // MARK: - Navigation
 
-    /// Navigate to a URL. Waits for page load to complete.
+    /// Navigate to a URL. Waits for page load to complete (with 30s timeout).
     public func navigate(to urlString: String) async throws -> String {
         guard let url = URL(string: urlString) else {
             throw WebAgentError.invalidURL(urlString)
@@ -74,16 +77,34 @@ public final class WebViewManager: NSObject, ObservableObject {
         let request = URLRequest(url: url)
         webView.load(request)
 
-        // Wait for navigation to complete
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            self.navigationContinuation = continuation
+        // Wait for navigation to complete with timeout
+        let timedOut: Bool = await withCheckedContinuation { continuation in
+            var resumed = false
+
+            // Set a callback for when navigation finishes
+            self.onNavigationComplete = {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: false)
+            }
+
+            // Timeout after 30 seconds
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard !resumed else { return }
+                resumed = true
+                self?.onNavigationComplete = nil
+                continuation.resume(returning: true)
+            }
         }
 
+        onNavigationComplete = nil
         isLoading = false
         currentURL = webView.url
         pageTitle = webView.title ?? ""
 
-        return "Page loaded: \(pageTitle) (\(webView.url?.absoluteString ?? urlString))"
+        let suffix = timedOut ? " (timed out, page may still be loading)" : ""
+        return "Page loaded: \(pageTitle) (\(webView.url?.absoluteString ?? urlString))\(suffix)"
     }
 
     // MARK: - Snapshot
@@ -324,18 +345,21 @@ extension WebViewManager: WKNavigationDelegate {
         isLoading = false
         navigationContinuation?.resume()
         navigationContinuation = nil
+        onNavigationComplete?()
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
         isLoading = false
         navigationContinuation?.resume(throwing: error)
         navigationContinuation = nil
+        onNavigationComplete?()
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
         isLoading = false
         navigationContinuation?.resume(throwing: error)
         navigationContinuation = nil
+        onNavigationComplete?()
     }
 
     // Handle download initiation
@@ -391,6 +415,7 @@ public enum WebAgentError: Error, LocalizedError {
     case uploadFailed(String)
     case fileNotFound(String)
     case javaScriptError(String)
+    case navigationTimeout(String)
 
     public var errorDescription: String? {
         switch self {
@@ -399,6 +424,7 @@ public enum WebAgentError: Error, LocalizedError {
         case .uploadFailed(let reason): return "Upload failed: \(reason)"
         case .fileNotFound(let path): return "File not found: \(path)"
         case .javaScriptError(let msg): return "JavaScript error: \(msg)"
+        case .navigationTimeout(let url): return "Navigation timed out (30s): \(url)"
         }
     }
 }
