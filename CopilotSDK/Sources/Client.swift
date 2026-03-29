@@ -1584,7 +1584,15 @@ public struct AgentConfig: Sendable {
     /// Model to use (e.g. "gpt-4.1", "claude-sonnet-4").
     public var model: String?
     /// System instructions for the agent.
+    /// When `sections` is nil, this replaces the entire system message (`.loop` mode).
+    /// When `sections` is set, this becomes additional content appended after all sections (`.customize` mode).
     public var instructions: String
+    /// Customize specific sections of the system prompt while preserving SDK defaults.
+    /// Available section IDs: identity, tone, tool_efficiency, environment_context,
+    /// code_change_rules, guidelines, safety, tool_instructions, custom_instructions, last_instructions.
+    /// When set, the agent loop instructions are auto-injected into `last_instructions`.
+    /// Example: `["identity": .replace(content: "You are Piggy, a toy pig companion")]`
+    public var sections: [String: SystemMessageSectionAction]?
     /// Additional tools the agent can use (send_response and ask_user are auto-injected).
     public var tools: [ToolDefinition]
     /// Called when the agent uses send_response to deliver a result.
@@ -1603,6 +1611,7 @@ public struct AgentConfig: Sendable {
     public init(
         model: String? = nil,
         instructions: String,
+        sections: [String: SystemMessageSectionAction]? = nil,
         tools: [ToolDefinition] = [],
         workingDirectory: String? = nil,
         clientId: String? = nil,
@@ -1613,6 +1622,7 @@ public struct AgentConfig: Sendable {
     ) {
         self.model = model
         self.instructions = instructions
+        self.sections = sections
         self.tools = tools
         self.workingDirectory = workingDirectory
         self.clientId = clientId
@@ -1736,19 +1746,38 @@ public final class CopilotAgent: @unchecked Sendable {
 
     /// Build the session config for an agent.
     static func buildSessionConfig(config: AgentConfig) -> SessionConfig {
-        let agentSystemMessage = """
-        \(config.instructions)
-
+        let agentLoopSuffix = """
         IMPORTANT: You are an autonomous agent running in an infinite loop.
         - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
         - Use the `ask_user` tool when you need more information or when all tasks are done to ask what to do next.
         - Always use one of these tools before your turn ends.
         """
 
+        let systemMessage: SystemMessageConfig
+        if let sections = config.sections {
+            // Customize mode: preserve SDK defaults, override specific sections.
+            // Inject agent loop instructions into last_instructions (unless caller already set it).
+            var allSections = sections
+            if allSections["last_instructions"] == nil {
+                allSections["last_instructions"] = .replace(content: agentLoopSuffix)
+            }
+            // instructions becomes the additional content appended after all sections.
+            let content = config.instructions.isEmpty ? nil : config.instructions
+            systemMessage = .customize(sections: allSections, content: content)
+        } else {
+            // Legacy mode: flat instructions replace the entire system message.
+            let agentSystemMessage = """
+            \(config.instructions)
+
+            \(agentLoopSuffix)
+            """
+            systemMessage = .loop(agentSystemMessage)
+        }
+
         return SessionConfig(
             model: config.model,
             tools: buildTools(config: config),
-            systemMessage: .loop(agentSystemMessage),
+            systemMessage: systemMessage,
             workingDirectory: config.workingDirectory,
             infiniteSessions: InfiniteSessionConfig(enabled: true),
             clientId: config.clientId,

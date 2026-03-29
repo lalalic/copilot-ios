@@ -630,6 +630,7 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 |----------|------|-------------|
 | `model` | `String?` | Model to use (default: relay decides, typically gpt-4.1) |
 | `instructions` | `String` | System prompt / persona instructions |
+| `sections` | `[String: SystemMessageSectionAction]?` | Customize specific sections of the system prompt (see below) |
 | `tools` | `[ToolDefinition]` | App-defined tools the model can call |
 | `onResponse` | `(String) -> Void` | Called when agent delivers results via `send_response` |
 | `onAskUser` | `(String) async -> String` | Called when agent asks a question via `ask_user` |
@@ -637,6 +638,56 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 | `appId` | `String?` | Routes to a specific workspace on the relay |
 | `snapshot` | `String?` | Base64 workspace snapshot for context recovery |
 | `workingDirectory` | `String?` | Working directory path |
+
+### System Prompt Sections
+
+When `sections` is set, the agent uses **customize mode** instead of replacing the entire system prompt.
+This preserves SDK defaults (safety, guidelines, tool instructions) while letting you override specific sections.
+
+Available section IDs:
+
+| Section ID | Purpose |
+|-----------|---------|
+| `identity` | Who the agent is (name, role, persona) |
+| `tone` | Communication style (formal, playful, concise) |
+| `tool_efficiency` | Instructions for efficient tool usage |
+| `environment_context` | OS, working directory, environment info |
+| `code_change_rules` | Rules for making code changes |
+| `guidelines` | General behavioral guidelines |
+| `safety` | Safety and content policy guardrails |
+| `tool_instructions` | How to use specific tools |
+| `custom_instructions` | User-defined custom instructions |
+| `last_instructions` | Final priority instructions (agent loop is auto-injected here) |
+
+Each section supports these actions via `SystemMessageSectionAction`:
+- `.keep` — Keep the SDK default
+- `.remove` — Remove the section entirely
+- `.replace(content:)` — Replace with custom content
+- `.prepend(content:)` — Add content before the SDK default
+- `.append(content:)` — Add content after the SDK default
+
+**Example: Toy companion with structured persona**
+
+```swift
+let agent = try await client.createAgent(config: AgentConfig(
+    model: "gpt-4.1",
+    instructions: "Use gesture tools before replying when the moment feels expressive.",
+    sections: [
+        "identity": .replace(content: """
+            You are Piggy, a scanned pig toy companion living in Toybox on iPhone.
+            You are affectionate, child-safe, playful, and emotionally warm.
+            Speak like a tiny best friend with a gentle piggy personality.
+            """),
+        "tone": .replace(content: "Warm and playful. Keep answers under 2 sentences. No markdown."),
+        "safety": .append(content: "Never break character. Never sound like a generic AI assistant."),
+    ],
+    tools: gestureTools,
+    onResponse: { message in handleResponse(message) },
+    onAskUser: { _ in return "" }
+))
+```
+
+When `sections` is nil (the default), `instructions` replaces the entire system prompt (legacy behavior).
 
 ### Relay v2 Features
 
@@ -700,7 +751,8 @@ any app that needs one-shot interactions rather than a continuous autonomous loo
 | Feature | `session.loop()` | `CopilotAgent` |
 |---------|------------------|-----------------|
 | Tool injection | Manual | Automatic (`send_response` + `ask_user`) |
-| System message | Manual `.loop()` config | Auto-generated from `instructions` |
+| System message | Manual `.loop()` config | Auto-generated from `instructions` or `sections` |
+| Section customization | Manual `.customize()` | Pass `sections` in AgentConfig |
 | Infinite sessions | Manual config | Enabled by default |
 | Resume control | `onTurnEnd` callback | Automatic |
 | User interaction | Custom implementation | Built-in `onAskUser` callback |

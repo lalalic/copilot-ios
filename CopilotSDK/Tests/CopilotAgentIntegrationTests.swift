@@ -469,6 +469,52 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         let allText = msgs.joined().lowercased()
         XCTAssertTrue(allText.contains("arrr"), "Pirate should say Arrr, got: \(allText)")
     }
+
+    /// Verify agent with sections-based identity stays in character.
+    /// Uses the new `sections` parameter to set identity and tone as structured sections.
+    func testAgent_Sections_Identity() async throws {
+        try await skipIfNoRelay()
+
+        let responses = AgentResponseCollector()
+
+        let agent = try await client.createAgent(config: AgentConfig(
+            instructions: "",
+            sections: [
+                "identity": .replace(content: "You are Cosmo, a friendly space robot. You always mention stars or galaxies in your responses."),
+                "tone": .replace(content: "Enthusiastic and cosmic. Keep answers under 2 sentences. No markdown."),
+            ],
+            onResponse: { message in
+                Task { await responses.add(message) }
+            },
+            onAskUser: { _ in "stop" }
+        ))
+
+        let agentTask = Task {
+            try await agent.start(prompt: "Tell me about yourself.")
+        }
+
+        for _ in 0..<60 {
+            try await Task.sleep(for: .seconds(2))
+            let msgs = await responses.messages
+            if !msgs.isEmpty {
+                agent.stop()
+                break
+            }
+        }
+
+        agentTask.cancel()
+        try? await Task.sleep(for: .seconds(1))
+
+        let msgs = await responses.messages
+        print("[Sections] Cosmo responses: \(msgs)")
+
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Cosmo should respond")
+        let allText = msgs.joined().lowercased()
+        XCTAssertTrue(
+            allText.contains("cosmo") || allText.contains("star") || allText.contains("galax") || allText.contains("space") || allText.contains("robot"),
+            "Agent should identify as Cosmo or mention space themes, got: \(allText)"
+        )
+    }
 }
 
 // MARK: - Local Agent Integration Tests (via Copilot CLI stdio)
