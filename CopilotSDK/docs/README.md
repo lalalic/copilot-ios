@@ -29,8 +29,8 @@ dependencies: [
 ```swift
 import CopilotSDK
 
-// Connect via WebSocket (relay server) or stdio transport
-let transport = WebSocketTransport(url: URL(string: "ws://localhost:8765")!)
+// Connect via WebSocket relay (defaults to wss://relay.ai.qili2.com)
+let transport = WebSocketTransport()
 let client = CopilotClient(transport: transport)
 try await client.start()
 
@@ -48,6 +48,16 @@ try await session.disconnect()
 client.stop()
 ```
 
+### Using a custom relay
+
+```swift
+// Local relay server
+let transport = WebSocketTransport(host: "localhost", port: 8765)
+
+// Or a custom URL
+let transport = WebSocketTransport(url: URL(string: "wss://my-relay.example.com")!)
+```
+
 ## API Reference
 
 ### CopilotClient
@@ -59,8 +69,10 @@ CopilotClient(transport: Transport)
 ```
 
 Supported transports:
-- `WebSocketTransport(url:)` — Connect via WebSocket relay
-- `StdioTransport(process:)` — Direct stdio to CLI process
+- `WebSocketTransport()` — Connect via WebSocket relay (default: `wss://relay.ai.qili2.com`)
+- `WebSocketTransport(host:port:)` — Custom relay host/port
+- `WebSocketTransport(url:)` — Custom relay URL
+- `StdioTransport(process:)` — Direct stdio to CLI process (macOS only)
 - `TCPTransport(host:port:)` — TCP socket connection
 
 #### Methods

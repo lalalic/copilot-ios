@@ -16,7 +16,8 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
     
     /// Convenience init for host:port.
     /// Uses wss:// for port 443, ws:// otherwise.
-    public convenience init(host: String = "localhost", port: UInt16 = 8765) {
+    /// Defaults to production relay at relay.ai.qili2.com:443.
+    public convenience init(host: String = "relay.ai.qili2.com", port: UInt16 = 443) {
         let scheme = port == 443 ? "wss" : "ws"
         let urlString = port == 443 ? "\(scheme)://\(host)" : "\(scheme)://\(host):\(port)"
         guard let url = URL(string: urlString) else {
