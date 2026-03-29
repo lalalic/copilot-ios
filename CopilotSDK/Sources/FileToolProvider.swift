@@ -63,6 +63,7 @@ public final class FileToolProvider: Sendable {
                 ]),
                 "required": .array([.string("path")])
             ]),
+            overridesBuiltInTool: true,
             skipPermission: true
         ) { [weak self] args in
             guard let self else { return "Error: FileToolProvider not available" }
@@ -106,6 +107,7 @@ public final class FileToolProvider: Sendable {
                 ]),
                 "required": .array([.string("path"), .string("content")])
             ]),
+            overridesBuiltInTool: true,
             skipPermission: true
         ) { [weak self] args in
             guard let self else { return "Error: FileToolProvider not available" }
@@ -144,6 +146,7 @@ public final class FileToolProvider: Sendable {
                     ])
                 ])
             ]),
+            overridesBuiltInTool: true,
             skipPermission: true
         ) { [weak self] args in
             guard let self else { return "Error: FileToolProvider not available" }
