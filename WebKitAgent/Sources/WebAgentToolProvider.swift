@@ -7,9 +7,14 @@ import CopilotSDK
 public final class WebAgentToolProvider {
 
     public let manager: WebViewManager
+    public let registry: AdapterRegistry
+    private let pipelineEngine: PipelineEngine
 
     public init(manager: WebViewManager) {
         self.manager = manager
+        self.registry = AdapterRegistry()
+        self.pipelineEngine = PipelineEngine()
+        registry.loadBundledAdapters()
     }
 
     // MARK: - Skill prompt describing sub-commands
@@ -26,8 +31,10 @@ public final class WebAgentToolProvider {
     - `type` — Type into an input/textarea. Params: `ref` (required), `text` (required), `clear` (optional, default true).
     - `download` — Download a file. Params: `ref` (element with href) OR `url` (direct URL), `filename` (optional override).
     - `upload` — Upload file to <input type="file">. Params: `ref` (required), `filePath` (required).
+    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name). Use action="list" to see available adapters. Example: site=hackernews action=top.
 
     Workflow: navigate → snapshot → read refs → click/type/download as needed → snapshot again after page changes.
+    For known sites, prefer `site` command over manual navigation — it's faster and deterministic.
     """
 
     // MARK: - Single Tool
@@ -47,7 +54,8 @@ public final class WebAgentToolProvider {
                         "type": .string("string"),
                         "enum": .array([
                             .string("navigate"), .string("snapshot"), .string("click"),
-                            .string("type"), .string("download"), .string("upload")
+                            .string("type"), .string("download"), .string("upload"),
+                            .string("site")
                         ]),
                         "description": .string("The sub-command to execute")
                     ]),
@@ -74,6 +82,14 @@ public final class WebAgentToolProvider {
                     "filePath": .object([
                         "type": .string("string"),
                         "description": .string("File path for upload")
+                    ]),
+                    "site": .object([
+                        "type": .string("string"),
+                        "description": .string("Site name for site command (e.g. hackernews)")
+                    ]),
+                    "action": .object([
+                        "type": .string("string"),
+                        "description": .string("Action name for site command (e.g. top, list)")
                     ])
                 ]),
                 "required": .array([.string("command")])
@@ -136,8 +152,94 @@ public final class WebAgentToolProvider {
             }
             return try await manager.upload(ref: ref, filePath: filePath)
 
+        case "site":
+            return try await dispatchSite(args: args)
+
         default:
-            return "Error: unknown command '\(command)'. Use: navigate, snapshot, click, type, download, upload"
+            return "Error: unknown command '\(command)'. Use: navigate, snapshot, click, type, download, upload, site"
         }
+    }
+
+    // MARK: - Site Adapter Dispatch
+
+    private func dispatchSite(args: [String: JSONValue]) async throws -> String {
+        // action=list → list all adapters
+        if case .string(let action) = args["action"], action == "list" {
+            return registry.listFormatted()
+        }
+
+        guard case .string(let site) = args["site"] else {
+            return "Error: 'site' parameter required for site command. Use action=\"list\" to see available adapters."
+        }
+
+        guard case .string(let action) = args["action"] else {
+            // List adapters for this site
+            let siteAdapters = registry.listForSite(site)
+            if siteAdapters.isEmpty {
+                return "Error: no adapters found for site '\(site)'. Use action=\"list\" to see all adapters."
+            }
+            let names = siteAdapters.map { "  - \($0.name): \($0.adapterDescription)" }.joined(separator: "\n")
+            return "Available actions for \(site):\n\(names)"
+        }
+
+        guard let adapter = registry.find(site: site, action: action) else {
+            return "Error: adapter '\(site)/\(action)' not found. Use action=\"list\" to see available adapters."
+        }
+
+        // Collect args from the tool call
+        var adapterArgs: [String: String] = [:]
+        for arg in adapter.args {
+            if case .string(let val) = args[arg.name] {
+                adapterArgs[arg.name] = val
+            } else if case .int(let val) = args[arg.name] {
+                adapterArgs[arg.name] = String(val)
+            } else if let defaultVal = arg.defaultValue {
+                adapterArgs[arg.name] = defaultVal
+            }
+        }
+
+        // Execute based on adapter type
+        if adapter.requiresBrowser {
+            return try await executeBrowserAdapter(adapter, args: adapterArgs)
+        } else {
+            return try await executePipelineAdapter(adapter, args: adapterArgs)
+        }
+    }
+
+    private func executePipelineAdapter(_ adapter: YAMLAdapter, args: [String: String]) async throws -> String {
+        let results = try await pipelineEngine.execute(pipeline: adapter.pipeline, args: args)
+
+        // Apply limit from args if specified
+        var limited = results
+        if let limitStr = args["limit"], let limit = Int(limitStr), limit < results.count {
+            limited = Array(results.prefix(limit))
+        }
+
+        return PipelineEngine.formatOutput(limited)
+    }
+
+    private func executeBrowserAdapter(_ adapter: YAMLAdapter, args: [String: String]) async throws -> String {
+        // Navigate to pre-navigate URL if specified
+        if let url = adapter.preNavigate {
+            _ = try await manager.navigate(to: url)
+        }
+
+        // Wait if specified
+        if let wait = adapter.waitSeconds, wait > 0 {
+            try await Task.sleep(for: .seconds(wait))
+        }
+
+        // Execute script if present
+        if let script = adapter.script {
+            let resultJSON = try await manager.evaluateJSPublic(script)
+            // Try to parse as JSON array for formatting
+            if let data = resultJSON.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return PipelineEngine.formatOutput(json)
+            }
+            return resultJSON
+        }
+
+        return "Error: browser adapter '\(adapter.site)/\(adapter.name)' has no script defined."
     }
 }

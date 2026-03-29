@@ -156,4 +156,58 @@ final class WebAgentToolProviderTests: XCTestCase {
             // JS eval may fail on blank webview in test environment — that's OK
         }
     }
+
+    // MARK: - Site Subcommand
+
+    func testSiteCommandExists() {
+        let tool = provider.tools[0]
+        if case .object(let schema) = tool.parameters,
+           case .object(let props) = schema["properties"],
+           case .object(let cmdProp) = props["command"],
+           case .array(let enumValues) = cmdProp["enum"] {
+            XCTAssertTrue(enumValues.contains(.string("site")))
+        } else {
+            XCTFail("command enum should contain 'site'")
+        }
+    }
+
+    func testSiteCommandRequiresSite() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object(["command": .string("site")]))
+        XCTAssertTrue(result.contains("Error") || result.contains("error"))
+    }
+
+    func testSiteCommandListAction() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "action": .string("list")
+        ]))
+        // Should list available adapters
+        XCTAssertTrue(result.contains("hackernews") || result.contains("adapter"))
+    }
+
+    func testSiteCommandUnknownSite() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("nonexistent"),
+            "action": .string("top")
+        ]))
+        XCTAssertTrue(result.contains("not found") || result.contains("Error"))
+    }
+
+    func testSkillPromptContainsSiteCommand() {
+        let prompt = WebAgentToolProvider.skillPrompt
+        XCTAssertTrue(prompt.contains("site"))
+    }
+
+    func testRegistryIsAccessible() {
+        XCTAssertNotNil(provider.registry)
+    }
+
+    func testBundledAdaptersLoaded() {
+        // Provider should auto-load bundled adapters
+        XCTAssertGreaterThan(provider.registry.adapterCount, 0)
+    }
 }

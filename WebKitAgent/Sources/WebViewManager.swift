@@ -305,6 +305,11 @@ public final class WebViewManager: NSObject, ObservableObject {
         }
         return String(describing: result ?? "null")
     }
+
+    /// Public wrapper for evaluateJS, used by site adapters.
+    public func evaluateJSPublic(_ js: String) async throws -> String {
+        try await evaluateJS(js)
+    }
 }
 
 // MARK: - WKNavigationDelegate
