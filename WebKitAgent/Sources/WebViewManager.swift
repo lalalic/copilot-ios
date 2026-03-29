@@ -52,6 +52,9 @@ public final class WebViewManager: NSObject, ObservableObject {
 
         super.init()
 
+        // Use desktop user-agent so sites serve their full desktop version
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+
         webView.navigationDelegate = self
         webView.uiDelegate = self
 
