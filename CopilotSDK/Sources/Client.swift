@@ -1753,7 +1753,7 @@ public final class CopilotAgent: @unchecked Sendable {
         - Always use one of these tools before your turn ends.
         """
 
-        let systemMessage: SystemMessageConfig
+        let systemMessage: SystemMessageConfig?
         if let sections = config.sections {
             // Customize mode: preserve SDK defaults, override specific sections.
             // Inject agent loop instructions into last_instructions (unless caller already set it).
@@ -1764,6 +1764,10 @@ public final class CopilotAgent: @unchecked Sendable {
             // instructions becomes the additional content appended after all sections.
             let content = config.instructions.isEmpty ? nil : config.instructions
             systemMessage = .customize(sections: allSections, content: content)
+        } else if config.instructions.isEmpty {
+            // No instructions and no sections — let the server (relay workspace) provide the system prompt.
+            // The relay will use the workspace's main.agent.md if available.
+            systemMessage = nil
         } else {
             // Legacy mode: flat instructions replace the entire system message.
             let agentSystemMessage = """
