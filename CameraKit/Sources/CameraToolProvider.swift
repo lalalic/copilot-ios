@@ -109,35 +109,26 @@ public final class CameraToolProvider {
         ]
     }
 
-    /// Get tools for a specific skill preset.
-    public func tools(for skill: CameraSkill) -> [ToolDefinition] {
-        skill.toolNames.compactMap { name in
-            allTools.first { $0.name == name }
-        }
-    }
-
-    /// Get compact tools for a specific skill preset (unified configure_camera + analyze_vision).
-    public func compactTools(for skill: CameraSkill) -> [ToolDefinition] {
-        let combined = allTools + [configureCameraTool, analyzeVisionTool]
-        return skill.compactToolNames.compactMap { name in
-            combined.first { $0.name == name }
-        }
-    }
-
-    /// Get all compact tools — union of every skill's compact tool set.
-    /// Use this when the agent decides its own approach based on user intent.
+    /// All compact tools — replaces individual set_*/detect_* with unified configure_camera + analyze_vision.
+    /// Use this for the unified agent that decides its own approach.
     public var allCompactTools: [ToolDefinition] {
-        let combined = allTools + [configureCameraTool, analyzeVisionTool]
-        var seen = Set<String>()
-        var result = [ToolDefinition]()
-        for skill in CameraSkill.allCases {
-            for name in skill.compactToolNames {
-                if seen.insert(name).inserted, let tool = combined.first(where: { $0.name == name }) {
-                    result.append(tool)
-                }
-            }
-        }
-        return result
+        [
+            observeCameraTool,
+            configureCameraTool,   // Unified: zoom, exposure, focus, lens, flash, white balance
+            analyzeVisionTool,     // Unified: composition, faces, objects, blur, horizon, scene
+            speakTool,
+            listenTool,
+            startRecordingTool,
+            stopRecordingTool,
+            pauseRecordingTool,
+            resumeRecordingTool,
+            capturePhotoTool,
+            trackSubjectTool,
+            getAudioLevelsTool,
+            generateImageTool,
+            animateCameraTool,
+            waitTool,
+        ]
     }
 
     // MARK: - Observation Tools
