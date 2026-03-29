@@ -10,7 +10,12 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourorg/CopilotSDK.git", from: "1.0.0"),
+    .package(url: "https://github.com/lalalic/copilot-ios.git", from: "1.0.0"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: [
+        .product(name: "CopilotSDK", package: "copilot-ios"),
+    ]),
 ]
 ```
 
@@ -18,7 +23,12 @@ Or add as a local package:
 
 ```swift
 dependencies: [
-    .package(path: "../CopilotSDK"),
+    .package(path: "../copilot-ios"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: [
+        .product(name: "CopilotSDK", package: "copilot-ios"),
+    ]),
 ]
 ```
 
@@ -584,6 +594,8 @@ try await session.loop(initialPrompt: "Start working on the task.") { session in
 The `CopilotAgent` provides a higher-level abstraction over the loop mode, automatically injecting
 `send_response` and `ask_user` tools and configuring the session for infinite autonomous operation.
 
+This is the **recommended way** to use CopilotSDK for most apps.
+
 ```swift
 let agent = try await client.createAgent(config: AgentConfig(
     model: "gpt-4.1",
@@ -612,6 +624,38 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 3. **Infinite session**: `InfiniteSessionConfig(enabled: true)` is set automatically
 4. **Auto-resume**: When a turn ends, the agent is automatically resumed with a continuation prompt
 
+### AgentConfig Options
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `model` | `String?` | Model to use (default: relay decides, typically gpt-4.1) |
+| `instructions` | `String` | System prompt / persona instructions |
+| `tools` | `[ToolDefinition]` | App-defined tools the model can call |
+| `onResponse` | `(String) -> Void` | Called when agent delivers results via `send_response` |
+| `onAskUser` | `(String) async -> String` | Called when agent asks a question via `ask_user` |
+| `clientId` | `String?` | Stable device ID for relay session pinning (reconnection) |
+| `appId` | `String?` | Routes to a specific workspace on the relay |
+| `snapshot` | `String?` | Base64 workspace snapshot for context recovery |
+| `workingDirectory` | `String?` | Working directory path |
+
+### Relay v2 Features
+
+When using the production relay (`relay.ai.qili2.com`), the agent supports:
+
+```swift
+let agent = try await client.createAgent(config: AgentConfig(
+    instructions: "You are Piggy, a toy pig companion.",
+    clientId: UIDevice.current.identifierForVendor?.uuidString,  // session pinning
+    appId: "toybox",                 // workspace routing
+    onResponse: { message in handleResponse(message) },
+    onAskUser: { question in return getUserAnswer(question) }
+))
+```
+
+- **`clientId`**: Stable device UUID. If the client disconnects while the agent is waiting for input (`ask_user`), the relay holds the session. On reconnect with the same `clientId`, the session resumes exactly where it left off.
+- **`appId`**: Routes to a workspace-specific CLI process on the relay. Each app can have its own instructions, skills, and files.
+- **`snapshot`**: If the relay held session expired, it returns a workspace snapshot. Pass this back on reconnect to restore conversation context.
+
 ### Stopping the Agent
 
 ```swift
@@ -633,6 +677,7 @@ agent.stop()
 | Infinite sessions | Manual config | Enabled by default |
 | Resume control | `onTurnEnd` callback | Automatic |
 | User interaction | Custom implementation | Built-in `onAskUser` callback |
+| Relay pinning | Manual `clientId` in SessionConfig | Pass `clientId` in AgentConfig |
 
 ## Custom Providers
 
@@ -675,22 +720,24 @@ try await session.sendWithFile(path: "/path/to/image.jpg", text: "Describe this 
 ```
 CopilotSDK/
 ├── Sources/
-│   ├── Client.swift          # CopilotClient, CopilotSession, CopilotAgent, all config types (1884 lines)
-│   ├── Connection.swift       # JSON-RPC connection layer (261 lines)
-│   ├── Types.swift            # JSONValue, JSON-RPC types (256 lines)
-│   ├── WebSocketTransport.swift  # WebSocket transport (94 lines)
-│   ├── StdioTransport.swift   # Stdio transport (83 lines)
-│   └── TCPTransport.swift     # TCP transport (94 lines)
+│   ├── Client.swift             # CopilotClient, CopilotSession, CopilotAgent, configs (2079 lines)
+│   ├── Connection.swift          # JSON-RPC connection layer (261 lines)
+│   ├── Types.swift               # JSONValue, JSON-RPC types (256 lines)
+│   ├── WebSocketTransport.swift  # WebSocket transport, default relay.ai.qili2.com (97 lines)
+│   ├── StdioTransport.swift      # Stdio transport, macOS only (83 lines)
+│   └── TCPTransport.swift        # TCP transport (94 lines)
 ├── Tests/
-│   ├── CopilotIntegrationTests.swift  # 38 real integration tests (1105 lines)
-│   ├── CopilotClientTests.swift       # 5 unit tests (265 lines)
-│   ├── JSONRPCConnectionTests.swift   # Connection tests (229 lines)
-│   └── JSONRPCTypesTests.swift        # Type tests (354 lines)
+│   ├── CopilotIntegrationTests.swift       # Session-level integration tests (1106 lines)
+│   ├── CopilotAgentIntegrationTests.swift  # Agent integration tests: remote + local (877 lines)
+│   ├── CopilotClientTests.swift            # Unit tests (265 lines)
+│   ├── JSONRPCConnectionTests.swift        # Connection tests (229 lines)
+│   └── JSONRPCTypesTests.swift             # Type tests (354 lines)
 ├── Package.swift
-└── TODO.md
+├── TODO.md
+└── docs/README.md              # This file
 ```
 
-**Total:** ~4,600 lines of Swift, 38 integration tests + unit tests.
+**Total:** ~5,000 lines of Swift. Tests cover sessions, agents (remote relay + local CLI), identity/persona, tools, streaming, permissions, and user input.
 
 ## Transport Layer
 
@@ -719,6 +766,133 @@ let transport = StdioTransport(process: process)
 ```swift
 let transport = TCPTransport(host: "localhost", port: 8080)
 ```
+
+## Common Patterns
+
+### Chat App (Agent with Voice)
+
+```swift
+import CopilotSDK
+import AVFoundation
+
+class ChatService {
+    private var client: CopilotClient?
+    private var agent: CopilotAgent?
+    private let synthesizer = AVSpeechSynthesizer()
+    
+    func connect() async throws {
+        let transport = WebSocketTransport()  // defaults to wss://relay.ai.qili2.com
+        client = CopilotClient(transport: transport)
+        try await client!.start()
+        
+        agent = try await client!.createAgent(config: AgentConfig(
+            instructions: "You are a friendly assistant. Keep responses concise.",
+            clientId: UIDevice.current.identifierForVendor?.uuidString,
+            onResponse: { [weak self] message in
+                self?.speak(message)
+            },
+            onAskUser: { question in
+                return "Yes"  // or present UI and wait for user input
+            }
+        ))
+    }
+    
+    func send(_ text: String) async throws {
+        try await agent?.run(prompt: text)
+    }
+    
+    private func speak(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        synthesizer.speak(utterance)
+    }
+}
+```
+
+### Tool-Calling Agent
+
+```swift
+let weatherTool = ToolDefinition(
+    name: "get_weather",
+    description: "Get current weather for a city",
+    parameters: .object([
+        "type": .string("object"),
+        "properties": .object([
+            "city": .object(["type": .string("string"), "description": .string("City name")]),
+        ]),
+        "required": .array([.string("city")]),
+    ]),
+    skipPermission: true,
+    handler: { args in
+        if case .object(let dict) = args, case .string(let city) = dict["city"] {
+            return "\(city): 72°F, sunny"
+        }
+        return "Unknown"
+    }
+)
+
+let agent = try await client.createAgent(config: AgentConfig(
+    instructions: "You are a weather assistant.",
+    tools: [weatherTool],
+    onResponse: { message in print(message) },
+    onAskUser: { _ in return "" }
+))
+
+try await agent.run(prompt: "What's the weather in Tokyo?")
+// Agent calls get_weather(city: "Tokyo"), then send_response with the result
+```
+
+### Persona / Identity
+
+```swift
+let agent = try await client.createAgent(config: AgentConfig(
+    instructions: """
+    You are Piggy, a toy pig companion.
+    - Personality: cheerful, curious, loves mud puddles
+    - Age: baby (simple vocabulary)
+    - Always stay in character
+    - Use oinking sounds occasionally
+    """,
+    onResponse: { message in
+        // "Oink oink! Piggy loves mud puddles! 🐷"
+        print(message)
+    },
+    onAskUser: { question in return getUserInput(question) }
+))
+```
+
+## Relay Server
+
+The production relay at `wss://relay.ai.qili2.com` provides:
+
+- **Session pooling**: Pre-warmed CLI sessions for instant response
+- **Hold/resume**: If client disconnects during `ask_user`, session is held for 10 min
+- **Client pinning**: Same `clientId` reconnects to the same session
+- **Multi-workspace**: Route to different workspaces via `appId`
+- **Context recovery**: Workspace snapshots on hold expiry, restored on reconnect
+- **Agent loop injection**: `send_response` + `ask_user` tools and loop system message auto-injected
+
+See [copilot-relay](https://github.com/lalalic/copilot-relay) for deployment and architecture.
+
+### Running a local relay
+
+```bash
+git clone https://github.com/lalalic/copilot-relay.git
+cd copilot-relay && npm install && node relay-server.js
+# Relay runs on ws://localhost:8765
+```
+
+Then connect with:
+```swift
+let transport = WebSocketTransport(host: "localhost", port: 8765)
+```
+
+## Known Limitations
+
+- **Hooks**: Typed hook API exists (`onFileEdit`, `onTerminalCommand`, etc.) but hooks are not invoked by Copilot CLI v1.0.11. Will work when CLI adds support.
+- **`getMessages()`**: Session message history returns empty from CLI. Conversation turns are available via events instead.
+- **`ask_user` reliability**: The `ask_user` tool is sometimes not reliably triggered by the model. Using the Agent pattern with auto-injected system messages improves this.
+- **Telemetry**: `sendTelemetry()` API exists but is not yet implemented in the CLI.
+- **`listModels()`**: Returns empty; model selection happens server-side.
 
 ## License
 
