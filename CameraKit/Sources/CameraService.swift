@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import AVFoundation
+import Speech
 
 // MARK: - Camera Preview
 
@@ -83,9 +84,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     // Outputs
     private var movieOutput: AVCaptureMovieFileOutput?
     private var videoDataOutput: AVCaptureVideoDataOutput?
+    private var audioDataOutput: AVCaptureAudioDataOutput?
     private var recordingDelegate: RecordingDelegate?
     private var currentRecordingURL: URL?
     private var recordingCompletion: ((URL?) -> Void)?
+
+    /// Directory for recorded clip files. Defaults to temp; set to workspace/clips/ for agent use.
+    public var recordingDirectory: URL = FileManager.default.temporaryDirectory
+
+    // Speech recognition via capture session audio (no AVAudioEngine!)
+    nonisolated(unsafe) private var speechRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    nonisolated(unsafe) private var speechRecognitionTask: SFSpeechRecognitionTask?
+    nonisolated(unsafe) private var isListeningForSpeech: Bool = false
+    @Published public var speechSoundLevel: Float = 0
 
     // Frame sampling
     nonisolated(unsafe) private var lastFrameTime: CFTimeInterval = 0
@@ -198,6 +209,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.videoDataOutput = videoOutput
         }
 
+        // Audio data output (for speech recognition via capture session — no AVAudioEngine needed)
+        let audioOutput = AVCaptureAudioDataOutput()
+        let audioQueue = DispatchQueue(label: "camerakit.audio")
+        audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
+        if session.canAddOutput(audioOutput) {
+            session.addOutput(audioOutput)
+            self.audioDataOutput = audioOutput
+        }
+
         session.commitConfiguration()
         hasConfigured = true
 
@@ -219,6 +239,32 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    // MARK: - Audio Input Management (Session Stop/Start)
+
+    /// Stop the entire capture session to release the microphone for speech recognition.
+    /// AVAudioEngine and AVCaptureSession CANNOT share the microphone on real devices.
+    /// Simply removing the audio input is not enough — the session holds the hardware.
+    public func pauseAudioInput() {
+        NSLog("[CameraService] pauseAudioInput: stopping capture session to release mic")
+        session.stopRunning()
+        isRunning = false
+        NSLog("[CameraService] pauseAudioInput: session stopped")
+    }
+
+    /// Restart the capture session after speech recognition finishes.
+    public func resumeAudioInput() {
+        NSLog("[CameraService] resumeAudioInput: restarting capture session")
+        let s = session
+        let q = queue
+        q.async {
+            s.startRunning()
+            DispatchQueue.main.async { [weak self] in
+                self?.isRunning = true
+                NSLog("[CameraService] resumeAudioInput: session restarted")
+            }
+        }
+    }
+
     // MARK: - Recording
 
     @discardableResult
@@ -237,7 +283,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         print("[CameraService] session.isRunning=\(session.isRunning), inputs=\(session.inputs.count), outputs=\(session.outputs.count)")
 
         let fileName = "camerakit_\(UUID().uuidString.prefix(8)).mov"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        // Ensure recording directory exists
+        try? FileManager.default.createDirectory(at: recordingDirectory, withIntermediateDirectories: true)
+        let url = recordingDirectory.appendingPathComponent(fileName)
         currentRecordingURL = url
 
         let delegate = RecordingDelegate { [weak self] url in
@@ -577,6 +625,70 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    // MARK: - Speech Recognition via Capture Session Audio
+
+    /// Listen for speech using the camera's audio capture pipeline.
+    /// This avoids AVAudioEngine entirely, preventing the real-device crash
+    /// where AVAudioEngine + AVCaptureSession fight over the microphone hardware.
+    public func listenViaCaptureSession(duration: TimeInterval = 5.0) async -> String {
+        NSLog("[CameraService] listenViaCaptureSession(duration: %.1f) starting", duration)
+
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            NSLog("[CameraService] Speech recognition not authorized")
+            return "(speech recognition not authorized)"
+        }
+
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+              recognizer.isAvailable else {
+            NSLog("[CameraService] Speech recognizer unavailable")
+            return "(speech recognizer unavailable)"
+        }
+
+        // Create recognition request
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+
+        // Store for the audio delegate to feed buffers
+        speechRecognitionRequest = request
+        isListeningForSpeech = true
+
+        var transcribedText = ""
+        var recognitionError: Error?
+
+        // Start recognition task
+        let task = recognizer.recognitionTask(with: request) { result, error in
+            if let result {
+                transcribedText = result.bestTranscription.formattedString
+            }
+            if let error {
+                recognitionError = error
+            }
+        }
+        speechRecognitionTask = task
+
+        NSLog("[CameraService] listenViaCaptureSession: recognition started, waiting %.1fs", duration)
+
+        // Wait for the specified duration
+        try? await Task.sleep(for: .seconds(duration))
+
+        // Stop listening
+        isListeningForSpeech = false
+        request.endAudio()
+        task.cancel()
+        speechRecognitionRequest = nil
+        speechRecognitionTask = nil
+        speechSoundLevel = 0
+
+        NSLog("[CameraService] listenViaCaptureSession: done, text='%@' error=%@",
+              String(transcribedText.prefix(80)),
+              String(describing: recognitionError))
+
+        if transcribedText.isEmpty {
+            return "(silence — no speech detected)"
+        }
+        return transcribedText
+    }
+
     // MARK: - Audio Level Monitoring
 
     @Published public var audioLevel: Float = 0
@@ -663,10 +775,42 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 }
 
-// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate + AVCaptureAudioDataOutputSampleBufferDelegate
 
-extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     nonisolated public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+
+        // --- Audio path: feed speech recognition ---
+        if output is AVCaptureAudioDataOutput {
+            if isListeningForSpeech, let request = speechRecognitionRequest {
+                request.appendAudioSampleBuffer(sampleBuffer)
+
+                // Calculate sound level from audio buffer
+                if let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
+                    var length = 0
+                    var dataPointer: UnsafeMutablePointer<Int8>?
+                    CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
+                    if let data = dataPointer {
+                        let int16Ptr = UnsafeRawPointer(data).bindMemory(to: Int16.self, capacity: length / 2)
+                        let sampleCount = length / 2
+                        var sum: Float = 0
+                        for i in 0..<sampleCount {
+                            let sample = Float(int16Ptr[i]) / Float(Int16.max)
+                            sum += sample * sample
+                        }
+                        let rms = sqrt(sum / Float(max(sampleCount, 1)))
+                        let db = 20 * log10(max(rms, 1e-10))
+                        let level = max(0, min(1, (db + 50) / 50))
+                        Task { @MainActor [weak self] in
+                            self?.speechSoundLevel = level
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        // --- Video path (existing) ---
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let now = CACurrentMediaTime()
 

@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let sdkLog = Logger(subsystem: "com.copilot.sdk", category: "session")
 
 // MARK: - Session Event Types
 
@@ -973,6 +976,11 @@ public final class CopilotSession: @unchecked Sendable {
                       case .object(let event) = params["event"],
                       case .string(let typeStr) = event["type"] else { continue }
 
+                // Log key events
+                if typeStr == "external_tool.requested" || typeStr == "session.idle" || typeStr == "assistant.turn_end" || typeStr == "session.error" {
+                    sdkLog.info("📨 Event: \(typeStr)")
+                }
+
                 let data: [String: JSONValue]
                 if case .object(let d) = event["data"] { data = d } else { data = [:] }
 
@@ -1074,16 +1082,29 @@ public final class CopilotSession: @unchecked Sendable {
 
         let args = data["arguments"] ?? .null
 
-        guard let handler = toolHandlers[toolName] else { return }
+        guard let handler = toolHandlers[toolName] else {
+            NSLog("[CopilotSDK] No handler for tool '%@' — skipping", toolName)
+            sdkLog.warning("⚠️ No handler for tool '\(toolName)' — skipping (requestId: \(requestId))")
+            return
+        }
+
+        NSLog("[CopilotSDK] Tool call: %@ (requestId: %@)", toolName, String(requestId.prefix(8)))
+        sdkLog.info("🔧 Tool call: \(toolName) (requestId: \(requestId.prefix(8))...)")
 
         do {
             let result = try await handler(args)
+            NSLog("[CopilotSDK] Tool '%@' completed (%d chars)", toolName, result.count)
+            sdkLog.info("✅ Tool '\(toolName)' completed (\(result.count) chars)")
             _ = try await connection.send(method: "session.tools.handlePendingToolCall", params: [
                 "sessionId": .string(sessionId),
                 "requestId": .string(requestId),
                 "result": .string(result),
             ])
+            NSLog("[CopilotSDK] Tool result sent for '%@'", toolName)
+            sdkLog.info("📤 Tool result sent for '\(toolName)'")
         } catch {
+            NSLog("[CopilotSDK] Tool '%@' error: %@", toolName, String(describing: error))
+            sdkLog.error("❌ Tool '\(toolName)' error: \(error)")
             _ = try? await connection.send(method: "session.tools.handlePendingToolCall", params: [
                 "sessionId": .string(sessionId),
                 "requestId": .string(requestId),

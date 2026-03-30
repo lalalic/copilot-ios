@@ -217,7 +217,7 @@ public final class CameraToolProvider {
     }
 
     public var listenTool: ToolDefinition {
-        let input = self.voiceInput
+        let cam = self.camera
         return ToolDefinition(
             name: "listen",
             description: "Listen to the user's speech for a given duration. Returns the transcribed text.",
@@ -240,8 +240,10 @@ public final class CameraToolProvider {
                 } else {
                     duration = 5.0
                 }
-                let text = await input.listen(duration: duration)
-                return text.isEmpty ? "(silence — no speech detected)" : "User said: \"\(text)\""
+                NSLog("[CameraToolProvider] listen tool: using capture session audio (duration=%.1f)", duration)
+                let text = await cam.listenViaCaptureSession(duration: duration)
+                NSLog("[CameraToolProvider] listen tool: result='%@'", String(text.prefix(80)))
+                return text
             }
         )
     }
@@ -315,7 +317,14 @@ public final class CameraToolProvider {
                     return d
                 }
                 if let url {
-                    return "Recording stopped. Duration: \(String(format: "%.1f", duration))s, File: \(url.lastPathComponent)"
+                    // Return workspace-relative path so agent can use with ffmpeg/file tools
+                    let wsRelative: String
+                    if let range = url.path.range(of: "/workspace/") {
+                        wsRelative = String(url.path[range.upperBound...])
+                    } else {
+                        wsRelative = url.lastPathComponent
+                    }
+                    return "Recording stopped. Duration: \(String(format: "%.1f", duration))s, File: \(wsRelative)"
                 }
                 return "No recording was active."
             }

@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let sdkLog = Logger(subsystem: "com.copilot.sdk", category: "websocket")
 
 /// WebSocket transport for CopilotSDK.
 /// Connects to a relay server that bridges WebSocket ↔ Copilot CLI stdio.
@@ -9,6 +12,7 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var streamContinuation: AsyncStream<Data>.Continuation?
+    private var pingTask: Task<Void, Never>?
     
     public init(url: URL) {
         self.url = url
@@ -29,17 +33,32 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
     }
     
     public func connect() async throws {
-        let session = URLSession(configuration: .default)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300  // 5 min request timeout
+        config.timeoutIntervalForResource = 600 // 10 min resource timeout
+        config.waitsForConnectivity = true
+        let session = URLSession(configuration: config)
         self.session = session
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
+        NSLog("[CopilotSDK] WebSocket connected to %@", url.absoluteString)
+        sdkLog.info("🔌 WebSocket connected to \(self.url)")
         
         // Start receive loop
         startReceiving()
+        
+        // Start keepalive ping every 15s
+        startPing()
     }
     
     public func disconnect() {
+        // Log stack trace to diagnose premature disconnects
+        let stack = Thread.callStackSymbols.prefix(10).joined(separator: "\n")
+        NSLog("[CopilotSDK] WebSocket disconnect() called. Stack:\n%@", stack)
+        sdkLog.info("🔌 WebSocket disconnect() called")
+        pingTask?.cancel()
+        pingTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         streamContinuation?.finish()
@@ -50,6 +69,7 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
     
     public func send(_ data: Data) async throws {
         guard let task = webSocketTask else {
+            NSLog("[CopilotSDK] WebSocket send failed: not connected")
             throw WebSocketError.notConnected
         }
         try await task.send(.data(data))
@@ -85,8 +105,29 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
                 // Continue receiving
                 self?.startReceiving()
                 
-            case .failure:
+            case .failure(let error):
+                NSLog("[CopilotSDK] WebSocket receive failure: %@", String(describing: error))
+                sdkLog.error("🔌 WebSocket receive failure: \(error)")
+                self?.pingTask?.cancel()
+                self?.pingTask = nil
                 self?.streamContinuation?.finish()
+            }
+        }
+    }
+    
+    /// Periodic ping to keep WebSocket alive
+    private func startPing() {
+        pingTask?.cancel()
+        pingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled, let task = self?.webSocketTask else { break }
+                task.sendPing { error in
+                    if let error {
+                        NSLog("[CopilotSDK] WebSocket ping failed: %@", String(describing: error))
+                        sdkLog.error("🔌 Ping failed: \(error)")
+                    }
+                }
             }
         }
     }

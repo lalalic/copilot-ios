@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let sdkLog = Logger(subsystem: "com.copilot.sdk", category: "connection")
 
 // MARK: - Transport Protocol
 
@@ -203,6 +206,7 @@ final class JSONRPCConnection: @unchecked Sendable {
                 await handleMessage(messageData)
             }
         }
+        sdkLog.info("🔌 ReadLoop ended — transport stream finished")
     }
     
     private func extractMessage(from buffer: inout Data) -> Data? {

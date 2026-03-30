@@ -2,6 +2,9 @@
 import Foundation
 import AVFoundation
 import Speech
+import os
+
+private let voiceLog = Logger(subsystem: "com.copilot.camerakit", category: "voice")
 
 // MARK: - Voice Output (TTS)
 
@@ -77,9 +80,13 @@ public final class VoiceInput: ObservableObject {
 
     /// Start listening. Updates `transcribedText` in real-time.
     public func startListening() {
+        NSLog("[VoiceService] startListening() called")
+        voiceLog.info("startListening() called")
         transcribedText = ""
 
         guard AVAudioApplication.shared.recordPermission == .granted else {
+            NSLog("[VoiceService] Record permission not granted, requesting...")
+            voiceLog.warning("Record permission not granted, requesting...")
             AVAudioApplication.requestRecordPermission { granted in
                 Task { @MainActor [weak self] in
                     if granted { self?.startListening() }
@@ -89,6 +96,8 @@ public final class VoiceInput: ObservableObject {
         }
 
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            NSLog("[VoiceService] Speech recognition not authorized, requesting...")
+            voiceLog.warning("Speech recognition not authorized, requesting...")
             SFSpeechRecognizer.requestAuthorization { status in
                 Task { @MainActor [weak self] in
                     if status == .authorized { self?.startListening() }
@@ -97,18 +106,14 @@ public final class VoiceInput: ObservableObject {
             return
         }
 
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
-
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playAndRecord, mode: .default,
-                options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("CameraKit: Audio session error: \(error)")
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            voiceLog.error("Speech recognizer unavailable")
             return
         }
+
+        voiceLog.info("Setting audio session category .playAndRecord")
+        // Audio session already configured by camera — skip reconfiguration to avoid conflicts
+        NSLog("[VoiceService] Audio session state: category=%@, mode=%@", AVAudioSession.sharedInstance().category.rawValue, AVAudioSession.sharedInstance().mode.rawValue)
 
         do {
             let engine = AVAudioEngine()
@@ -144,13 +149,17 @@ public final class VoiceInput: ObservableObject {
             audioEngine = engine
             recognitionRequest = request
             isListening = true
+            NSLog("[VoiceService] Audio engine started, listening...")
+            voiceLog.info("Audio engine started, listening...")
         } catch {
-            print("CameraKit: Audio engine error: \(error)")
+            NSLog("[VoiceService] Audio engine error: %@", String(describing: error))
+            voiceLog.error("Audio engine error: \(error)")
         }
     }
 
     /// Stop listening.
     public func stopListening() {
+        voiceLog.info("stopListening() called")
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
@@ -164,10 +173,18 @@ public final class VoiceInput: ObservableObject {
 
     /// Listen for a given duration and return the transcribed text.
     public func listen(duration: TimeInterval = 5.0) async -> String {
+        NSLog("[VoiceService] listen(duration: %.1f) called", duration)
+        voiceLog.info("listen(duration: \(duration)) called")
         startListening()
+        NSLog("[VoiceService] listen: sleeping for %.1f s", duration)
+        voiceLog.info("listen: sleeping for \(duration)s")
         try? await Task.sleep(for: .seconds(duration))
         let text = transcribedText
+        NSLog("[VoiceService] listen: woke up, text=%@", String(text.prefix(80)))
+        voiceLog.info("listen: woke up, text=\(text.prefix(80))")
         stopListening()
+        NSLog("[VoiceService] listen: returning %d chars", text.count)
+        voiceLog.info("listen: returning \(text.count) chars")
         return text
     }
 }
