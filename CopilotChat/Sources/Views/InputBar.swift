@@ -66,7 +66,7 @@ public struct InputBar: View {
         Button {
             showAttachmentPicker = true
         } label: {
-            Image(systemName: "paperclip")
+            Image(systemName: "plus")
                 .font(.system(size: 20))
                 .foregroundStyle(.secondary)
         }
