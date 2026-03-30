@@ -68,7 +68,7 @@ public struct ChatView: View {
 
             Rectangle()
                 .fill(platformGray5)
-                .frame(height: 0.5)
+                .frame(height: 1)
 
             // Input bar
             InputBar(

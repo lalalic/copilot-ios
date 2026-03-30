@@ -67,21 +67,6 @@ public struct TodoPanelView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                 }
-
-                // Progress bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(platformGray5)
-                            .frame(height: 2)
-
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: geo.size.width * progress, height: 2)
-                            .animation(.easeInOut(duration: 0.3), value: progress)
-                    }
-                }
-                .frame(height: 2)
             }
             .background(.ultraThinMaterial)
             .frame(maxWidth: .infinity)
@@ -92,10 +77,6 @@ public struct TodoPanelView: View {
 
     private var completedCount: Int {
         displayItems.filter { $0.status == .completed }.count
-    }
-
-    private var progress: CGFloat {
-        displayItems.isEmpty ? 0 : CGFloat(completedCount) / CGFloat(displayItems.count)
     }
 
     private var progressText: String {
