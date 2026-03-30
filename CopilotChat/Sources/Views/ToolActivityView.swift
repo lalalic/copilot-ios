@@ -7,7 +7,7 @@ import SwiftUI
 public struct ToolActivityView: View {
 
     let toolCalls: [ToolCallInfo]
-    @State private var isExpanded = false
+    @State private var isExpanded = true
 
     public init(toolCalls: [ToolCallInfo]) {
         self.toolCalls = toolCalls

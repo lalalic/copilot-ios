@@ -373,8 +373,10 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Agent Callbacks
 
     private func handleAgentResponse(_ message: String) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         // send_response delivers a final response — add as assistant message
-        let blocks = parseContentBlocks(message)
+        let blocks = parseContentBlocks(trimmed)
         let msg = ChatMessage(role: .assistant, content: blocks)
         messages.append(msg)
     }
@@ -510,6 +512,9 @@ public final class ChatViewModel: ObservableObject {
     /// Append a delta token to the current streaming assistant message,
     /// or create a new one if none exists.
     private func appendOrUpdateAssistantDelta(_ delta: String) {
+        let trimmedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDelta.isEmpty else { return }
+
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].isStreaming {
@@ -526,13 +531,24 @@ public final class ChatViewModel: ObservableObject {
 
     /// Finalize a streaming message or add a complete assistant message.
     private func finalizeAssistantMessage(_ content: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].isStreaming {
-            messages[lastIndex].content = parseContentBlocks(content)
-            messages[lastIndex].isStreaming = false
+            if trimmed.isEmpty {
+                if messages[lastIndex].fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    messages.remove(at: lastIndex)
+                } else {
+                    messages[lastIndex].isStreaming = false
+                }
+            } else {
+                messages[lastIndex].content = parseContentBlocks(trimmed)
+                messages[lastIndex].isStreaming = false
+            }
         } else {
-            let blocks = parseContentBlocks(content)
+            guard !trimmed.isEmpty else { return }
+            let blocks = parseContentBlocks(trimmed)
             messages.append(ChatMessage(role: .assistant, content: blocks))
         }
     }

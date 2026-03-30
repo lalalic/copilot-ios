@@ -32,6 +32,19 @@ public struct ChatView: View {
             // Message list
             messageList
 
+            if case .working = viewModel.chatState, viewModel.toolCalls.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Thinking…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+
             // Tool activity (if any tools are running)
             if !viewModel.toolCalls.isEmpty {
                 ToolActivityView(toolCalls: viewModel.toolCalls)
@@ -82,6 +95,7 @@ public struct ChatView: View {
                 }
                 .padding(.vertical, 8)
             }
+            .defaultScrollAnchor(.bottom)
             .onChange(of: viewModel.messages.count) { _, _ in
                 // Auto-scroll to bottom on new messages
                 if let lastId = viewModel.messages.last?.id {
