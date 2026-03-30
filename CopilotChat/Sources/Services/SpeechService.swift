@@ -18,6 +18,7 @@ public final class SpeechService: ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     /// Lazily create AVAudioEngine to avoid crash on init before audio session is configured.
     private lazy var audioEngine = AVAudioEngine()
+    private var isAudioTapInstalled = false
     private let locale: Locale
 
     public init(locale: Locale = .current) {
@@ -50,6 +51,10 @@ public final class SpeechService: ObservableObject {
     /// Start listening and transcribing speech.
     /// - Parameter onResult: Called with each partial/final transcription result.
     public func startListening(onResult: @escaping @Sendable (String, Bool) -> Void) throws {
+        guard isAuthorized else {
+            throw SpeechError.notAuthorized
+        }
+
         // Lazily create recognizer
         if speechRecognizer == nil {
             speechRecognizer = SFSpeechRecognizer(locale: locale)
@@ -59,7 +64,13 @@ public final class SpeechService: ObservableObject {
         }
 
         // Cancel any ongoing task
-        stopListening()
+        if isListening {
+            stopListening()
+        }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -67,11 +78,16 @@ public final class SpeechService: ObservableObject {
         self.recognitionRequest = request
 
         let inputNode = audioEngine.inputNode
+        if isAudioTapInstalled {
+            inputNode.removeTap(onBus: 0)
+            isAudioTapInstalled = false
+        }
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
             request.append(buffer)
         }
+        isAudioTapInstalled = true
 
         audioEngine.prepare()
         try audioEngine.start()
@@ -119,12 +135,18 @@ public final class SpeechService: ObservableObject {
 
     /// Stop listening and clean up audio resources.
     public func stopListening() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        if isAudioTapInstalled {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isAudioTapInstalled = false
+        }
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         isListening = false
     }
 
