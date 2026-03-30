@@ -84,8 +84,7 @@ public struct TodoPanelView: View {
                 .frame(height: 2)
             }
             .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
         }
     }
 
