@@ -92,8 +92,10 @@ public func parseContentBlocks(_ text: String) -> [ChatMessage.ContentBlock] {
     var codeContent = ""
 
     for line in lines {
+        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+
         if !inCodeBlock {
-            if line.hasPrefix("```") {
+            if trimmedLine.hasPrefix("```") {
                 // Flush pending markdown
                 let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
@@ -102,7 +104,7 @@ public func parseContentBlocks(_ text: String) -> [ChatMessage.ContentBlock] {
                 current = ""
 
                 // Start code block
-                let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                let lang = String(trimmedLine.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 codeLanguage = lang.isEmpty ? nil : lang
                 codeContent = ""
                 inCodeBlock = true
@@ -110,7 +112,7 @@ public func parseContentBlocks(_ text: String) -> [ChatMessage.ContentBlock] {
                 current += (current.isEmpty ? "" : "\n") + line
             }
         } else {
-            if line.hasPrefix("```") {
+            if trimmedLine.hasPrefix("```") {
                 // End code block
                 inCodeBlock = false
                 if codeLanguage?.lowercased() == "mermaid" {
