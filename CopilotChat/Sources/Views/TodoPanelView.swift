@@ -141,16 +141,9 @@ private struct TodoRow: View {
             Text(item.title)
                 .font(.caption)
                 .foregroundStyle(item.status == .completed ? .secondary : .primary)
-                .strikethrough(item.status == .completed)
                 .lineLimit(1)
 
             Spacer()
-
-            // In-progress indicator
-            if item.status == .inProgress {
-                ProgressView()
-                    .controlSize(.mini)
-            }
         }
         .padding(.vertical, 2)
     }
