@@ -83,8 +83,12 @@ public struct MessageBubble: View {
             CodeBlockView(code: code, language: language)
 
         case .mermaid(let source):
-            MermaidView(source: source)
-                .frame(minHeight: 200)
+            HStack {
+                Spacer(minLength: 0)
+                MermaidView(source: source)
+                    .frame(maxWidth: 320, minHeight: 200)
+                Spacer(minLength: 0)
+            }
 
         case .image(let data, _):
             #if canImport(UIKit)
