@@ -13,27 +13,47 @@ public final class SpeechService: ObservableObject {
     @Published public var transcript: String = ""
     @Published public var isAuthorized: Bool = false
 
-    private let speechRecognizer: SFSpeechRecognizer?
+    private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
+    /// Lazily create AVAudioEngine to avoid crash on init before audio session is configured.
+    private lazy var audioEngine = AVAudioEngine()
+    private let locale: Locale
 
     public init(locale: Locale = .current) {
-        self.speechRecognizer = SFSpeechRecognizer(locale: locale)
+        self.locale = locale
     }
 
     /// Request speech recognition authorization.
     public func requestAuthorization() {
-        SFSpeechRecognizer.requestAuthorization { [weak self] status in
+        // Lazily create the recognizer on first use
+        if speechRecognizer == nil {
+            speechRecognizer = SFSpeechRecognizer(locale: locale)
+        }
+        // Use nonisolated static helper to break @MainActor isolation chain.
+        // SFSpeechRecognizer.requestAuthorization calls its handler on a background queue,
+        // but closures in @MainActor classes inherit that isolation, causing a runtime crash.
+        SpeechService.performAuthRequest { [weak self] authorized in
             Task { @MainActor in
-                self?.isAuthorized = (status == .authorized)
+                self?.isAuthorized = authorized
             }
+        }
+    }
+
+    /// Nonisolated helper — closures defined here do NOT inherit @MainActor.
+    private nonisolated static func performAuthRequest(handler: @escaping @Sendable (Bool) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            handler(status == .authorized)
         }
     }
 
     /// Start listening and transcribing speech.
     /// - Parameter onResult: Called with each partial/final transcription result.
     public func startListening(onResult: @escaping @Sendable (String, Bool) -> Void) throws {
+        // Lazily create recognizer
+        if speechRecognizer == nil {
+            speechRecognizer = SFSpeechRecognizer(locale: locale)
+        }
         guard let speechRecognizer, speechRecognizer.isAvailable else {
             throw SpeechError.recognizerUnavailable
         }
@@ -56,29 +76,45 @@ public final class SpeechService: ObservableObject {
         audioEngine.prepare()
         try audioEngine.start()
 
-        recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-
-            if let result {
-                let text = result.bestTranscription.formattedString
-                let isFinal = result.isFinal
-                Task { @MainActor in
-                    self.transcript = text
-                    onResult(text, isFinal)
-                    if isFinal {
-                        self.stopListening()
-                    }
+        // Use nonisolated static helper to break @MainActor isolation chain.
+        // The recognitionTask handler runs on a background queue.
+        recognitionTask = SpeechService.startRecognitionTask(
+            recognizer: speechRecognizer,
+            request: request
+        ) { [weak self] text, isFinal in
+            Task { @MainActor in
+                self?.transcript = text
+                onResult(text, isFinal)
+                if isFinal {
+                    self?.stopListening()
                 }
             }
-
-            if error != nil {
-                Task { @MainActor in
-                    self.stopListening()
-                }
+        } onError: { [weak self] in
+            Task { @MainActor in
+                self?.stopListening()
             }
         }
 
         isListening = true
+    }
+
+    /// Nonisolated helper — closures defined here do NOT inherit @MainActor.
+    private nonisolated static func startRecognitionTask(
+        recognizer: SFSpeechRecognizer,
+        request: SFSpeechAudioBufferRecognitionRequest,
+        onResult: @escaping @Sendable (String, Bool) -> Void,
+        onError: @escaping @Sendable () -> Void
+    ) -> SFSpeechRecognitionTask {
+        recognizer.recognitionTask(with: request) { result, error in
+            if let result {
+                let text = result.bestTranscription.formattedString
+                let isFinal = result.isFinal
+                onResult(text, isFinal)
+            }
+            if error != nil {
+                onError()
+            }
+        }
     }
 
     /// Stop listening and clean up audio resources.
