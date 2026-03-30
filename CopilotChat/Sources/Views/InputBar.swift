@@ -9,6 +9,7 @@ public struct InputBar: View {
     @ObservedObject var viewModel: ChatViewModel
     @StateObject private var speechService = SpeechService()
     @State private var showAttachmentPicker = false
+    @FocusState private var isTextFieldFocused: Bool
 
     private let inputModes: InputMode
     private let onSend: () async -> Void
@@ -47,6 +48,14 @@ public struct InputBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Cancel") {
+                    isTextFieldFocused = false
+                }
+            }
+        }
         .onAppear {
             if inputModes.contains(.speech) {
                 speechService.requestAuthorization()
@@ -78,6 +87,7 @@ public struct InputBar: View {
             TextField(placeholderText, text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
+                .focused($isTextFieldFocused)
                 .disabled(!isInputEnabled)
 
             if speechService.isListening {
