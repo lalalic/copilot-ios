@@ -7,14 +7,16 @@ import SwiftUI
 public struct TodoPanelView: View {
 
     let items: [TodoItem]
+    let showExampleWhenEmpty: Bool
     @State private var isExpanded = true
 
-    public init(items: [TodoItem]) {
+    public init(items: [TodoItem], showExampleWhenEmpty: Bool = false) {
         self.items = items
+        self.showExampleWhenEmpty = showExampleWhenEmpty
     }
 
     public var body: some View {
-        if !items.isEmpty {
+        if !displayItems.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 // Header
                 Button {
@@ -30,6 +32,12 @@ public struct TodoPanelView: View {
                         Text("Tasks")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.primary)
+
+                        if isExampleMode {
+                            Text("example")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
                         Text(progressText)
                             .font(.caption)
@@ -52,7 +60,7 @@ public struct TodoPanelView: View {
 
                     // Task list
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(items) { item in
+                        ForEach(displayItems) { item in
                             TodoRow(item: item)
                         }
                     }
@@ -84,15 +92,35 @@ public struct TodoPanelView: View {
     // MARK: - Computed
 
     private var completedCount: Int {
-        items.filter { $0.status == .completed }.count
+        displayItems.filter { $0.status == .completed }.count
     }
 
     private var progress: CGFloat {
-        items.isEmpty ? 0 : CGFloat(completedCount) / CGFloat(items.count)
+        displayItems.isEmpty ? 0 : CGFloat(completedCount) / CGFloat(displayItems.count)
     }
 
     private var progressText: String {
-        "\(completedCount)/\(items.count)"
+        "\(completedCount)/\(displayItems.count)"
+    }
+
+    private var isExampleMode: Bool {
+        items.isEmpty && showExampleWhenEmpty
+    }
+
+    private var displayItems: [TodoItem] {
+        if !items.isEmpty {
+            return items
+        }
+
+        if showExampleWhenEmpty {
+            return [
+                TodoItem(id: 1, title: "Understand requirement", status: .completed),
+                TodoItem(id: 2, title: "Implement changes", status: .inProgress),
+                TodoItem(id: 3, title: "Verify on device", status: .notStarted),
+            ]
+        }
+
+        return []
     }
 }
 

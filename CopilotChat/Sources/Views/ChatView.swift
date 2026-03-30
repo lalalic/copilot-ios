@@ -52,7 +52,7 @@ public struct ChatView: View {
             }
 
             // Todo panel (above input bar, like VS Code chat)
-            TodoPanelView(items: viewModel.todoItems)
+            TodoPanelView(items: viewModel.todoItems, showExampleWhenEmpty: true)
                 .padding(.bottom, 4)
 
             if case .waitingForQuestions(let questions) = viewModel.chatState {
