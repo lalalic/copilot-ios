@@ -48,14 +48,6 @@ public struct InputBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Cancel") {
-                    isTextFieldFocused = false
-                }
-            }
-        }
         .onAppear {
             if inputModes.contains(.speech) {
                 speechService.requestAuthorization()
@@ -88,6 +80,10 @@ public struct InputBar: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .focused($isTextFieldFocused)
+                .submitLabel(.done)
+                .onSubmit {
+                    isTextFieldFocused = false
+                }
                 .disabled(!isInputEnabled)
 
             if speechService.isListening {
