@@ -176,6 +176,10 @@ public struct InputBar: View {
         switch viewModel.chatState {
         case .waitingForUser(let question):
             return question.prefix(50) + (question.count > 50 ? "..." : "")
+        case .waitingForQuestions(let questions):
+            guard let first = questions.first else { return "Answer questions..." }
+            let question = first.question
+            return question.prefix(50) + (question.count > 50 ? "..." : "")
         case .working:
             return "Steer..."
         case .connecting:
@@ -189,6 +193,8 @@ public struct InputBar: View {
         switch viewModel.chatState {
         case .waitingForUser:
             return .orange
+        case .waitingForQuestions:
+            return .orange
         case .working:
             return .blue.opacity(0.5)
         default:
@@ -198,7 +204,7 @@ public struct InputBar: View {
 
     private var isInputEnabled: Bool {
         switch viewModel.chatState {
-        case .idle, .waitingForUser, .working:
+        case .idle, .waitingForUser, .waitingForQuestions, .working:
             return true
         default:
             return false

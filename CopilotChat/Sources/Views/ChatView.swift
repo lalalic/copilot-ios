@@ -42,6 +42,19 @@ public struct ChatView: View {
             TodoPanelView(items: viewModel.todoItems)
                 .padding(.bottom, 4)
 
+            if case .waitingForQuestions(let questions) = viewModel.chatState {
+                AskQuestionsView(
+                    questions: questions,
+                    onSubmit: { answers in
+                        viewModel.submitAskQuestions(answers)
+                    },
+                    onSkip: {
+                        viewModel.skipAskQuestions()
+                    }
+                )
+                .padding(.bottom, 4)
+            }
+
             // Input bar
             InputBar(
                 viewModel: viewModel,

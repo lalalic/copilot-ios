@@ -1620,6 +1620,9 @@ public struct AgentConfig: Sendable {
     public var onResponse: @Sendable (String) async -> Void
     /// Called when the agent uses ask_user to request input. Return the user's answer.
     public var onAskUser: @Sendable (String) async -> String
+    /// Called when the agent uses ask_questions to request structured input.
+    /// Return a JSON object keyed by question header.
+    public var onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)?
     /// Optional working directory for the agent.
     public var workingDirectory: String?
     /// Stable client identifier for relay v2 session pinning.
@@ -1639,7 +1642,8 @@ public struct AgentConfig: Sendable {
         snapshot: String? = nil,
         appId: String? = nil,
         onResponse: @escaping @Sendable (String) async -> Void,
-        onAskUser: @escaping @Sendable (String) async -> String
+        onAskUser: @escaping @Sendable (String) async -> String,
+        onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
     ) {
         self.model = model
         self.instructions = instructions
@@ -1651,6 +1655,7 @@ public struct AgentConfig: Sendable {
         self.appId = appId
         self.onResponse = onResponse
         self.onAskUser = onAskUser
+        self.onAskQuestions = onAskQuestions
     }
 }
 
@@ -1734,6 +1739,7 @@ public final class CopilotAgent: @unchecked Sendable {
         ))
 
         let onAskUser = config.onAskUser
+        let onAskQuestions = config.onAskQuestions
         tools.append(ToolDefinition(
             name: "ask_user",
             description: "Ask the user a question and wait for their answer. Use this when you need more information or when all tasks are completed to ask what to do next.",
@@ -1762,6 +1768,82 @@ public final class CopilotAgent: @unchecked Sendable {
             }
         ))
 
+        tools.append(ToolDefinition(
+            name: "ask_questions",
+            description: "Ask one or more structured questions with options and optional free-form input, then wait for the user's answers.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "questions": .object([
+                        "type": .string("array"),
+                        "items": .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "header": .object([
+                                    "type": .string("string"),
+                                    "description": .string("A short label for this question"),
+                                ]),
+                                "question": .object([
+                                    "type": .string("string"),
+                                    "description": .string("The full question text"),
+                                ]),
+                                "multiSelect": .object([
+                                    "type": .string("boolean"),
+                                    "description": .string("Whether multiple options can be selected"),
+                                ]),
+                                "options": .object([
+                                    "type": .string("array"),
+                                    "items": .object([
+                                        "type": .string("object"),
+                                        "properties": .object([
+                                            "label": .object([
+                                                "type": .string("string"),
+                                            ]),
+                                            "description": .object([
+                                                "type": .string("string"),
+                                            ]),
+                                            "recommended": .object([
+                                                "type": .string("boolean"),
+                                            ]),
+                                        ]),
+                                        "required": .array([.string("label")]),
+                                    ]),
+                                ]),
+                                "allowFreeformInput": .object([
+                                    "type": .string("boolean"),
+                                    "description": .string("Allow free text input in addition to options"),
+                                ]),
+                            ]),
+                            "required": .array([.string("header"), .string("question")]),
+                        ]),
+                    ]),
+                ]),
+                "required": .array([.string("questions")]),
+            ]),
+            skipPermission: true,
+            handler: { args in
+                if let onAskQuestions {
+                    let result = await onAskQuestions(args)
+                    if let data = try? JSONEncoder().encode(result), let text = String(data: data, encoding: .utf8) {
+                        return "User answered: \(text)"
+                    }
+                    return "User answered."
+                }
+
+                let question: String
+                if case .object(let dict) = args,
+                   case .array(let arr) = dict["questions"],
+                   case .object(let first) = arr.first,
+                   case .string(let text) = first["question"] {
+                    question = text
+                } else {
+                    question = "What would you like me to do next?"
+                }
+                let answer = await onAskUser(question)
+                return "User answered: \(answer)"
+            }
+        ))
+
         return tools
     }
 
@@ -1771,6 +1853,7 @@ public final class CopilotAgent: @unchecked Sendable {
         IMPORTANT: You are an autonomous agent running in an infinite loop.
         - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
         - Use the `ask_user` tool when you need more information or when all tasks are done to ask what to do next.
+        - Use the `ask_questions` tool when you need structured choices (single-select, multi-select, or free-form answers).
         - Always use one of these tools before your turn ends.
         """
 

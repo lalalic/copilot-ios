@@ -107,3 +107,41 @@ ChatView(viewModel: chat)
 - iOS 18.0+ / macOS 15.0+
 - Swift 6.0+
 - CopilotSDK
+
+## Structured Questions (`ask_questions`)
+
+CopilotChat now supports the `ask_questions` tool with the same schema as VS Code:
+- **Multiple choice options** (single-select or multi-select)
+- **Recommended option** highlighting
+- **Free-form text input** alongside options
+- **Multiple questions** in a single call (batch up to 4)
+- **Headers** for each question
+
+The `ask_questions` schema:
+
+```json
+{
+  "questions": [{
+    "header": "Short Label",
+    "question": "Full question text",
+    "options": [
+      { "label": "Option A", "description": "...", "recommended": true },
+      { "label": "Option B" }
+    ],
+    "multiSelect": false,
+    "allowFreeformInput": false
+  }]
+}
+```
+
+Responses are returned as a structured object keyed by question header:
+
+```json
+{
+  "Header": {
+    "selected": ["Option A"],
+    "freeText": "optional notes",
+    "skipped": false
+  }
+}
+```

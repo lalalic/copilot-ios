@@ -26,6 +26,8 @@ public enum ChatState: Sendable, Equatable {
     case working
     /// Model called `ask_user` — waiting for user reply.
     case waitingForUser(question: String)
+    /// Model called `ask_questions` — waiting for structured user replies.
+    case waitingForQuestions([AskQuestionItem])
     /// An error occurred.
     case error(String)
 }
@@ -60,6 +62,9 @@ public final class ChatViewModel: ObservableObject {
     private var agentTask: Task<Void, Error>?
     /// Continuation for ask_user — resumed when user replies.
     private var askUserContinuation: CheckedContinuation<String, Never>?
+    /// Continuation for ask_questions — resumed when user submits structured replies.
+    private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
+    @Published public var activeQuestions: [AskQuestionItem] = []
 
     // MARK: - Init
 
@@ -156,10 +161,18 @@ public final class ChatViewModel: ObservableObject {
 
         // Wrap onAskUser to update UI and wait for user input
         let originalOnAskUser = config.onAskUser
-        _ = originalOnAskUser // suppress unused warning for now
+        _ = originalOnAskUser
         config.onAskUser = { [weak self] question in
             guard let self else { return "" }
             return await self.handleAgentAskUser(question)
+        }
+
+        let originalOnAskQuestions = config.onAskQuestions
+        _ = originalOnAskQuestions
+        config.onAskQuestions = { [weak self] payload in
+            guard let self else { return .object([:]) }
+            let answer = await self.handleAgentAskQuestions(payload)
+            return answer
         }
 
         let agent = try await client.createAgent(config: config)
@@ -207,6 +220,7 @@ public final class ChatViewModel: ObservableObject {
             Task { @MainActor in
                 // Only go idle if not waiting for user (ask_user sets its own state)
                 if case .waitingForUser = self.chatState { return }
+                if case .waitingForQuestions = self.chatState { return }
                 self.chatState = .idle
             }
         }
@@ -274,6 +288,12 @@ public final class ChatViewModel: ObservableObject {
             askUserContinuation?.resume(returning: text)
             askUserContinuation = nil
             chatState = .working
+
+        case .waitingForQuestions(let questions):
+            guard let first = questions.first else { return }
+            submitAskQuestions([
+                first.header: AskQuestionAnswer(selected: [], freeText: text, skipped: false)
+            ])
 
         case .working:
             // Steer — inject immediate message
@@ -370,6 +390,118 @@ public final class ChatViewModel: ObservableObject {
         // Wait for user reply via continuation
         return await withCheckedContinuation { continuation in
             self.askUserContinuation = continuation
+        }
+    }
+
+    private func handleAgentAskQuestions(_ payload: JSONValue) async -> JSONValue {
+        let questions = parseAskQuestions(payload)
+        guard !questions.isEmpty else {
+            return .object([:])
+        }
+
+        chatState = .waitingForQuestions(questions)
+        activeQuestions = questions
+        messages.append(ChatMessage(role: .assistant, content: [.text("Please answer the questions below.")]))
+
+        return await withCheckedContinuation { continuation in
+            self.askQuestionsContinuation = continuation
+        }
+    }
+
+    public func submitAskQuestions(_ answers: [String: AskQuestionAnswer]) {
+        var result: [String: JSONValue] = [:]
+        for (header, answer) in answers {
+            result[header] = .object([
+                "selected": .array(answer.selected.map(JSONValue.string)),
+                "freeText": answer.freeText.map(JSONValue.string) ?? .null,
+                "skipped": .bool(answer.skipped),
+            ])
+        }
+
+        askQuestionsContinuation?.resume(returning: .object(result))
+        askQuestionsContinuation = nil
+        activeQuestions = []
+        chatState = .working
+    }
+
+    public func skipAskQuestions() {
+        var skipped: [String: AskQuestionAnswer] = [:]
+        for question in activeQuestions {
+            skipped[question.header] = AskQuestionAnswer(selected: [], freeText: nil, skipped: true)
+        }
+        submitAskQuestions(skipped)
+    }
+
+    private func parseAskQuestions(_ payload: JSONValue) -> [AskQuestionItem] {
+        guard case .object(let root) = payload,
+              case .array(let rawQuestions) = root["questions"] else {
+            return []
+        }
+
+        return rawQuestions.enumerated().compactMap { index, entry in
+            guard case .object(let q) = entry else { return nil }
+
+            let header: String
+            if case .string(let h) = q["header"], !h.isEmpty {
+                header = h
+            } else {
+                header = "Question \(index + 1)"
+            }
+
+            guard case .string(let questionText) = q["question"], !questionText.isEmpty else {
+                return nil
+            }
+
+            let multiSelect: Bool
+            if case .bool(let b) = q["multiSelect"] {
+                multiSelect = b
+            } else {
+                multiSelect = false
+            }
+
+            let allowFreeformInput: Bool
+            if case .bool(let b) = q["allowFreeformInput"] {
+                allowFreeformInput = b
+            } else {
+                allowFreeformInput = false
+            }
+
+            let options: [AskQuestionOption]
+            if case .array(let rawOptions) = q["options"] {
+                options = rawOptions.compactMap { opt in
+                    guard case .object(let o) = opt,
+                          case .string(let label) = o["label"],
+                          !label.isEmpty else {
+                        return nil
+                    }
+
+                    let description: String?
+                    if case .string(let d) = o["description"], !d.isEmpty {
+                        description = d
+                    } else {
+                        description = nil
+                    }
+
+                    let recommended: Bool
+                    if case .bool(let r) = o["recommended"] {
+                        recommended = r
+                    } else {
+                        recommended = false
+                    }
+
+                    return AskQuestionOption(label: label, description: description, recommended: recommended)
+                }
+            } else {
+                options = []
+            }
+
+            return AskQuestionItem(
+                header: header,
+                question: questionText,
+                multiSelect: multiSelect,
+                options: options,
+                allowFreeformInput: allowFreeformInput
+            )
         }
     }
 
