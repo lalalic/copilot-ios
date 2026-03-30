@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.iOS(.v18), .macOS(.v15)],
     products: [
         .library(name: "CopilotSDK", targets: ["CopilotSDK"]),
+        .library(name: "CopilotChat", targets: ["CopilotChat"]),
         .library(name: "CameraKit", targets: ["CameraKit"]),
         .library(name: "WebKitAgent", targets: ["WebKitAgent"]),
         .library(name: "AppAgent", targets: ["AppAgent"]),
@@ -24,6 +25,19 @@ let package = Package(
             name: "CopilotSDKTests",
             dependencies: ["CopilotSDK"],
             path: "CopilotSDK/Tests"
+        ),
+
+        // MARK: - CopilotChat (depends on CopilotSDK)
+        .target(
+            name: "CopilotChat",
+            dependencies: ["CopilotSDK"],
+            path: "CopilotChat/Sources",
+            resources: [.copy("Resources")]
+        ),
+        .testTarget(
+            name: "CopilotChatTests",
+            dependencies: ["CopilotChat"],
+            path: "CopilotChat/Tests"
         ),
 
         // MARK: - AppAgent (leaf, no dependencies)
