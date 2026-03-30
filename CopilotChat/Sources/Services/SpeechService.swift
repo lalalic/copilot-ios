@@ -84,9 +84,11 @@ public final class SpeechService: ObservableObject {
         }
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-            request.append(buffer)
-        }
+        SpeechService.installAudioTap(
+            inputNode: inputNode,
+            request: request,
+            format: recordingFormat
+        )
         isAudioTapInstalled = true
 
         audioEngine.prepare()
@@ -130,6 +132,18 @@ public final class SpeechService: ObservableObject {
             if error != nil {
                 onError()
             }
+        }
+    }
+
+    /// Nonisolated helper for installing the audio tap.
+    /// The tap closure runs on a realtime audio queue and must not inherit @MainActor isolation.
+    private nonisolated static func installAudioTap(
+        inputNode: AVAudioInputNode,
+        request: SFSpeechAudioBufferRecognitionRequest,
+        format: AVAudioFormat
+    ) {
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            request.append(buffer)
         }
     }
 
