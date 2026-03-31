@@ -158,7 +158,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Inject manage_todo_list and get_attachment tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool()]
+        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -178,6 +178,7 @@ public final class ChatViewModel: ObservableObject {
         config.tools.append(makeTodoTool())
         config.tools.append(makeGetAttachmentTool())
         config.tools.append(makeCreatePlanTool())
+        config.tools.append(makeStripeCheckoutTool())
 
         // Wrap onResponse to update UI
         let originalOnResponse = config.onResponse
@@ -845,6 +846,70 @@ public final class ChatViewModel: ObservableObject {
     }
 
     // MARK: - Get Attachment Tool
+
+    // MARK: - Stripe Checkout Tool
+
+    /// Build the `stripe_checkout` tool definition.
+    /// Agent-only payment helper: returns an external Stripe checkout link.
+    private func makeStripeCheckoutTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "stripe_checkout",
+            description: "Generate an external Stripe checkout link. Use only when user explicitly asks for Stripe payment or when credits are low. Keep Apple IAP as default for in-app digital credits.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "amount_usd": .object([
+                        "type": .string("number"),
+                        "description": .string("Optional requested top-up amount in USD"),
+                    ]),
+                    "reason": .object([
+                        "type": .string("string"),
+                        "description": .string("Why Stripe is needed (e.g. user asked for Stripe, credits exhausted)"),
+                    ]),
+                ]),
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "Error: view model deallocated" }
+                return await self.handleStripeCheckout(args)
+            }
+        )
+    }
+
+    /// Handle `stripe_checkout` tool call.
+    private func handleStripeCheckout(_ args: JSONValue) async -> String {
+        let base = (UserDefaults.standard.string(forKey: "stripePaymentLink") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else {
+            return "Stripe checkout is not configured. Set UserDefaults key 'stripePaymentLink' to your Stripe Payment Link or checkout URL. For now, use Apple IAP: Settings -> Credits -> Buy Credits."
+        }
+
+        var requestedAmount: Double?
+        var reason = ""
+        if case .object(let dict) = args {
+            if case .double(let d) = dict["amount_usd"] { requestedAmount = d }
+            else if case .int(let i) = dict["amount_usd"] { requestedAmount = Double(i) }
+            if case .string(let r) = dict["reason"] { reason = r }
+        }
+
+        let explicitStripeIntent = reason.lowercased().contains("stripe") || reason.lowercased().contains("checkout") || reason.lowercased().contains("payment")
+        if !usageTracker.isLowBalance && !usageTracker.hasInsufficientBalance && !explicitStripeIntent {
+            return "Balance is still sufficient ($\(String(format: "%.2f", usageTracker.balance))). Keep Apple IAP as default unless user explicitly requests Stripe."
+        }
+
+        var checkoutURL = base
+        if var components = URLComponents(string: base) {
+            var query = components.queryItems ?? []
+            if let requestedAmount, requestedAmount > 0 {
+                query.append(URLQueryItem(name: "amount_usd", value: String(format: "%.2f", requestedAmount)))
+            }
+            query.append(URLQueryItem(name: "source", value: "agent_tool"))
+            query.append(URLQueryItem(name: "balance", value: String(format: "%.2f", usageTracker.balance)))
+            components.queryItems = query
+            checkoutURL = components.url?.absoluteString ?? base
+        }
+
+        return "Stripe checkout link (external): \(checkoutURL)\nNote: Apple IAP remains the default in-app credit flow."
+    }
 
     /// Build the `get_attachment` tool definition.
     /// The model calls this to lazily load file contents that were listed in the prompt.
