@@ -311,6 +311,20 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
         }
+
+        // Stripe credit grants — map product_id to credits (same as IAP)
+        await session.on(.creditsGrantCreated) { [weak self] event in
+            guard let self else { return }
+            if case .object(let data) = event.data,
+               case .string(let productId) = data["productId"] {
+                let credits = PaymentManager.creditValues[productId] ?? 0
+                if credits > 0 {
+                    Task { @MainActor in
+                        self.usageTracker.addCredits(credits)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Run Plan

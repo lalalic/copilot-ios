@@ -70,6 +70,9 @@ public enum SessionEventType: String, Sendable {
     case exitPlanModeRequested = "exit_plan_mode.requested"
     case exitPlanModeCompleted = "exit_plan_mode.completed"
 
+    // Credits events (Stripe webhook push)
+    case creditsGrantCreated = "credits.grant_created"
+
     case unknown
 }
 
