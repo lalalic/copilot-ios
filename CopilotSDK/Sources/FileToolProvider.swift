@@ -3,7 +3,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.copilot-ios.sdk", category: "FileTools")
 
-/// Provides read_file, write_file, and list_files tools that let an AI agent
+/// Provides read_file, write_file, list_files, and create_directory tools that let an AI agent
 /// manage files on the device. All paths are sandboxed under a configurable
 /// base directory (default: Documents/workspace/).
 ///
@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, list_files, create_new_project.
+    /// All file tools: read_file, write_file, list_files, create_directory, create_new_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, listFilesTool, createNewProjectTool]
+        [readFileTool, writeFileTool, listFilesTool, createDirectoryTool, createNewProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -184,6 +184,56 @@ public final class FileToolProvider: Sendable {
     }
 
     // MARK: - create_new_project
+
+    private var createDirectoryTool: ToolDefinition {
+        ToolDefinition(
+            name: "create_directory",
+            description: "Create a directory inside the on-device workspace. Supports nested paths and creates missing parents.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Relative directory path within the workspace, e.g. 'project/docs' or 'assets/images'.")
+                    ])
+                ]),
+                "required": .array([.string("path")])
+            ]),
+            overridesBuiltInTool: true,
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: FileToolProvider not available" }
+            guard case .object(let dict) = args,
+                  case .string(let rawPath) = dict["path"] else {
+                return "Error: 'path' (string) required"
+            }
+
+            let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else {
+                return "Error: path cannot be empty"
+            }
+
+            guard let url = self.resolve(path) else {
+                return "Error: invalid path '\(rawPath)'"
+            }
+
+            do {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+                    if isDir.boolValue {
+                        return "Directory already exists: \(path)"
+                    }
+                    return "Error: path exists and is a file: \(path)"
+                }
+
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                logger.info("create_directory: \(path)")
+                return "Created directory: \(path)"
+            } catch {
+                return "Error creating directory \(path): \(error.localizedDescription)"
+            }
+        }
+    }
 
     private var createNewProjectTool: ToolDefinition {
         ToolDefinition(
