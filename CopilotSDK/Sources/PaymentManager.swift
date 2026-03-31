@@ -23,6 +23,7 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     
     /// How much credit (in USD equivalent) each product grants.
     public static let creditValues: [String: Double] = [
+        "com.neox.credits.test": 0.75,      // $1.00 test → $0.75 credits
         "com.neox.credits.starter": 3.50,
         "com.neox.credits.standard": 7.50,
         "com.neox.credits.pro": 25.00,

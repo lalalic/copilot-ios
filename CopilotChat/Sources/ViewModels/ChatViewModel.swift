@@ -892,9 +892,12 @@ public final class ChatViewModel: ObservableObject {
 
     /// Handle `stripe_checkout` tool call.
     private func handleStripeCheckout(_ args: JSONValue) async -> String {
-        let base = (UserDefaults.standard.string(forKey: "stripePaymentLink") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Payment link URL — set via UserDefaults or fall back to test link
+        let base = (UserDefaults.standard.string(forKey: "stripePaymentLink")
+            ?? "https://buy.stripe.com/test_14A7sLfQc0DY3YTfGp24004")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else {
-            return "Stripe checkout is not configured. Set UserDefaults key 'stripePaymentLink' to your Stripe Payment Link or checkout URL. For now, use Apple IAP: Settings -> Credits -> Buy Credits."
+            return "Stripe checkout is not configured."
         }
 
         var requestedAmount: Double?
@@ -913,11 +916,12 @@ public final class ChatViewModel: ObservableObject {
         var checkoutURL = base
         if var components = URLComponents(string: base) {
             var query = components.queryItems ?? []
+            // client_reference_id flows through to checkout.session.completed
+            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            query.append(URLQueryItem(name: "client_reference_id", value: deviceId))
             if let requestedAmount, requestedAmount > 0 {
                 query.append(URLQueryItem(name: "amount_usd", value: String(format: "%.2f", requestedAmount)))
             }
-            query.append(URLQueryItem(name: "source", value: "agent_tool"))
-            query.append(URLQueryItem(name: "balance", value: String(format: "%.2f", usageTracker.balance)))
             components.queryItems = query
             checkoutURL = components.url?.absoluteString ?? base
         }
