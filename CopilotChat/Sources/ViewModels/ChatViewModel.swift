@@ -48,6 +48,28 @@ public final class ChatViewModel: ObservableObject {
     @Published public var inputText: String = ""
     @Published public var isListening: Bool = false
 
+    // MARK: - Usage Tracking
+
+    /// Client-authoritative usage and balance tracker.
+    public let usageTracker: UsageTracker
+
+    // MARK: - Lazy Attachments
+
+    /// Per-session attachment registry. Files are added eagerly (metadata only)
+    /// and loaded lazily when the model calls `get_attachment`.
+    public let attachmentStore = AttachmentStore()
+
+    // MARK: - Plan Store
+
+    /// Shared plan store for create_plan tool and run plan.
+    public let planStore = PlanStore()
+
+    // MARK: - Project Scope
+
+    /// Currently selected project name. When set, scopes chat context
+    /// to a specific workspace subdirectory.
+    @Published public var projectScope: String?
+
     // MARK: - Configuration
 
     public let inputModes: InputMode
@@ -76,11 +98,13 @@ public final class ChatViewModel: ObservableObject {
     public init(
         transport: Transport,
         mode: ChatMode,
-        inputModes: InputMode = .textAndSpeech
+        inputModes: InputMode = .textAndSpeech,
+        usageTracker: UsageTracker = UsageTracker()
     ) {
         self.transport = transport
         self.mode = mode
         self.inputModes = inputModes
+        self.usageTracker = usageTracker
     }
 
     deinit {
@@ -132,15 +156,16 @@ public final class ChatViewModel: ObservableObject {
     private func connectSession(config: SessionConfig) async throws {
         guard let client else { return }
 
-        // Inject manage_todo_list tool
+        // Inject manage_todo_list and get_attachment tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeTodoTool()]
+        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
 
         // Subscribe to events
         await subscribeToEvents(session: session)
+        usageTracker.resetSession()
         chatState = .idle
     }
 
@@ -149,8 +174,10 @@ public final class ChatViewModel: ObservableObject {
     private func connectAgent(config: inout AgentConfig) async throws {
         guard let client else { return }
 
-        // Inject manage_todo_list tool
+        // Inject manage_todo_list and get_attachment tools
         config.tools.append(makeTodoTool())
+        config.tools.append(makeGetAttachmentTool())
+        config.tools.append(makeCreatePlanTool())
 
         // Wrap onResponse to update UI
         let originalOnResponse = config.onResponse
@@ -262,6 +289,66 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
         }
+
+        // Usage tracking — record token consumption and cost
+        await session.on(.assistantUsage) { [weak self] event in
+            guard let self else { return }
+            if case .object(let data) = event.data {
+                let model = data["model"]?.stringValue ?? "unknown"
+                // CLI uses inputTokens/outputTokens (camelCase)
+                let promptTokens = data["inputTokens"]?.intValue ?? data["prompt_tokens"]?.intValue ?? 0
+                let completionTokens = data["outputTokens"]?.intValue ?? data["completion_tokens"]?.intValue ?? 0
+                let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
+                Task { @MainActor in
+                    self.usageTracker.record(
+                        model: model,
+                        promptTokens: promptTokens,
+                        completionTokens: completionTokens,
+                        inputMultiplier: inMult,
+                        outputMultiplier: outMult
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Run Plan
+
+    /// Execute a plan by sending its prompt through the chat pipeline.
+    /// Logs execution start/completion in the PlanStore.
+    public func runPlan(_ plan: Plan) async {
+        var execution = PlanExecution(planId: plan.id)
+        planStore.addExecution(execution)
+
+        // Inject a system-like message indicating plan execution
+        let header = ChatMessage(
+            role: .user,
+            content: [.text("[Plan: \(plan.name)]\n\(plan.prompt)")]
+        )
+        messages.append(header)
+        let messageCountBefore = messages.count
+
+        // Use normal send flow
+        chatState = .working
+        await sendPrompt(plan.prompt)
+
+        // Wait briefly for the agent to process and produce output
+        try? await Task.sleep(for: .seconds(1))
+
+        // Capture assistant response — gather all assistant messages added after our header
+        let newMessages = messages.suffix(from: messageCountBefore)
+        let resultText = newMessages
+            .filter { $0.role == .assistant }
+            .map { $0.fullText }
+            .joined(separator: "\n\n")
+
+        // Mark execution completed
+        execution.complete(
+            result: resultText.isEmpty ? "Completed (no output)" : resultText,
+            tokensUsed: nil,
+            cost: nil
+        )
+        planStore.addExecution(execution)
     }
 
     // MARK: - Send Message
@@ -275,30 +362,44 @@ public final class ChatViewModel: ObservableObject {
         guard !text.isEmpty else { return }
         inputText = ""
 
-        // Add user message to the chat
+        // Prepend attachment context if files are attached
+        let attachmentDesc = attachmentStore.promptDescription()
+        let promptText: String
+        if let desc = attachmentDesc {
+            promptText = "\(desc)\n\n\(text)"
+        } else {
+            promptText = text
+        }
+
+        // Add user message to the chat (show original text, not the injection)
         let userMessage = ChatMessage(
             role: .user,
             content: [.text(text)]
         )
         messages.append(userMessage)
 
+        // Clear attachments after sending
+        if attachmentDesc != nil {
+            attachmentStore.clear()
+        }
+
         switch chatState {
         case .waitingForUser:
             // Resume ask_user continuation
-            askUserContinuation?.resume(returning: text)
+            askUserContinuation?.resume(returning: promptText)
             askUserContinuation = nil
             chatState = .working
 
         case .waitingForQuestions(let questions):
             guard let first = questions.first else { return }
             submitAskQuestions([
-                first.header: AskQuestionAnswer(selected: [], freeText: text, skipped: false)
+                first.header: AskQuestionAnswer(selected: [], freeText: promptText, skipped: false)
             ])
 
         case .working:
             // Steer — inject immediate message
             do {
-                try await session?.steer(prompt: text)
+                try await session?.steer(prompt: promptText)
             } catch {
                 appendSystemMessage("Steer failed: \(error.localizedDescription)")
             }
@@ -306,7 +407,7 @@ public final class ChatViewModel: ObservableObject {
         case .idle:
             // Normal prompt
             chatState = .working
-            await sendPrompt(text)
+            await sendPrompt(promptText)
 
         default:
             break
@@ -337,10 +438,18 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Private Send Helpers
 
     private func sendPrompt(_ text: String) async {
+        // Inject project context if a project is scoped
+        let effectiveText: String
+        if let project = projectScope {
+            effectiveText = "[Project: \(project)] \(text)"
+        } else {
+            effectiveText = text
+        }
+
         switch mode {
         case .session:
             do {
-                try await session?.send(prompt: text)
+                try await session?.send(prompt: effectiveText)
             } catch {
                 appendSystemMessage("Send failed: \(error.localizedDescription)")
                 chatState = .idle
@@ -351,7 +460,7 @@ public final class ChatViewModel: ObservableObject {
                 // Start agent loop with the initial prompt
                 agentTask = Task {
                     do {
-                        try await agent.start(prompt: text)
+                        try await agent.start(prompt: effectiveText)
                     } catch {
                         await MainActor.run {
                             self.appendSystemMessage("Agent error: \(error.localizedDescription)")
@@ -362,7 +471,7 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 // Agent is already running — this is a follow-up / steer
                 do {
-                    try await session?.steer(prompt: text)
+                    try await session?.steer(prompt: effectiveText)
                 } catch {
                     appendSystemMessage("Steer failed: \(error.localizedDescription)")
                 }
@@ -375,6 +484,18 @@ public final class ChatViewModel: ObservableObject {
     private func handleAgentResponse(_ message: String) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Deduplicate: if the last assistant message already has this content
+        // (delivered via streaming), don't add it again.
+        if let lastIndex = messages.indices.last,
+           messages[lastIndex].role == .assistant {
+            let existing = messages[lastIndex].fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if existing == trimmed {
+                messages[lastIndex].isStreaming = false
+                return
+            }
+        }
+
         // send_response delivers a final response — add as assistant message
         let blocks = parseContentBlocks(trimmed)
         let msg = ChatMessage(role: .assistant, content: blocks)
@@ -548,6 +669,14 @@ public final class ChatViewModel: ObservableObject {
             }
         } else {
             guard !trimmed.isEmpty else { return }
+
+            // Deduplicate: if last assistant message has same content, skip
+            if let lastIndex = messages.indices.last,
+               messages[lastIndex].role == .assistant,
+               messages[lastIndex].fullText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed {
+                return
+            }
+
             let blocks = parseContentBlocks(trimmed)
             messages.append(ChatMessage(role: .assistant, content: blocks))
         }
@@ -618,6 +747,143 @@ public final class ChatViewModel: ObservableObject {
             newTodos.append(TodoItem(id: id, title: title, status: status))
         }
         todoItems = newTodos
+    }
+
+    // MARK: - Create Plan Tool
+
+    /// Build the `create_plan` tool definition.
+    /// Allows the agent to create a plan from chat.
+    private func makeCreatePlanTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "create_plan",
+            description: "Create a scheduled plan. Plans can run prompts on a schedule or manually.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object([
+                        "type": .string("string"),
+                        "description": .string("Short name for the plan"),
+                    ]),
+                    "prompt": .object([
+                        "type": .string("string"),
+                        "description": .string("The prompt/instructions to execute when the plan runs"),
+                    ]),
+                    "schedule": .object([
+                        "type": .string("string"),
+                        "description": .string("Schedule type: 'manual', 'daily', 'hourly', or interval in minutes like '30m'"),
+                    ]),
+                    "model": .object([
+                        "type": .string("string"),
+                        "description": .string("Model to use. Default: gpt-4.1"),
+                    ]),
+                ]),
+                "required": .array([.string("name"), .string("prompt")]),
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "Error: view model deallocated" }
+                return await self.handleCreatePlan(args)
+            }
+        )
+    }
+
+    /// Handle `create_plan` tool call.
+    private func handleCreatePlan(_ args: JSONValue) -> String {
+        guard case .object(let dict) = args,
+              case .string(let name) = dict["name"],
+              case .string(let prompt) = dict["prompt"] else {
+            return "Error: missing required 'name' and 'prompt' parameters"
+        }
+
+        let model: String
+        if case .string(let m) = dict["model"] {
+            model = m
+        } else {
+            model = "gpt-4.1"
+        }
+
+        let schedule: PlanSchedule
+        if case .string(let s) = dict["schedule"] {
+            switch s.lowercased() {
+            case "daily":
+                schedule = .interval(seconds: 86400)
+            case "hourly":
+                schedule = .interval(seconds: 3600)
+            case "manual", "":
+                schedule = .manual
+            default:
+                // Parse "30m", "2h", etc.
+                if s.hasSuffix("m"), let mins = Int(s.dropLast()) {
+                    schedule = .interval(seconds: mins * 60)
+                } else if s.hasSuffix("h"), let hrs = Int(s.dropLast()) {
+                    schedule = .interval(seconds: hrs * 3600)
+                } else {
+                    schedule = .manual
+                }
+            }
+        } else {
+            schedule = .manual
+        }
+
+        let plan = Plan(
+            name: name,
+            prompt: prompt,
+            schedule: schedule,
+            model: model
+        )
+        planStore.createPlan(plan)
+
+        let scheduleDesc: String
+        switch schedule {
+        case .manual: scheduleDesc = "manual"
+        case .interval(let s): scheduleDesc = "every \(s / 60) minutes"
+        case .once(let d): scheduleDesc = "once at \(d)"
+        case .cron(let e, _): scheduleDesc = "cron: \(e)"
+        }
+
+        return "Plan '\(name)' created (\(scheduleDesc), model: \(model)). ID: \(plan.id)"
+    }
+
+    // MARK: - Get Attachment Tool
+
+    /// Build the `get_attachment` tool definition.
+    /// The model calls this to lazily load file contents that were listed in the prompt.
+    private func makeGetAttachmentTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "get_attachment",
+            description: "Load the contents of an attached file by name. Returns text content directly, or base64-encoded data for binary files.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object([
+                        "type": .string("string"),
+                        "description": .string("The exact file name from the attached files list"),
+                    ]),
+                ]),
+                "required": .array([.string("name")]),
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "Error: view model deallocated" }
+                return await self.handleGetAttachment(args)
+            }
+        )
+    }
+
+    /// Handle `get_attachment` tool call — load file data from the store.
+    /// Uses smart loading: auto-resizes images, extracts PDF text, returns video metadata.
+    private func handleGetAttachment(_ args: JSONValue) -> String {
+        guard case .object(let dict) = args,
+              case .string(let name) = dict["name"] else {
+            return "Error: missing 'name' parameter"
+        }
+
+        do {
+            let result = try attachmentStore.loadSmart(name: name)
+            return result.modelDescription
+        } catch {
+            return "Error: \(error)"
+        }
     }
 }
 

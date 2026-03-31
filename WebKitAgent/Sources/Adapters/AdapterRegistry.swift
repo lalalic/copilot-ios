@@ -207,6 +207,8 @@ public final class AdapterRegistry {
         description: Check WeChat Web login status
         auth: none
         requiresBrowser: true
+        preNavigate: https://wx.qq.com
+        waitSeconds: 3
         script: |
           (() => {
             if (typeof angular === 'undefined' || !angular.element) {
@@ -251,7 +253,8 @@ public final class AdapterRegistry {
               if (!injector) return JSON.stringify([{error: "Angular not ready"}]);
               const contactFactory = injector.get('contactFactory');
               const contacts = contactFactory.getAllFriendContact();
-              return JSON.stringify(contacts.slice(0, 50).map((c, i) => ({
+              const limit = parseInt(__adapterArgs.limit) || 50;
+              return JSON.stringify(contacts.slice(0, limit).map((c, i) => ({
                 rank: i + 1,
                 name: c.NickName || c.RemarkName || 'Unknown',
                 remark: c.RemarkName || '',
@@ -275,22 +278,40 @@ public final class AdapterRegistry {
         args:
           to:
             type: string
-            description: Recipient UserName
+            description: Recipient name or UserName
           message:
             type: string
             description: Message text to send
         script: |
           (() => {
             if (typeof angular === 'undefined') {
-              return JSON.stringify([{error: "Not logged in"}]);
+              return JSON.stringify([{error: "Not logged in. Use wechat/login first."}]);
+            }
+            const to = __adapterArgs.to;
+            const message = __adapterArgs.message;
+            if (!to || !message) {
+              return JSON.stringify([{error: "Both 'to' and 'message' parameters are required."}]);
             }
             try {
               const injector = angular.element(document).injector();
+              const contactFactory = injector.get('contactFactory');
               const chatFactory = injector.get('chatFactory');
-              const confFactory = injector.get('confFactory');
-              // Note: to and message are injected by the adapter args system
-              // This script runs in the browser context and needs the args passed in
-              return JSON.stringify([{status: "ready", message: "Use evaluate command to send: chatFactory.sendMessage(...)"}]);
+              // Find contact by NickName or RemarkName or UserName
+              const allContacts = contactFactory.getAllFriendContact();
+              const contact = allContacts.find(c =>
+                c.NickName === to || c.RemarkName === to || c.UserName === to
+              );
+              if (!contact) {
+                return JSON.stringify([{error: "Contact not found: " + to}]);
+              }
+              // Send message via AngularJS chatFactory
+              chatFactory.sendMessage(contact.UserName, message);
+              return JSON.stringify([{
+                status: "sent",
+                to: contact.NickName || contact.RemarkName,
+                userName: contact.UserName,
+                message: message
+              }]);
             } catch (e) {
               return JSON.stringify([{error: e.message}]);
             }

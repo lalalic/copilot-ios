@@ -7,12 +7,20 @@ import XCTest
 /// Integration tests for the CopilotAgent pattern via a remote relay server.
 /// Tests the full agent loop: connect → send_response/ask_user tools → loop control.
 /// Requires: relay server running (either remote at relay.ai.qili2.com:443 or local at localhost:8765).
+///
+/// To skip: set SKIP_INTEGRATION_TESTS=1
 final class RemoteAgentIntegrationTests: XCTestCase {
+
+    /// Default timeout for LLM responses (seconds).
+    private static let defaultTimeout: TimeInterval = 30
 
     var client: CopilotClient!
 
     /// Use remote relay by default; set RELAY_HOST/RELAY_PORT env vars to override.
     override func setUp() async throws {
+        if ProcessInfo.processInfo.environment["SKIP_INTEGRATION_TESTS"] != nil {
+            throw XCTSkip("Integration tests skipped (SKIP_INTEGRATION_TESTS is set)")
+        }
         try await super.setUp()
         let host = ProcessInfo.processInfo.environment["RELAY_HOST"] ?? "relay.ai.qili2.com"
         let port = UInt16(ProcessInfo.processInfo.environment["RELAY_PORT"] ?? "443") ?? 443
@@ -291,7 +299,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 
         let directReply = try await session.sendAndWait(
             prompt: "Say 'MANUAL_TEST_OK' using send_response tool.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
 
         // With relay agent loop, directReply is often empty — response comes via tool
@@ -524,6 +532,9 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 /// Requires: Copilot CLI installed and authenticated.
 final class LocalAgentIntegrationTests: XCTestCase {
 
+    /// Default timeout for LLM responses (seconds).
+    private static let defaultTimeout: TimeInterval = 30
+
     var client: CopilotClient!
 
     /// Find the Copilot CLI executable path.
@@ -564,6 +575,9 @@ final class LocalAgentIntegrationTests: XCTestCase {
     }
 
     override func setUp() async throws {
+        if ProcessInfo.processInfo.environment["SKIP_INTEGRATION_TESTS"] != nil {
+            throw XCTSkip("Integration tests skipped (SKIP_INTEGRATION_TESTS is set)")
+        }
         try await super.setUp()
 
         guard let cliPath = Self.findCopilotCLI() else {
@@ -610,7 +624,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
         let session = try await client.createSession(config: SessionConfig(model: "gpt-4.1"))
         let response = try await session.sendAndWait(
             prompt: "Reply with exactly the word 'LOCAL_OK' and nothing else.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
 
         XCTAssertNotNil(response, "Local CLI should return a response")
@@ -804,7 +818,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
             Task { await collector.add(event.type) }
         }
 
-        _ = try await session.sendAndWait(prompt: "Say 'event test'.", timeout: 120)
+        _ = try await session.sendAndWait(prompt: "Say 'event test'.", timeout: Self.defaultTimeout)
 
         try await Task.sleep(for: .seconds(1))
         let types = await collector.types
@@ -839,7 +853,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
 
         let response = try await session.sendAndWait(
             prompt: "Call the get_magic_number tool and tell me the result.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
 
         let calls = await handlerCalled.count

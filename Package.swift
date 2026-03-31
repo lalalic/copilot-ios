@@ -14,12 +14,17 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/yangliu-1995/ffmpeg-kit-spm.git", exact: "6.0.0"),
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.18"),
     ],
     targets: [
         // MARK: - CopilotSDK (leaf, no dependencies)
         .target(
             name: "CopilotSDK",
-            path: "CopilotSDK/Sources"
+            dependencies: [
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ],
+            path: "CopilotSDK/Sources",
+            resources: [.copy("Resources")]
         ),
         .testTarget(
             name: "CopilotSDKTests",

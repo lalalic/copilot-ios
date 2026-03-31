@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, list_files.
+    /// All file tools: read_file, write_file, list_files, create_new_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, listFilesTool]
+        [readFileTool, writeFileTool, listFilesTool, createNewProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -179,6 +179,100 @@ public final class FileToolProvider: Sendable {
                 return names.joined(separator: "\n")
             } catch {
                 return "Error listing \(path.isEmpty ? "/" : path): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - create_new_project
+
+    private var createNewProjectTool: ToolDefinition {
+        ToolDefinition(
+            name: "create_new_project",
+            description: "Create a new project directory under workspace root using .neo/templates/project as scaffold. The tool creates project folders and copies template files when present.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object([
+                        "type": .string("string"),
+                        "description": .string("Project folder name, e.g. 'ProjectA' or 'video-campaign'.")
+                    ])
+                ]),
+                "required": .array([.string("name")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: FileToolProvider not available" }
+            guard case .object(let dict) = args,
+                  case .string(let rawName) = dict["name"] else {
+                return "Error: 'name' (string) required"
+            }
+
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                return "Error: project name cannot be empty"
+            }
+            guard !name.contains("/"), !name.contains("..") else {
+                return "Error: invalid project name '\(rawName)'"
+            }
+
+            let projectURL = self.baseDirectory.appendingPathComponent(name, isDirectory: true)
+            guard projectURL.path.hasPrefix(self.baseDirectory.path) else {
+                return "Error: invalid project path"
+            }
+
+            if FileManager.default.fileExists(atPath: projectURL.path) {
+                return "Error: project already exists: \(name)"
+            }
+
+            do {
+                try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+
+                let templateURL = self.baseDirectory
+                    .appendingPathComponent(".neo", isDirectory: true)
+                    .appendingPathComponent("templates", isDirectory: true)
+                    .appendingPathComponent("project", isDirectory: true)
+
+                if FileManager.default.fileExists(atPath: templateURL.path) {
+                    try self.copyTemplateProject(from: templateURL, to: projectURL)
+                } else {
+                    try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("docs", isDirectory: true), withIntermediateDirectories: true)
+                    try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("progress", isDirectory: true), withIntermediateDirectories: true)
+                    let readme = "# \(name)\n\n## Goal\n\n## Features\n\n## Phase\n"
+                    try readme.write(to: projectURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+                }
+
+                logger.info("create_new_project: \(name)")
+                return "Created project '\(name)'"
+            } catch {
+                return "Error creating project \(name): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func copyTemplateProject(from templateURL: URL, to projectURL: URL) throws {
+        let manager = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey]
+
+        let enumerator = manager.enumerator(
+            at: templateURL,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]
+        )
+
+        while let item = enumerator?.nextObject() as? URL {
+            let relativePath = item.path.replacingOccurrences(of: templateURL.path + "/", with: "")
+            if relativePath.isEmpty { continue }
+
+            let destination = projectURL.appendingPathComponent(relativePath)
+            let values = try item.resourceValues(forKeys: Set(keys))
+            if values.isDirectory == true {
+                try manager.createDirectory(at: destination, withIntermediateDirectories: true)
+            } else {
+                try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if manager.fileExists(atPath: destination.path) {
+                    try manager.removeItem(at: destination)
+                }
+                try manager.copyItem(at: item, to: destination)
             }
         }
     }

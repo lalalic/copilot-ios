@@ -249,7 +249,12 @@ public final class WebAgentToolProvider {
 
         // Execute script if present
         if let script = adapter.script {
-            let resultJSON = try await manager.evaluateJSPublic(script)
+            // Inject adapter args as JavaScript variables
+            let argsJSON = try JSONSerialization.data(withJSONObject: args)
+            let argsStr = String(data: argsJSON, encoding: .utf8) ?? "{}"
+            let wrappedScript = "const __adapterArgs = \(argsStr);\n\(script)"
+
+            let resultJSON = try await manager.evaluateJSPublic(wrappedScript)
             // Try to parse as JSON array for formatting
             if let data = resultJSON.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {

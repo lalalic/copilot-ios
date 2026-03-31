@@ -245,12 +245,18 @@ public final class PipelineEngine {
             return "No results."
         }
 
+        // Priority ordering for common fields
+        let priorityKeys = ["rank", "title", "name", "url", "score", "author", "status", "message", "error"]
+
         var lines: [String] = []
         for (i, item) in data.enumerated() {
             if let dict = item as? [String: Any] {
-                let pairs = dict.sorted(by: { $0.key < $1.key })
-                    .map { "\($0.key): \($0.value)" }
-                    .joined(separator: " | ")
+                let keys = dict.keys.sorted { a, b in
+                    let ai = priorityKeys.firstIndex(of: a) ?? priorityKeys.count
+                    let bi = priorityKeys.firstIndex(of: b) ?? priorityKeys.count
+                    return ai == bi ? a < b : ai < bi
+                }
+                let pairs = keys.map { "\($0): \(dict[$0]!)" }.joined(separator: " | ")
                 lines.append("\(i + 1). \(pairs)")
             } else {
                 lines.append("\(i + 1). \(item)")

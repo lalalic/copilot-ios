@@ -82,6 +82,41 @@ public enum JSONValue: Codable, Equatable, Sendable {
         case .object(let obj): try container.encode(obj)
         }
     }
+    
+    // MARK: - Convenience Accessors
+    
+    /// Extract the string value, or nil if not a string.
+    public var stringValue: String? {
+        if case .string(let s) = self { return s }
+        return nil
+    }
+    
+    /// Extract the int value, or nil if not an int.
+    public var intValue: Int? {
+        if case .int(let i) = self { return i }
+        return nil
+    }
+    
+    /// Extract a double value. Works for both .double and .int cases.
+    public var doubleValue: Double? {
+        switch self {
+        case .double(let d): return d
+        case .int(let i): return Double(i)
+        default: return nil
+        }
+    }
+    
+    /// Extract the bool value, or nil if not a bool.
+    public var boolValue: Bool? {
+        if case .bool(let b) = self { return b }
+        return nil
+    }
+    
+    /// Subscript for object key access.
+    public subscript(key: String) -> JSONValue? {
+        if case .object(let dict) = self { return dict[key] }
+        return nil
+    }
 }
 
 // MARK: - JSON-RPC Request (outbound)

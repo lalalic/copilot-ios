@@ -40,7 +40,7 @@ public struct AppElement: Sendable {
         if let value, !value.isEmpty { desc += " value=\"\(value)\"" }
         // Show frame position for hit-test discovered elements
         let x = Int(frame.origin.x), y = Int(frame.origin.y)
-        let w = Int(frame.width), h = Int(frame.height)
+        let w = Int(frame.size.width), h = Int(frame.size.height)
         desc += " (\(x),\(y) \(w)x\(h))"
         return desc
     }

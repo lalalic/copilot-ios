@@ -5,11 +5,27 @@ import XCTest
 /// Integration tests against the real Copilot CLI via relay server on ws://localhost:8765.
 /// The relay server bridges WebSocket ↔ Copilot CLI stdio.
 /// Requires: relay-server.js running (`node relay-server.js`)
+///
+/// To skip these tests (for fast CI runs), set:
+///   SKIP_INTEGRATION_TESTS=1
+///
+/// To run only these tests:
+///   swift test --filter CopilotIntegrationTests
 final class CopilotIntegrationTests: XCTestCase {
+    
+    /// Default timeout for LLM responses (seconds). Reduced from 120 to 30
+    /// to prevent long waits when the relay or LLM is unresponsive.
+    private static let defaultTimeout: TimeInterval = 30
+    /// Slightly longer timeout for fulfillment expectations.
+    private static let fulfillmentTimeout: TimeInterval = 35
     
     var client: CopilotClient!
     
     override func setUp() async throws {
+        // Skip all integration tests if env var is set
+        if ProcessInfo.processInfo.environment["SKIP_INTEGRATION_TESTS"] != nil {
+            throw XCTSkip("Integration tests skipped (SKIP_INTEGRATION_TESTS is set)")
+        }
         try await super.setUp()
         let transport = WebSocketTransport(host: "localhost", port: 8765)
         client = CopilotClient(transport: transport)
@@ -43,7 +59,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Reply with exactly the word 'PONG' and nothing else.",
-            timeout: 60
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertNotNil(response)
@@ -61,7 +77,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "What model are you? Reply with ONLY your model name, nothing else.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertNotNil(response, "Expected a response from gpt-4.1")
@@ -79,7 +95,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "What model are you? Reply with ONLY your model name, nothing else.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertNotNil(response, "Expected a response from gpt-4o")
@@ -95,7 +111,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let resp1 = try await session.sendAndWait(
             prompt: "Reply with exactly: MODEL_A",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         XCTAssertTrue(resp1?.contains("MODEL_A") == true, "Expected MODEL_A, got: \(resp1 ?? "nil")")
         
@@ -104,7 +120,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let resp2 = try await session.sendAndWait(
             prompt: "Reply with exactly: MODEL_B",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         XCTAssertTrue(resp2?.contains("MODEL_B") == true, "Expected MODEL_B after model switch, got: \(resp2 ?? "nil")")
     }
@@ -123,7 +139,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Say hello.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertNotNil(response)
@@ -147,7 +163,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Say 'hello world'.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         // Small delay to let all events arrive
@@ -177,7 +193,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Say 'hello world'.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         try await Task.sleep(for: .seconds(1))
@@ -210,10 +226,10 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Say hello.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
-        await fulfillment(of: [expectation], timeout: 130)
+        await fulfillment(of: [expectation], timeout: Self.fulfillmentTimeout)
         
         let types = await collector.types
         XCTAssertTrue(types.contains(.assistantMessage), "Should receive assistant.message event")
@@ -234,10 +250,10 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Say OK.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
-        await fulfillment(of: [expectation], timeout: 130)
+        await fulfillment(of: [expectation], timeout: Self.fulfillmentTimeout)
     }
     
     // MARK: - Steer (Immediate Mode)
@@ -249,10 +265,10 @@ final class CopilotIntegrationTests: XCTestCase {
         let session = try await client.createSession(config: SessionConfig(model: "gpt-4.1"))
         
         // Start a long task
-        let sendTask = Task {
+        let sendTask = Task { @Sendable in
             try await session.sendAndWait(
                 prompt: "Write a detailed essay about quantum physics. Make it at least 500 words.",
-                timeout: 120
+                timeout: Self.defaultTimeout
             )
         }
         
@@ -279,7 +295,7 @@ final class CopilotIntegrationTests: XCTestCase {
         let response = try await session.sendAndWait(
             prompt: "Reply with exactly: ENQUEUE_OK",
             mode: .enqueue,
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertTrue(response?.contains("ENQUEUE_OK") == true, "Enqueue mode should work, got: \(response ?? "nil")")
@@ -314,7 +330,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "What is the secret number? You MUST use the get_secret_number tool to find out. Call the tool now.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let wasCalled = await handlerCalled.called
@@ -332,7 +348,7 @@ final class CopilotIntegrationTests: XCTestCase {
         try await skipIfNoRelay()
         
         let session = try await client.createSession(config: SessionConfig(model: "gpt-4.1"))
-        let _ = try await session.sendAndWait(prompt: "Remember: the secret word is BANANA.", timeout: 120)
+        let _ = try await session.sendAndWait(prompt: "Remember: the secret word is BANANA.", timeout: Self.defaultTimeout)
         
         let result = try await client.listSessions()
         
@@ -360,7 +376,7 @@ final class CopilotIntegrationTests: XCTestCase {
         let session = try await client.createSession(config: SessionConfig(model: "gpt-4.1"))
         let sessionId = session.sessionId
         
-        let _ = try await session.sendAndWait(prompt: "Hello", timeout: 120)
+        let _ = try await session.sendAndWait(prompt: "Hello", timeout: Self.defaultTimeout)
         
         // Destroy the session
         try await session.destroy()
@@ -384,7 +400,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Remember this: SECRET_WORD_XYZ",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         // Verify session was created
@@ -403,10 +419,10 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let session = try await client.createSession(config: SessionConfig(model: "gpt-4.1"))
         
-        let sendTask = Task {
+        let sendTask = Task { @Sendable in
             try await session.sendAndWait(
                 prompt: "Write a 1000 word essay about the history of computing.",
-                timeout: 120
+                timeout: Self.defaultTimeout
             )
         }
         
@@ -432,7 +448,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Reply with exactly: WORKDIR_OK",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertTrue(response?.contains("WORKDIR_OK") == true, "Should work with workingDirectory set, got: \(response ?? "nil")")
@@ -454,7 +470,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let _ = try await session.sendAndWait(
             prompt: "Say 'hi'.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         try await Task.sleep(for: .seconds(1))
@@ -475,7 +491,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Say hello.", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Say hello.", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response)
         print("Append mode response: \(response ?? "nil")")
@@ -496,7 +512,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Tell me about winter.", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Tell me about winter.", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response)
         print("Customize mode response: \(response ?? "nil")")
@@ -512,7 +528,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Are you ready?", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Are you ready?", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response)
         XCTAssertTrue(response?.contains("LOOP_READY") == true,
@@ -550,7 +566,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Use the simple_tool now.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let called = await hookCalled.called
@@ -597,7 +613,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "What is 17 + 25? You MUST use the add_numbers tool with a=17 and b=25.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let args = await receivedArgs.args
@@ -641,7 +657,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Use the get_fact tool to get facts about both 'dogs' and 'cats'. Call the tool twice.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let count = await callCount.count
@@ -668,7 +684,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Say 'skills ok'.", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Say 'skills ok'.", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response, "Session with skillDirectories should work")
         print("Skills test response: \(response ?? "nil")")
@@ -684,7 +700,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Say 'disabled ok'.", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Say 'disabled ok'.", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response, "Session with disabledSkills should work")
         print("DisabledSkills test response: \(response ?? "nil")")
@@ -702,7 +718,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        let response = try await session.sendAndWait(prompt: "Say 'infinite ok'.", timeout: 120)
+        let response = try await session.sendAndWait(prompt: "Say 'infinite ok'.", timeout: Self.defaultTimeout)
         
         XCTAssertNotNil(response, "Session with infiniteSessions should work")
         print("InfiniteSessions test response: \(response ?? "nil")")
@@ -788,7 +804,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Call the test_perm_tool now.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let kinds = await permissionTracker.kinds
@@ -823,7 +839,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Call the denied_tool now.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let wasCalled = await toolTracker.called
@@ -852,7 +868,7 @@ final class CopilotIntegrationTests: XCTestCase {
         
         let response = try await session.sendAndWait(
             prompt: "Ask the user what their favorite city is using the ask_user tool, then tell me their answer.",
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         let questions = await inputTracker.questions
@@ -871,7 +887,7 @@ final class CopilotIntegrationTests: XCTestCase {
         let config = SessionConfig(model: "gpt-4.1")
         let session = try await client.createSession(config: config)
         
-        _ = try await session.sendAndWait(prompt: "Say 'history test'.", timeout: 120)
+        _ = try await session.sendAndWait(prompt: "Say 'history test'.", timeout: Self.defaultTimeout)
         
         // Slight delay to ensure events are stored
         try await Task.sleep(for: .seconds(1))
@@ -906,7 +922,7 @@ final class CopilotIntegrationTests: XCTestCase {
                 "path": .string(tmpFile.path),
                 "displayName": .string("test.txt"),
             ])],
-            timeout: 120
+            timeout: Self.defaultTimeout
         )
         
         XCTAssertNotNil(response)
@@ -963,7 +979,7 @@ final class CopilotIntegrationTests: XCTestCase {
         )
         let session = try await client.createSession(config: config)
         
-        _ = try await session.sendAndWait(prompt: "Say 'event test'.", timeout: 120)
+        _ = try await session.sendAndWait(prompt: "Say 'event test'.", timeout: Self.defaultTimeout)
         
         try await Task.sleep(for: .seconds(1))
         let types = await earlyEvents.types

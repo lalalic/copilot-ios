@@ -1590,7 +1590,7 @@ private actor LoopControl {
         for c in continuations { c.resume() }
     }
 
-    func waitForIdle() async {
+    public func waitForIdle() async {
         if state == .idle { return }
         await withCheckedContinuation { continuation in
             idleContinuations.append(continuation)

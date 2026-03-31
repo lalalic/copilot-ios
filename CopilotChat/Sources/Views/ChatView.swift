@@ -70,11 +70,20 @@ public struct ChatView: View {
                 .fill(platformGray5)
                 .frame(height: 1)
 
+            // Attachment chips (if any files are staged)
+            if !viewModel.attachmentStore.entries.isEmpty {
+                AttachmentChipBar(store: viewModel.attachmentStore)
+            }
+
             // Input bar
             InputBar(
                 viewModel: viewModel,
                 inputModes: inputModes,
-                onSend: { await viewModel.send() }
+                onSend: { await viewModel.send() },
+                onAttachment: { url in
+                    viewModel.attachmentStore.add(url: url)
+                    viewModel.objectWillChange.send()
+                }
             )
         }
         .task {

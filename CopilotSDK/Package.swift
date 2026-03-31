@@ -7,10 +7,17 @@ let package = Package(
     products: [
         .library(name: "CopilotSDK", targets: ["CopilotSDK"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.18"),
+    ],
     targets: [
         .target(
             name: "CopilotSDK",
-            path: "Sources"
+            dependencies: [
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ],
+            path: "Sources",
+            resources: [.copy("Resources")]
         ),
         .testTarget(
             name: "CopilotSDKTests",

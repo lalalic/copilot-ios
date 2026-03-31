@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UniformTypeIdentifiers
+#endif
 
 // MARK: - Input Bar
 
@@ -8,7 +11,8 @@ public struct InputBar: View {
 
     @ObservedObject var viewModel: ChatViewModel
     @StateObject private var speechService = SpeechService()
-    @State private var showAttachmentPicker = false
+    @State private var showPhotoPicker = false
+    @State private var showFilePicker = false
     @FocusState private var isTextFieldFocused: Bool
 
     private let inputModes: InputMode
@@ -53,19 +57,44 @@ public struct InputBar: View {
                 speechService.requestAuthorization()
             }
         }
-        .sheet(isPresented: $showAttachmentPicker) {
-            AttachmentPicker { url in
+        #if canImport(UIKit)
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPickerSheet { url in
                 onAttachment?(url)
-                showAttachmentPicker = false
+                showPhotoPicker = false
             }
         }
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: temp)
+                try? FileManager.default.copyItem(at: url, to: temp)
+                onAttachment?(temp)
+            }
+        }
+        #endif
     }
 
     // MARK: - Subviews
 
     private var attachmentButton: some View {
-        Button {
-            showAttachmentPicker = true
+        Menu {
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Label("Photo Library", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                showFilePicker = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20))
@@ -249,3 +278,54 @@ private struct PulseAnimation: ViewModifier {
             .onAppear { isPulsing = true }
     }
 }
+
+// MARK: - Photo Picker Sheet
+
+#if canImport(UIKit)
+import PhotosUI
+
+/// Wrapper around PHPickerViewController for selecting photos.
+private struct PhotoPickerSheet: UIViewControllerRepresentable {
+    let onSelect: (URL) -> Void
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.selectionLimit = 1
+        config.filter = .images
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelect: onSelect)
+    }
+
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let onSelect: (URL) -> Void
+
+        init(onSelect: @escaping (URL) -> Void) {
+            self.onSelect = onSelect
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard let provider = results.first?.itemProvider,
+                  provider.canLoadObject(ofClass: UIImage.self) else { return }
+
+            provider.loadFileRepresentation(forTypeIdentifier: "public.image") { [weak self] url, _ in
+                if let url {
+                    let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                    try? FileManager.default.removeItem(at: temp)
+                    try? FileManager.default.copyItem(at: url, to: temp)
+                    DispatchQueue.main.async {
+                        self?.onSelect(temp)
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
