@@ -872,14 +872,14 @@ public final class ChatViewModel: ObservableObject {
 
     /// Handle `get_attachment` tool call — load file data from the store.
     /// Uses smart loading: auto-resizes images, extracts PDF text, returns video metadata.
-    private func handleGetAttachment(_ args: JSONValue) -> String {
+    private func handleGetAttachment(_ args: JSONValue) async -> String {
         guard case .object(let dict) = args,
               case .string(let name) = dict["name"] else {
             return "Error: missing 'name' parameter"
         }
 
         do {
-            let result = try attachmentStore.loadSmart(name: name)
+            let result = try await attachmentStore.loadSmart(name: name)
             return result.modelDescription
         } catch {
             return "Error: \(error)"

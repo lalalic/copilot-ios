@@ -115,7 +115,9 @@ private struct PhotoPickerView: UIViewControllerRepresentable {
                                 let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                                 try? FileManager.default.removeItem(at: temp)
                                 try? FileManager.default.copyItem(at: url, to: temp)
-                                self?.onSelect(temp)
+                                Task { @MainActor [weak self] in
+                                    self?.onSelect(temp)
+                                }
                             }
                         }
                         break

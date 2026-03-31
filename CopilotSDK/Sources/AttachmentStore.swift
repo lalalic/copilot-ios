@@ -48,7 +48,7 @@ public struct AttachmentEntry: Identifiable, Sendable {
 /// Per-session, in-memory registry of attached files.
 /// Files are registered eagerly (metadata only) but data is loaded lazily
 /// via `loadData(name:)` — typically called by the `get_attachment` tool.
-public final class AttachmentStore {
+public final class AttachmentStore: @unchecked Sendable {
     
     /// All current attachment entries.
     public private(set) var entries: [AttachmentEntry] = []
@@ -225,7 +225,7 @@ public final class AttachmentStore {
     /// - Videos: metadata returned (duration, resolution)
     /// - Text files: returned as-is
     /// - Other: raw base64
-    public func loadSmart(name: String, maxImageDimension: Int = 1024) throws -> SmartAttachmentResult {
+    public func loadSmart(name: String, maxImageDimension: Int = 1024) async throws -> SmartAttachmentResult {
         guard let entry = entries.first(where: { $0.displayName == name }) else {
             throw AttachmentError.notFound(name)
         }
@@ -244,7 +244,7 @@ public final class AttachmentStore {
         
         // Video: return metadata
         if mime.hasPrefix("video/") {
-            return loadSmartVideo(entry: entry)
+            return try await loadSmartVideo(entry: entry)
         }
         
         // Text: return content directly
@@ -329,45 +329,74 @@ public final class AttachmentStore {
     
     // MARK: - Smart Video
     
-    private func loadSmartVideo(entry: AttachmentEntry) -> SmartAttachmentResult {
+    private func loadSmartVideo(entry: AttachmentEntry) async throws -> SmartAttachmentResult {
         #if canImport(AVFoundation)
         let asset = AVURLAsset(url: entry.fileURL)
-        let duration = CMTimeGetSeconds(asset.duration)
         
+        let durationTime = try await asset.load(.duration)
+        let duration = CMTimeGetSeconds(durationTime)
+        
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
         var width = 0
         var height = 0
-        if let track = asset.tracks(withMediaType: .video).first {
-            let size = track.naturalSize.applying(track.preferredTransform)
-            width = Int(abs(size.width))
-            height = Int(abs(size.height))
+        if let track = videoTracks.first {
+            let naturalSize = try await track.load(.naturalSize)
+            let preferredTransform = try await track.load(.preferredTransform)
+            let transformedSize = naturalSize.applying(preferredTransform)
+            width = Int(abs(transformedSize.width))
+            height = Int(abs(transformedSize.height))
         }
         
-        let hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let hasAudio = !audioTracks.isEmpty
         
         // Generate thumbnail
-        var thumbnailData: Data?
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 512, height: 512)
         
-        if let cgImage = try? generator.copyCGImage(at: CMTime(seconds: min(1.0, duration / 2), preferredTimescale: 600), actualTime: nil) {
+        let thumbTime = CMTime(seconds: min(1.0, max(duration / 2, 0)), preferredTimescale: 600)
+        if let cgImage = try await generateThumbnailImage(generator: generator, at: thumbTime) {
             #if canImport(UIKit)
             let uiImage = UIImage(cgImage: cgImage)
-            thumbnailData = uiImage.jpegData(compressionQuality: 0.7)
+            let thumbnailData = uiImage.jpegData(compressionQuality: 0.7)
+            #else
+            let thumbnailData: Data? = nil
             #endif
+            return .videoMetadata(
+                duration: duration,
+                width: width,
+                height: height,
+                hasAudio: hasAudio,
+                thumbnail: thumbnailData
+            )
+        } else {
+            return .videoMetadata(
+                duration: duration,
+                width: width,
+                height: height,
+                hasAudio: hasAudio,
+                thumbnail: nil
+            )
         }
-        
-        return .videoMetadata(
-            duration: duration,
-            width: width,
-            height: height,
-            hasAudio: hasAudio,
-            thumbnail: thumbnailData
-        )
         #else
         return .binary(Data(), mimeType: entry.mimeType)
         #endif
     }
+
+    #if canImport(AVFoundation)
+    private func generateThumbnailImage(generator: AVAssetImageGenerator, at time: CMTime) async throws -> CGImage? {
+        try await withCheckedThrowingContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: time) { cgImage, _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: cgImage)
+            }
+        }
+    }
+    #endif
     
     // MARK: - Thumbnail
     
