@@ -489,7 +489,10 @@ public final class WeChatChannel: NSObject, ObservableObject {
         let scaleY = size / ciImage.extent.size.height
         let transformedImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
 
-        return UIImage(ciImage: transformedImage)
+        // CIImage-backed UIImage doesn't render in SwiftUI — convert through CGImage
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(transformedImage, from: transformedImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
     #endif
 }
