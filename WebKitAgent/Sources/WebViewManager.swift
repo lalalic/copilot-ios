@@ -320,6 +320,58 @@ public final class WebViewManager: NSObject, ObservableObject {
         #endif
     }
 
+    // MARK: - Cookies & Auth
+
+    /// Get all cookies for a specific domain.
+    public func getCookies(for domain: String) async -> [HTTPCookie] {
+        let allCookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        return allCookies.filter { cookie in
+            cookie.domain == domain || cookie.domain == ".\(domain)" || domain.hasSuffix(cookie.domain)
+        }
+    }
+
+    /// Check if we have session cookies for a domain (i.e., user is probably logged in).
+    /// Returns a dictionary with `loggedIn` (bool) + domain-specific details.
+    public func checkAuth(domain: String, cookieNames: [String]? = nil) async -> [String: Any] {
+        let cookies = await getCookies(for: domain)
+        if cookies.isEmpty {
+            return ["loggedIn": false, "domain": domain, "reason": "no cookies"]
+        }
+        // If specific cookie names are required, check for them
+        if let required = cookieNames, !required.isEmpty {
+            let present = Set(cookies.map { $0.name })
+            let missing = required.filter { !present.contains($0) }
+            if !missing.isEmpty {
+                return ["loggedIn": false, "domain": domain, "reason": "missing cookies: \(missing.joined(separator: ", "))"]
+            }
+        }
+        // Has cookies → probably logged in. Return cookie names for debugging.
+        let names = cookies.map { $0.name }.sorted()
+        return ["loggedIn": true, "domain": domain, "cookieCount": cookies.count, "cookies": names]
+    }
+
+    /// Get login status for multiple domains at once.
+    public func sessionStatus(domains: [(site: String, domain: String, requiredCookies: [String]?)]) async -> [[String: Any]] {
+        var results: [[String: Any]] = []
+        for entry in domains {
+            var status = await checkAuth(domain: entry.domain, cookieNames: entry.requiredCookies)
+            status["site"] = entry.site
+            results.append(status)
+        }
+        return results
+    }
+
+    /// Clear all cookies for a specific domain (logout).
+    public func clearCookies(for domain: String) async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let cookies = await store.allCookies()
+        for cookie in cookies {
+            if cookie.domain == domain || cookie.domain == ".\(domain)" || domain.hasSuffix(cookie.domain) {
+                await store.deleteCookie(cookie)
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func evaluateJS(_ js: String) async throws -> String {

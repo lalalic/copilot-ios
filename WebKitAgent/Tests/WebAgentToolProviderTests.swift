@@ -202,12 +202,124 @@ final class WebAgentToolProviderTests: XCTestCase {
         XCTAssertTrue(prompt.contains("site"))
     }
 
+    func testSkillPromptContainsAuthCommands() {
+        let prompt = WebAgentToolProvider.skillPrompt
+        XCTAssertTrue(prompt.contains("sessions"))
+        XCTAssertTrue(prompt.contains("login"))
+        XCTAssertTrue(prompt.contains("logout"))
+        XCTAssertTrue(prompt.contains("auth_check"))
+    }
+
+    func testSkillPromptDescribesAuthFlow() {
+        let prompt = WebAgentToolProvider.skillPrompt
+        XCTAssertTrue(prompt.contains("Not logged in"))
+        XCTAssertTrue(prompt.contains("Cookies persist"))
+    }
+
     func testRegistryIsAccessible() {
         XCTAssertNotNil(provider.registry)
     }
 
     func testBundledAdaptersLoaded() {
-        // Provider should auto-load bundled adapters (3 HN + 4 WeChat)
-        XCTAssertEqual(provider.registry.adapterCount, 7)
+        // Provider should auto-load bundled adapters (3 HN + 4 WeChat + 4 XHS)
+        XCTAssertEqual(provider.registry.adapterCount, 11)
+    }
+
+    // MARK: - Auth Actions
+
+    func testSessionsAction() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "action": .string("sessions")
+        ]))
+        // Should return login status for all known sites
+        XCTAssertTrue(result.contains("Login status:"))
+        XCTAssertTrue(result.contains("xiaohongshu"))
+        XCTAssertTrue(result.contains("twitter"))
+        XCTAssertTrue(result.contains("github"))
+    }
+
+    func testLoginActionRequiresSite() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "action": .string("login")
+        ]))
+        // Without site param, should get an error about missing 'site'
+        XCTAssertTrue(result.contains("Error") || result.contains("error"))
+    }
+
+    func testLoginActionUnknownSite() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("unknownsite123"),
+            "action": .string("login")
+        ]))
+        // Unknown site should return error about no known login URL
+        XCTAssertTrue(result.contains("no known login URL") || result.contains("Error"))
+    }
+
+    func testLogoutActionClearsWithoutCrash() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("xiaohongshu"),
+            "action": .string("logout")
+        ]))
+        // Should complete without crashing
+        XCTAssertTrue(result.contains("Cleared cookies") || result.contains("logged out"))
+    }
+
+    func testAuthCheckNotLoggedIn() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("xiaohongshu"),
+            "action": .string("auth_check")
+        ]))
+        // Fresh WKWebView has no cookies → should say not logged in
+        XCTAssertTrue(result.contains("Not logged in") || result.contains("✗"))
+    }
+
+    func testAuthCheckUnknownSite() async throws {
+        let tool = provider.tools[0]
+        let result = try await tool.handler(.object([
+            "command": .string("site"),
+            "site": .string("unknownsite123"),
+            "action": .string("auth_check")
+        ]))
+        // Unknown site should gracefully handle
+        XCTAssertTrue(result.contains("No auth info") || result.contains("unknownsite123"))
+    }
+
+    // MARK: - XHS Adapters
+
+    func testXhsAdaptersRegistered() {
+        XCTAssertNotNil(provider.registry.find(site: "xiaohongshu", action: "explore"))
+        XCTAssertNotNil(provider.registry.find(site: "xiaohongshu", action: "search"))
+        XCTAssertNotNil(provider.registry.find(site: "xiaohongshu", action: "profile"))
+        XCTAssertNotNil(provider.registry.find(site: "xiaohongshu", action: "post"))
+    }
+
+    func testXhsAdaptersRequireAuth() {
+        let explore = provider.registry.find(site: "xiaohongshu", action: "explore")!
+        if case .cookie(let domain) = explore.auth {
+            XCTAssertEqual(domain, "xiaohongshu.com")
+        } else {
+            XCTFail("XHS explore should require cookie auth")
+        }
+    }
+
+    func testXhsAdaptersRequireBrowser() {
+        let explore = provider.registry.find(site: "xiaohongshu", action: "explore")!
+        XCTAssertTrue(explore.requiresBrowser)
+    }
+
+    func testListFormattedIncludesAuthMarker() {
+        let formatted = provider.registry.listFormatted()
+        XCTAssertTrue(formatted.contains("[auth required]"))
+        XCTAssertTrue(formatted.contains("[browser]"))
     }
 }

@@ -153,6 +153,137 @@ public final class AdapterRegistry {
 
         // WeChat Web adapters (browser-based, hook into AngularJS)
         registerWeChatAdapters()
+
+        // Xiaohongshu adapters (browser-based)
+        registerXiaohongshuAdapters()
+    }
+
+    // MARK: - Xiaohongshu Adapters
+
+    private func registerXiaohongshuAdapters() {
+        // xiaohongshu/explore — get explore/trending notes
+        let xhsExplore = """
+        site: xiaohongshu
+        name: explore
+        description: Get trending notes from Xiaohongshu explore page
+        auth: cookie
+        domain: xiaohongshu.com
+        requiresBrowser: true
+        preNavigate: https://www.xiaohongshu.com/explore
+        waitSeconds: 5
+        args:
+          limit:
+            type: int
+            default: 20
+            description: Number of notes to return
+        script: |
+          (() => {
+            const limit = parseInt(__adapterArgs.limit) || 20;
+            const notes = [];
+            const cards = document.querySelectorAll('[class*="note-item"], .feeds-page .note-item, section.note-item, a[href*="/explore/"]');
+            cards.forEach((card, i) => {
+              if (i >= limit) return;
+              const titleEl = card.querySelector('[class*="title"], .title, span.title');
+              const authorEl = card.querySelector('[class*="author"], .author, span.name');
+              const likeEl = card.querySelector('[class*="like-wrapper"], .like-wrapper, span.count');
+              const imgEl = card.querySelector('img');
+              const linkEl = card.closest('a') || card.querySelector('a');
+              notes.push({
+                rank: i + 1,
+                title: titleEl ? titleEl.textContent.trim() : (card.textContent || '').trim().substring(0, 60),
+                author: authorEl ? authorEl.textContent.trim() : '',
+                likes: likeEl ? likeEl.textContent.trim() : '',
+                image: imgEl ? imgEl.src : '',
+                url: linkEl ? linkEl.href : ''
+              });
+            });
+            if (notes.length === 0) {
+              return JSON.stringify([{info: "No notes found. Page may need login or different DOM structure.", url: window.location.href}]);
+            }
+            return JSON.stringify(notes);
+          })()
+        """
+
+        // xiaohongshu/search — search for notes
+        let xhsSearch = """
+        site: xiaohongshu
+        name: search
+        description: Search for notes on Xiaohongshu
+        auth: cookie
+        domain: xiaohongshu.com
+        requiresBrowser: true
+        args:
+          query:
+            type: string
+            description: Search query
+          limit:
+            type: int
+            default: 20
+            description: Number of results to return
+        script: |
+          (() => {
+            const query = __adapterArgs.query;
+            if (!query) return JSON.stringify([{error: "query parameter is required"}]);
+            const encoded = encodeURIComponent(query);
+            window.location.href = 'https://www.xiaohongshu.com/search_result?keyword=' + encoded + '&type=1';
+            return JSON.stringify([{status: "navigating", message: "Navigating to search results for: " + query + ". Run this command again in a few seconds to get results."}]);
+          })()
+        """
+
+        // xiaohongshu/profile — get current user profile info
+        let xhsProfile = """
+        site: xiaohongshu
+        name: profile
+        description: Get current logged-in user profile
+        auth: cookie
+        domain: xiaohongshu.com
+        requiresBrowser: true
+        preNavigate: https://www.xiaohongshu.com/user/profile
+        waitSeconds: 3
+        script: |
+          (() => {
+            const nameEl = document.querySelector('[class*="user-name"], .user-name, .name');
+            const idEl = document.querySelector('[class*="user-id"], .user-redId, .red-id');
+            const bioEl = document.querySelector('[class*="user-desc"], .desc');
+            const followingEl = document.querySelector('[class*="following"] [class*="count"], .count:first-child');
+            const fansEl = document.querySelector('[class*="fans"] [class*="count"]');
+            const avatarEl = document.querySelector('[class*="avatar"] img, .avatar img');
+            if (!nameEl) {
+              return JSON.stringify([{error: "Profile not found. You may not be logged in.", url: window.location.href}]);
+            }
+            return JSON.stringify([{
+              name: nameEl ? nameEl.textContent.trim() : '',
+              redId: idEl ? idEl.textContent.trim() : '',
+              bio: bioEl ? bioEl.textContent.trim() : '',
+              avatar: avatarEl ? avatarEl.src : '',
+              url: window.location.href
+            }]);
+          })()
+        """
+
+        // xiaohongshu/post — create a new note (text only for now)
+        let xhsPost = """
+        site: xiaohongshu
+        name: post
+        description: Navigate to Xiaohongshu note creation page
+        auth: cookie
+        domain: xiaohongshu.com
+        requiresBrowser: true
+        preNavigate: https://creator.xiaohongshu.com/publish/publish
+        waitSeconds: 3
+        script: |
+          (() => {
+            return JSON.stringify([{
+              status: "ready",
+              message: "Xiaohongshu creator page loaded. Use snapshot + click + type to fill in the note.",
+              url: window.location.href
+            }]);
+          })()
+        """
+
+        for yaml in [xhsExplore, xhsSearch, xhsProfile, xhsPost] {
+            try? register(yaml: yaml)
+        }
     }
 
     // MARK: - WeChat Adapters

@@ -203,4 +203,76 @@ final class AdapterRegistryTests: XCTestCase {
         let found = registry.find(site: "test", action: "demo")
         XCTAssertNotNil(found)
     }
+
+    // MARK: - Bundled Adapters
+
+    func testBundledAdaptersIncludeHackerNews() {
+        registry.loadBundledAdapters()
+        XCTAssertNotNil(registry.find(site: "hackernews", action: "top"))
+        XCTAssertNotNil(registry.find(site: "hackernews", action: "new"))
+        XCTAssertNotNil(registry.find(site: "hackernews", action: "best"))
+    }
+
+    func testBundledAdaptersIncludeWeChat() {
+        registry.loadBundledAdapters()
+        XCTAssertNotNil(registry.find(site: "wechat", action: "login"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "status"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "contacts"))
+        XCTAssertNotNil(registry.find(site: "wechat", action: "send"))
+    }
+
+    func testBundledAdaptersIncludeXiaohongshu() {
+        registry.loadBundledAdapters()
+        XCTAssertNotNil(registry.find(site: "xiaohongshu", action: "explore"))
+        XCTAssertNotNil(registry.find(site: "xiaohongshu", action: "search"))
+        XCTAssertNotNil(registry.find(site: "xiaohongshu", action: "profile"))
+        XCTAssertNotNil(registry.find(site: "xiaohongshu", action: "post"))
+    }
+
+    func testBundledAdaptersTotalCount() {
+        registry.loadBundledAdapters()
+        // 3 HN + 4 WeChat + 4 XHS = 11
+        XCTAssertEqual(registry.adapterCount, 11)
+    }
+
+    func testXhsAdaptersHaveCookieAuth() {
+        registry.loadBundledAdapters()
+        let explore = registry.find(site: "xiaohongshu", action: "explore")!
+        if case .cookie(let domain) = explore.auth {
+            XCTAssertEqual(domain, "xiaohongshu.com")
+        } else {
+            XCTFail("XHS explore adapter should use cookie auth")
+        }
+    }
+
+    func testXhsAdaptersHaveScripts() {
+        registry.loadBundledAdapters()
+        let explore = registry.find(site: "xiaohongshu", action: "explore")!
+        XCTAssertNotNil(explore.script)
+        XCTAssertFalse(explore.script!.isEmpty)
+    }
+
+    func testXhsExploreHasPreNavigate() {
+        registry.loadBundledAdapters()
+        let explore = registry.find(site: "xiaohongshu", action: "explore")!
+        XCTAssertEqual(explore.preNavigate, "https://www.xiaohongshu.com/explore")
+    }
+
+    func testWeChatContactsRequireAuth() {
+        registry.loadBundledAdapters()
+        let contacts = registry.find(site: "wechat", action: "contacts")!
+        if case .cookie(let domain) = contacts.auth {
+            XCTAssertEqual(domain, "wx.qq.com")
+        } else {
+            XCTFail("WeChat contacts adapter should use cookie auth")
+        }
+    }
+
+    func testListFormattedGroupsBySite() {
+        registry.loadBundledAdapters()
+        let output = registry.listFormatted()
+        XCTAssertTrue(output.contains("hackernews:"))
+        XCTAssertTrue(output.contains("wechat:"))
+        XCTAssertTrue(output.contains("xiaohongshu:"))
+    }
 }

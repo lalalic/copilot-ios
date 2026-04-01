@@ -31,12 +31,22 @@ public final class WebAgentToolProvider {
     - `type` — Type into an input/textarea. Params: `ref` (required), `text` (required), `clear` (optional, default true).
     - `download` — Download a file. Params: `ref` (element with href) OR `url` (direct URL), `filename` (optional override).
     - `upload` — Upload file to <input type="file">. Params: `ref` (required), `filePath` (required).
-    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name). Use action="list" to see available adapters.
+    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name).
+      Special actions available for all sites:
+        - `action=list` — List all available adapters
+        - `action=sessions` — Check login status for all known sites
+        - `action=login` — Navigate to the site's login page (user logs in manually in browser tab)
+        - `action=logout` — Clear cookies / log out from a site
+        - `action=auth_check` — Check if user is currently logged in to a site
     - `evaluate` — Run JavaScript on the current page. Params: `script` (required). Returns the result.
     - `screenshot` — Take a screenshot of the current page. Returns base64 JPEG.
 
     Workflow: navigate → snapshot → read refs → click/type/download as needed → snapshot again after page changes.
     For known sites, prefer `site` command over manual navigation — it's faster and deterministic.
+
+    Auth flow: If a site adapter says "Not logged in", run `site action=login site=<name>` to open the login page.
+    The user logs in manually in the browser tab. Then run `site action=auth_check site=<name>` to verify.
+    Cookies persist across app launches, so the user only needs to log in once per site.
     """
 
     // MARK: - Single Tool
@@ -186,6 +196,11 @@ public final class WebAgentToolProvider {
             return registry.listFormatted()
         }
 
+        // action=sessions → show login status for all known sites
+        if case .string(let action) = args["action"], action == "sessions" {
+            return try await checkAllSessions()
+        }
+
         guard case .string(let site) = args["site"] else {
             return "Error: 'site' parameter required for site command. Use action=\"list\" to see available adapters."
         }
@@ -198,6 +213,21 @@ public final class WebAgentToolProvider {
             }
             let names = siteAdapters.map { "  - \($0.name): \($0.adapterDescription)" }.joined(separator: "\n")
             return "Available actions for \(site):\n\(names)"
+        }
+
+        // action=login → navigate to login page for the site
+        if action == "login" {
+            return try await handleLogin(site: site)
+        }
+
+        // action=logout → clear cookies for the site
+        if action == "logout" {
+            return await handleLogout(site: site)
+        }
+
+        // action=auth_check → check if user is logged in
+        if action == "auth_check" {
+            return await handleAuthCheck(site: site)
         }
 
         guard let adapter = registry.find(site: site, action: action) else {
@@ -237,6 +267,25 @@ public final class WebAgentToolProvider {
     }
 
     private func executeBrowserAdapter(_ adapter: YAMLAdapter, args: [String: String]) async throws -> String {
+        // Check auth before executing if adapter requires it
+        if case .cookie(let domain) = adapter.auth {
+            let authResult = await manager.checkAuth(domain: domain)
+            if let loggedIn = authResult["loggedIn"] as? Bool, !loggedIn {
+                let reason = authResult["reason"] as? String ?? "unknown"
+                let loginURL = Self.knownLoginURLs[adapter.site] ?? "https://\(domain)"
+                return """
+                Not logged in to \(adapter.site) (\(domain)). \(reason)
+                
+                To log in:
+                1. Run: web_agent command=site site=\(adapter.site) action=login
+                2. Log in manually in the browser tab
+                3. Run this command again
+                
+                Or navigate directly to: \(loginURL)
+                """
+            }
+        }
+
         // Navigate to pre-navigate URL if specified
         if let url = adapter.preNavigate {
             _ = try await manager.navigate(to: url)
@@ -264,5 +313,98 @@ public final class WebAgentToolProvider {
         }
 
         return "Error: browser adapter '\(adapter.site)/\(adapter.name)' has no script defined."
+    }
+
+    // MARK: - Auth Helpers
+
+    /// Known login URLs for popular sites.
+    private static let knownLoginURLs: [String: String] = [
+        "xiaohongshu": "https://www.xiaohongshu.com/login",
+        "wechat": "https://wx.qq.com",
+        "twitter": "https://x.com/i/flow/login",
+        "bilibili": "https://passport.bilibili.com/login",
+        "zhihu": "https://www.zhihu.com/signin",
+        "weibo": "https://passport.weibo.com/signin/login",
+        "douyin": "https://www.douyin.com",
+        "github": "https://github.com/login",
+        "reddit": "https://www.reddit.com/login",
+        "youtube": "https://accounts.google.com/signin",
+    ]
+
+    /// Known auth domains and required cookies for popular sites.
+    private static let knownAuthDomains: [(site: String, domain: String, requiredCookies: [String]?)] = [
+        ("xiaohongshu", "xiaohongshu.com", ["web_session"]),
+        ("wechat", "wx.qq.com", nil),
+        ("twitter", "x.com", ["ct0", "auth_token"]),
+        ("bilibili", "bilibili.com", ["SESSDATA"]),
+        ("zhihu", "zhihu.com", ["z_c0"]),
+        ("weibo", "weibo.com", ["SUB"]),
+        ("github", "github.com", ["user_session"]),
+        ("reddit", "reddit.com", ["reddit_session"]),
+    ]
+
+    /// Navigate to a site's login page.
+    private func handleLogin(site: String) async throws -> String {
+        guard let loginURL = Self.knownLoginURLs[site] else {
+            return "Error: no known login URL for '\(site)'. Navigate manually using: web_agent command=navigate url=<login_url>"
+        }
+        let result = try await manager.navigate(to: loginURL)
+        return """
+        Navigated to \(site) login page.
+        \(result)
+        
+        The user can now log in manually in the browser tab.
+        After login, verify with: web_agent command=site site=\(site) action=auth_check
+        """
+    }
+
+    /// Clear cookies for a site (logout).
+    private func handleLogout(site: String) async -> String {
+        // Find domain for the site
+        if let entry = Self.knownAuthDomains.first(where: { $0.site == site }) {
+            await manager.clearCookies(for: entry.domain)
+            return "Cleared cookies for \(site) (\(entry.domain)). You are now logged out."
+        }
+        // Try the site name as the domain
+        await manager.clearCookies(for: "\(site).com")
+        return "Cleared cookies for \(site).com. You are now logged out."
+    }
+
+    /// Check auth status for a specific site.
+    private func handleAuthCheck(site: String) async -> String {
+        if let entry = Self.knownAuthDomains.first(where: { $0.site == site }) {
+            let status = await manager.checkAuth(domain: entry.domain, cookieNames: entry.requiredCookies)
+            let loggedIn = status["loggedIn"] as? Bool ?? false
+            if loggedIn {
+                let count = status["cookieCount"] as? Int ?? 0
+                return "✓ Logged in to \(site) (\(entry.domain)) — \(count) cookies"
+            } else {
+                let reason = status["reason"] as? String ?? "unknown"
+                return "✗ Not logged in to \(site) (\(entry.domain)) — \(reason)"
+            }
+        }
+        return "No auth info configured for '\(site)'. Try: web_agent command=site site=\(site) action=login"
+    }
+
+    /// Check login status for all known sites.
+    private func checkAllSessions() async throws -> String {
+        let results = await manager.sessionStatus(domains: Self.knownAuthDomains)
+        var lines: [String] = ["Login status:"]
+        for result in results {
+            let site = result["site"] as? String ?? "?"
+            let loggedIn = result["loggedIn"] as? Bool ?? false
+            let domain = result["domain"] as? String ?? "?"
+            if loggedIn {
+                let count = result["cookieCount"] as? Int ?? 0
+                lines.append("  ✓ \(site) (\(domain)) — \(count) cookies")
+            } else {
+                let reason = result["reason"] as? String ?? ""
+                lines.append("  ✗ \(site) (\(domain)) — \(reason)")
+            }
+        }
+        lines.append("")
+        lines.append("To log in: web_agent command=site site=<name> action=login")
+        lines.append("To verify: web_agent command=site site=<name> action=auth_check")
+        return lines.joined(separator: "\n")
     }
 }

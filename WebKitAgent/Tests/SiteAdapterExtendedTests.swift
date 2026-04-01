@@ -216,7 +216,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testBundledAdaptersCount() {
         let registry = AdapterRegistry()
         registry.loadBundledAdapters()
-        XCTAssertEqual(registry.adapterCount, 7) // 3 HN + 4 WeChat
+        XCTAssertEqual(registry.adapterCount, 11) // 3 HN + 4 WeChat + 4 XHS
     }
 
     func testBundledAdaptersHavePipelines() {

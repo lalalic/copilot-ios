@@ -83,6 +83,47 @@ final class WebViewManagerTests: XCTestCase {
         let manager = WebViewManager()
         XCTAssertNil(manager.pendingUploadURLs)
     }
+
+    // MARK: - Cookies & Auth
+
+    func testGetCookiesForDomainReturnsEmptyOnFresh() async {
+        let manager = WebViewManager()
+        let cookies = await manager.getCookies(for: "example.com")
+        XCTAssertTrue(cookies.isEmpty)
+    }
+
+    func testCheckAuthReturnsFalseOnFresh() async {
+        let manager = WebViewManager()
+        let result = await manager.checkAuth(domain: "example.com")
+        XCTAssertEqual(result["loggedIn"] as? Bool, false)
+        XCTAssertEqual(result["reason"] as? String, "no cookies")
+    }
+
+    func testCheckAuthWithRequiredCookies() async {
+        let manager = WebViewManager()
+        let result = await manager.checkAuth(domain: "example.com", cookieNames: ["session_id"])
+        XCTAssertEqual(result["loggedIn"] as? Bool, false)
+    }
+
+    func testSessionStatusReturnsAllDomains() async {
+        let manager = WebViewManager()
+        let domains: [(site: String, domain: String, requiredCookies: [String]?)] = [
+            ("test1", "test1.com", nil),
+            ("test2", "test2.com", ["sid"]),
+        ]
+        let results = await manager.sessionStatus(domains: domains)
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results[0]["site"] as? String, "test1")
+        XCTAssertEqual(results[1]["site"] as? String, "test2")
+        XCTAssertEqual(results[0]["loggedIn"] as? Bool, false)
+        XCTAssertEqual(results[1]["loggedIn"] as? Bool, false)
+    }
+
+    func testClearCookiesDoesNotCrashOnFresh() async {
+        let manager = WebViewManager()
+        // Should not crash on a fresh webview with no cookies
+        await manager.clearCookies(for: "example.com")
+    }
 }
 
 // MARK: - WebAgentError Tests
