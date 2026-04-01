@@ -19,7 +19,7 @@ final class AppAgentTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 100, height: 44),
             traits: "button"
         )
-        XCTAssertEqual(element.description, "r0 [button] \"Submit\"")
+        XCTAssertEqual(element.description, "r0 [button] \"Submit\" (0,0 100x44)")
     }
 
     func testAppElementDescriptionWithValue() {
@@ -33,7 +33,7 @@ final class AppAgentTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 200, height: 44),
             traits: "search"
         )
-        XCTAssertEqual(element.description, "r3 [textField] \"Username\" value=\"john\"")
+        XCTAssertEqual(element.description, "r3 [textField] \"Username\" value=\"john\" (0,0 200x44)")
     }
 
     func testAppElementDescriptionDisabled() {
@@ -75,7 +75,7 @@ final class AppAgentTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 51, height: 31),
             traits: "button"
         )
-        XCTAssertEqual(element.description, "r2 [switch] \"Dark Mode\" value=\"on\"")
+        XCTAssertEqual(element.description, "r2 [switch] \"Dark Mode\" value=\"on\" (0,0 51x31)")
     }
 
     func testAppElementEmptyLabel() {
@@ -89,7 +89,7 @@ final class AppAgentTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 50, height: 50),
             traits: ""
         )
-        XCTAssertEqual(element.description, "r0 [view]")
+        XCTAssertEqual(element.description, "r0 [view] (0,0 50x50)")
     }
 
     func testAppElementEmptyValue() {
@@ -104,7 +104,7 @@ final class AppAgentTests: XCTestCase {
             traits: ""
         )
         // Empty value should not be shown
-        XCTAssertEqual(element.description, "r1 [textField] \"Name\"")
+        XCTAssertEqual(element.description, "r1 [textField] \"Name\" (0,0 200x44)")
     }
 
     // MARK: - Tool Provider Schema
