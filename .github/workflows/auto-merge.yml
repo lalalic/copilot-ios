@@ -1,0 +1,126 @@
+name: Auto-Merge Copilot PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.user.login == 'copilot[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'auto-merge')
+    steps:
+      - name: Wait for CI
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            // Wait for all check suites to complete (max 10 min)
+            const maxWait = 600000;
+            const interval = 30000;
+            let elapsed = 0;
+
+            while (elapsed < maxWait) {
+              const { data: checks } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: pr.head.sha,
+              });
+
+              const pending = checks.check_runs.filter(
+                c => c.status !== 'completed'
+              );
+
+              if (pending.length === 0) {
+                const failed = checks.check_runs.filter(
+                  c => c.conclusion !== 'success' && c.conclusion !== 'skipped'
+                );
+                if (failed.length > 0) {
+                  core.setFailed(`CI failed: ${failed.map(f => f.name).join(', ')}`);
+                  return;
+                }
+                core.info('All checks passed');
+                break;
+              }
+
+              core.info(`Waiting for ${pending.length} checks...`);
+              await new Promise(r => setTimeout(r, interval));
+              elapsed += interval;
+            }
+
+            if (elapsed >= maxWait) {
+              core.setFailed('Timed out waiting for CI');
+            }
+
+      - name: Scope check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            // Get the diff
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            // Check for security-sensitive files
+            const sensitivePatterns = [
+              /\.env/,
+              /secrets?\./i,
+              /credentials/i,
+              /\.pem$/,
+              /\.key$/,
+              /Podfile\.lock/,
+              /Package\.resolved/,
+            ];
+
+            const sensitive = files.filter(f =>
+              sensitivePatterns.some(p => p.test(f.filename))
+            );
+
+            if (sensitive.length > 0) {
+              core.setFailed(
+                `PR touches sensitive files: ${sensitive.map(f => f.filename).join(', ')}. Manual review required.`
+              );
+              return;
+            }
+
+            // Check total changes aren't too large
+            const totalChanges = files.reduce((sum, f) => sum + f.changes, 0);
+            if (totalChanges > 500) {
+              core.setFailed(
+                `PR has ${totalChanges} line changes (limit: 500). Manual review required.`
+              );
+              return;
+            }
+
+            core.info(`Scope check passed: ${files.length} files, ${totalChanges} changes`);
+
+      - name: Auto-merge
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              merge_method: 'squash',
+            });
+
+            core.info(`Merged PR #${pr.number}`);
