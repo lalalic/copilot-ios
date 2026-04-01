@@ -48,6 +48,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public var inputText: String = ""
     @Published public var isListening: Bool = false
 
+    /// URL to present in SFSafariViewController for Stripe checkout.
+    @Published public var stripeCheckoutURL: URL?
+
     // MARK: - Usage Tracking
 
     /// Client-authoritative usage and balance tracker.
@@ -312,19 +315,8 @@ public final class ChatViewModel: ObservableObject {
             }
         }
 
-        // Stripe credit grants — map product_id to credits (same as IAP)
-        await session.on(.creditsGrantCreated) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data,
-               case .string(let productId) = data["productId"] {
-                let credits = PaymentManager.creditValues[productId] ?? 0
-                if credits > 0 {
-                    Task { @MainActor in
-                        self.usageTracker.addCredits(credits)
-                    }
-                }
-            }
-        }
+        // Stripe credits are handled client-side via SFSafariViewController + relay /stripe/verify
+        // (see NeoxApp.onOpenURL → verifyStripeSession → usageTracker.addCredits)
     }
 
     // MARK: - Run Plan
@@ -918,12 +910,34 @@ public final class ChatViewModel: ObservableObject {
             var query = components.queryItems ?? []
             // client_reference_id flows through to checkout.session.completed
             let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            UserDefaults.standard.set(deviceId, forKey: "pendingStripeCheckoutRef")
             query.append(URLQueryItem(name: "client_reference_id", value: deviceId))
             if let requestedAmount, requestedAmount > 0 {
                 query.append(URLQueryItem(name: "amount_usd", value: String(format: "%.2f", requestedAmount)))
             }
             components.queryItems = query
             checkoutURL = components.url?.absoluteString ?? base
+        }
+
+        // Open payment link — try SFSafariViewController via notification, fallback to external Safari
+        if let url = URL(string: checkoutURL) {
+            await MainActor.run {
+                self.stripeCheckoutURL = url
+                NotificationCenter.default.post(
+                    name: Notification.Name("stripeCheckoutRequested"),
+                    object: url
+                )
+                // Fallback: open in external Safari after a brief delay
+                // (SFSafariVC may not present if view hierarchy isn't ready)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    // If stripeCheckoutURL is still set, SFSafariVC didn't consume it
+                    if self?.stripeCheckoutURL != nil {
+                        self?.stripeCheckoutURL = nil
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+            return "Opening Stripe checkout. After payment, credits will be added automatically."
         }
 
         return "Stripe checkout link (external): \(checkoutURL)\nNote: Apple IAP remains the default in-app credit flow."

@@ -24,7 +24,7 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
             path: "CopilotSDK/Sources",
-            resources: [.copy("Resources")]
+            resources: [.copy("Resources/workspace.zip"), .copy("Resources/workspace")]
         ),
         .testTarget(
             name: "CopilotSDKTests",
@@ -37,7 +37,7 @@ let package = Package(
             name: "CopilotChat",
             dependencies: ["CopilotSDK"],
             path: "CopilotChat/Sources",
-            resources: [.copy("Resources")]
+            resources: [.copy("Resources/mermaid.html")]
         ),
         .testTarget(
             name: "CopilotChatTests",

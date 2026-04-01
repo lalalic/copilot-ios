@@ -17,7 +17,7 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
             path: "Sources",
-            resources: [.copy("Resources")]
+            resources: [.copy("Resources/workspace.zip"), .copy("Resources/workspace")]
         ),
         .testTarget(
             name: "CopilotSDKTests",
