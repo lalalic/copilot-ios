@@ -33,16 +33,22 @@ public final class WeChatChannel: NSObject, ObservableObject {
 
     // MARK: - Internal
 
-    private let webView: WKWebView
+    /// The underlying WKWebView. Expose for callers that need to add it
+    /// to a window hierarchy (required on-device for page loads).
+    public private(set) var webView: WKWebView
     private var bridgeInjected = false
     private var pollingTimer: Timer?
     private var heartbeatDeadline: Date?
     private var qrCheckTimer: Timer?
+    private var directQRTimer: Timer?
+    private var qrRefreshTimer: Timer?
 
     private static let wechatURL = "https://wx.qq.com/"
     private static let pollInterval: TimeInterval = 0.5
     private static let heartbeatTimeout: TimeInterval = 45  // 3 missed 15s heartbeats
     private static let qrCheckInterval: TimeInterval = 1.0
+    private static let directQRInterval: TimeInterval = 2.0
+    private static let qrRefreshTimeout: TimeInterval = 4 * 60  // QR expires ~5min, refresh at 4
 
     // MARK: - Init
 
@@ -76,12 +82,22 @@ public final class WeChatChannel: NSObject, ObservableObject {
 
         let request = URLRequest(url: URL(string: Self.wechatURL)!)
         webView.load(request)
+
+        // wx.qq.com never finishes loading (perpetual long-polling), so
+        // `didFinish` WKNavigationDelegate will never fire.
+        // Start bridge injection retries and QR extraction immediately.
+        startBridgeRetry()
+        startDirectQRExtraction()
     }
 
     /// Stop the WeChat channel and clean up.
     public func destroy() {
         stopPolling()
         stopQRCheck()
+        stopBridgeRetry()
+        stopDirectQR()
+        qrRefreshTimer?.invalidate()
+        qrRefreshTimer = nil
         webView.stopLoading()
         bridgeInjected = false
         qrCodeURL = nil
@@ -155,8 +171,39 @@ public final class WeChatChannel: NSObject, ObservableObject {
     // MARK: - State Machine
 
     private func setState(_ newState: WeChatChannelState) {
+        print("[WeChatChannel] state: \(state.rawValue) → \(newState.rawValue)")
         state = newState
         onStateChange?(newState)
+    }
+
+    private var bridgeRetryTimer: Timer?
+    private static let bridgeRetryInterval: TimeInterval = 2.0
+    private static let bridgeMaxRetries: Int = 15
+
+    private var bridgeRetryCount = 0
+
+    private func startBridgeRetry() {
+        stopBridgeRetry()
+        bridgeRetryCount = 0
+        bridgeRetryTimer = Timer.scheduledTimer(withTimeInterval: Self.bridgeRetryInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.bridgeInjected else {
+                    self?.stopBridgeRetry()
+                    return
+                }
+                self.bridgeRetryCount += 1
+                if self.bridgeRetryCount > Self.bridgeMaxRetries {
+                    self.stopBridgeRetry()
+                    return
+                }
+                await self.tryInjectBridge()
+            }
+        }
+    }
+
+    private func stopBridgeRetry() {
+        bridgeRetryTimer?.invalidate()
+        bridgeRetryTimer = nil
     }
 
     // MARK: - Bridge Injection
@@ -169,10 +216,12 @@ public final class WeChatChannel: NSObject, ObservableObject {
         do {
             let result = try await webView.evaluateJavaScript(WeChatBridge.angularCheckScript)
             guard let ready = result as? Bool, ready else {
-                // Angular not ready yet, retry later
+                print("[WeChatChannel] tryInjectBridge: angular not ready yet")
                 return
             }
+            print("[WeChatChannel] tryInjectBridge: angular IS ready!")
         } catch {
+            print("[WeChatChannel] tryInjectBridge: angular check error: \(error.localizedDescription)")
             return
         }
 
@@ -244,6 +293,102 @@ public final class WeChatChannel: NSObject, ObservableObject {
         } catch {
             // QR check failed
         }
+    }
+
+    // MARK: - Direct QR Extraction (pre-bridge)
+
+    /// Extract QR UUID directly from DOM/JS variables without requiring the bridge.
+    /// wx.qq.com never fires didFinish, so this timer starts immediately from start().
+    private func startDirectQRExtraction() {
+        stopDirectQR()
+        directQRTimer = Timer.scheduledTimer(withTimeInterval: Self.directQRInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.extractQRDirect()
+            }
+        }
+    }
+
+    private func stopDirectQR() {
+        directQRTimer?.invalidate()
+        directQRTimer = nil
+    }
+
+    private func extractQRDirect() async {
+        // Stop once bridge takes over or we're logged in
+        guard !bridgeInjected, state == .loading || state == .extractingQR || state == .qrReady else {
+            print("[WeChatChannel] extractQRDirect: stopping (bridgeInjected=\(bridgeInjected), state=\(state.rawValue))")
+            stopDirectQR()
+            return
+        }
+
+        // Also check page title and readyState for debugging
+        if let title = try? await webView.evaluateJavaScript("document.title") as? String,
+           let ready = try? await webView.evaluateJavaScript("document.readyState") as? String {
+            print("[WeChatChannel] extractQRDirect: title='\(title)' readyState=\(ready) url=\(webView.url?.absoluteString ?? "nil")")
+        }
+
+        do {
+            let result = try await webView.evaluateJavaScript(WeChatBridge.directQRExtractionScript)
+            if let str = result as? String {
+                print("[WeChatChannel] directQR result: \(str)")
+                if let data = str.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let uuid = json["uuid"] as? String, !uuid.isEmpty {
+                    // Build the scan URL from UUID
+                    let scanURL = "https://login.weixin.qq.com/l/\(uuid)"
+                    if qrCodeURL != scanURL {
+                        print("[WeChatChannel] QR found! UUID=\(uuid)")
+                        qrCodeURL = scanURL
+                        if state != .qrReady {
+                            setState(.qrReady)
+                        }
+                        scheduleQRRefresh()
+                    }
+                }
+            }
+        } catch {
+            print("[WeChatChannel] extractQRDirect error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - QR Refresh (expiry handling)
+
+    private func scheduleQRRefresh() {
+        qrRefreshTimer?.invalidate()
+        qrRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.qrRefreshTimeout, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.refreshQRCode()
+            }
+        }
+    }
+
+    private func refreshQRCode() async {
+        guard state == .qrReady || state == .extractingQR else { return }
+
+        // Try clicking the expired overlay first
+        do {
+            let result = try await webView.evaluateJavaScript(WeChatBridge.qrRefreshScript)
+            if let str = result as? String,
+               let data = str.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let refreshed = json["refreshed"] as? Bool, refreshed {
+                // Overlay clicked — wait for new QR to appear
+                setState(.extractingQR)
+                qrCodeURL = nil
+                return
+            }
+        } catch {
+            // JS eval failed
+        }
+
+        // Fallback: full page reload
+        qrCodeURL = nil
+        setState(.loading)
+        bridgeInjected = false
+        let request = URLRequest(url: URL(string: Self.wechatURL)!)
+        webView.load(request)
+        startBridgeRetry()
+        startDirectQRExtraction()
     }
 
     // MARK: - Message Polling
@@ -354,19 +499,24 @@ public final class WeChatChannel: NSObject, ObservableObject {
 extension WeChatChannel: WKNavigationDelegate {
     public nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
-            // Page loaded — try to inject bridge
+            print("[WeChatChannel] didFinish navigation, URL: \(webView.url?.absoluteString ?? "nil")")
             await tryInjectBridge()
+            if !bridgeInjected {
+                startBridgeRetry()
+            }
         }
     }
 
     public nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
         Task { @MainActor in
+            print("[WeChatChannel] didFail navigation: \(error.localizedDescription)")
             setState(.dead)
         }
     }
 
     public nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
         Task { @MainActor in
+            print("[WeChatChannel] didFailProvisionalNavigation: \(error.localizedDescription)")
             setState(.dead)
         }
     }
@@ -378,6 +528,10 @@ extension WeChatChannel: WKNavigationDelegate {
             setState(.dead)
             stopPolling()
             stopQRCheck()
+            stopBridgeRetry()
+            stopDirectQR()
+            qrRefreshTimer?.invalidate()
+            qrRefreshTimer = nil
         }
     }
 }

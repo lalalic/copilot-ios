@@ -278,6 +278,62 @@ public enum WeChatBridge {
     })()
     """
 
+    /// JavaScript to extract QR code UUID directly from DOM/JS variables.
+    /// Does NOT require the bridge or angular to be fully ready.
+    /// Uses 3 fallback methods (same as bullx):
+    /// 1. Find QR <img> element in DOM
+    /// 2. window.QRLogin.uuid
+    /// 3. Angular loginController scope
+    public static let directQRExtractionScript: String = """
+    (function() {
+      try {
+        // Method 1: Find QR code <img> element
+        var imgs = document.querySelectorAll(
+          'img[src*="login.weixin.qq.com/qrcode/"], img[src*="login.wx.qq.com/qrcode/"]'
+        );
+        for (var i = 0; i < imgs.length; i++) {
+          var match = imgs[i].src.match(/qrcode\\/(.+)/);
+          if (match) return JSON.stringify({uuid: match[1], method: 'img'});
+        }
+
+        // Method 2: Global JS variable
+        if (window.QRLogin && window.QRLogin.uuid) {
+          return JSON.stringify({uuid: window.QRLogin.uuid, method: 'global'});
+        }
+
+        // Method 3: Angular scope (if available)
+        if (typeof angular !== 'undefined' && angular.element) {
+          var scope = angular.element('[ng-controller="loginController"]').scope();
+          if (scope && scope.qrcodeUrl) {
+            var m = scope.qrcodeUrl.match(/\\/l\\/(.+)$/);
+            if (m) return JSON.stringify({uuid: m[1], method: 'angular'});
+          }
+        }
+
+        return JSON.stringify({uuid: null});
+      } catch(e) {
+        return JSON.stringify({error: e.message});
+      }
+    })()
+    """
+
+    /// JavaScript to click the expired QR overlay to refresh it.
+    public static let qrRefreshScript: String = """
+    (function() {
+      try {
+        var overlay = document.querySelector(
+          '.qrcode .expired, .qrcode_expired_mask, [ng-click*="getQRCode"], .QRCode .mask'
+        );
+        if (overlay) { overlay.click(); return JSON.stringify({refreshed: true, method: 'overlay'}); }
+        var mask = document.querySelector('.qrcode .mask, .login_box .mask');
+        if (mask) { mask.click(); return JSON.stringify({refreshed: true, method: 'mask'}); }
+        return JSON.stringify({refreshed: false});
+      } catch(e) {
+        return JSON.stringify({error: e.message});
+      }
+    })()
+    """
+
     /// JavaScript to get contacts list.
     public static let contactsScript: String = """
     (function() {
