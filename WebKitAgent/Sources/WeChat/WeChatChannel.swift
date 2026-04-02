@@ -315,7 +315,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
 
     private func extractQRDirect() async {
         // Stop once bridge takes over or we're logged in
-        guard !bridgeInjected, state == .loading || state == .extractingQR || state == .qrReady else {
+        guard !bridgeInjected, state == .loading || state == .extractingQR || state == .qrReady || state == .loggingIn else {
             print("[WeChatChannel] extractQRDirect: stopping (bridgeInjected=\(bridgeInjected), state=\(state.rawValue))")
             stopDirectQR()
             return
@@ -325,6 +325,39 @@ public final class WeChatChannel: NSObject, ObservableObject {
         if let title = try? await webView.evaluateJavaScript("document.title") as? String,
            let ready = try? await webView.evaluateJavaScript("document.readyState") as? String {
             print("[WeChatChannel] extractQRDirect: title='\(title)' readyState=\(ready) url=\(webView.url?.absoluteString ?? "nil")")
+        }
+
+        // When QR is already shown or user has scanned, try to detect login.
+        if state == .qrReady || state == .loggingIn {
+            // 1. Try direct login check (works even without Angular bridge)
+            if let loggedIn = try? await webView.evaluateJavaScript(WeChatBridge.loginCheckScript) as? Bool,
+               loggedIn {
+                print("[WeChatChannel] extractQRDirect: login detected via MMCgi!")
+                // Try to inject bridge for full functionality
+                await tryInjectBridge()
+                if !bridgeInjected {
+                    // Bridge injection failed, but we know we're logged in
+                    setState(.ready)
+                }
+                stopDirectQR()
+                return
+            }
+
+            // 2. Try bridge injection (angular may have become ready after login)
+            await tryInjectBridge()
+            if bridgeInjected {
+                stopDirectQR()
+                return
+            }
+
+            // 3. Check for scan confirmation (code 201) via the login page script
+            if let result = try? await webView.evaluateJavaScript(WeChatBridge.qrCodeScript) as? String,
+               let data = result.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let code = json["code"] as? Int, code == 201 {
+                print("[WeChatChannel] extractQRDirect: scan detected (code 201)!")
+                setState(.loggingIn)
+            }
         }
 
         do {
