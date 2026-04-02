@@ -1932,6 +1932,28 @@ public final class CopilotClient: @unchecked Sendable {
         state = .connected
     }
 
+    /// Register an APNs device token with the relay server for push notifications.
+    /// Call this after `start()` when you have a device token.
+    public func registerDeviceToken(_ token: String) async {
+        do {
+            let _ = try await connection.send(method: "register_device", params: [
+                "token": .string(token),
+            ])
+            NSLog("[CopilotClient] Device token registered with relay")
+        } catch {
+            NSLog("[CopilotClient] Failed to register device token: \(error.localizedDescription)")
+        }
+    }
+
+    /// Send a raw JSON-RPC notification (no id, no response expected).
+    public func sendNotification(method: String, params: [String: JSONValue]) async {
+        do {
+            try await connection.sendNotification(method: method, params: params)
+        } catch {
+            NSLog("[CopilotClient] sendNotification error: \(error.localizedDescription)")
+        }
+    }
+
     /// Create a new session with full configuration.
     public func createSession(config: SessionConfig = SessionConfig()) async throws -> CopilotSession {
         let sessionId = config.sessionId ?? UUID().uuidString.lowercased()
