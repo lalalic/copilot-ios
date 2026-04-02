@@ -1,25 +1,112 @@
 import Foundation
 import ZIPFoundation
 
+// MARK: - Skill Discovery
+
+/// A discovered skill from the workspace's `.github/skills/` directory.
+public struct SkillDescriptor: Sendable, Equatable {
+    /// Skill name from frontmatter.
+    public let name: String
+    /// Skill description from frontmatter.
+    public let description: String
+    /// Workspace-relative file path (e.g. ".github/skills/photo-editor/SKILL.md").
+    public let filePath: String
+
+    public init(name: String, description: String, filePath: String) {
+        self.name = name
+        self.description = description
+        self.filePath = filePath
+    }
+}
+
+/// Scans a workspace for SKILL.md files and parses their frontmatter.
+public final class SkillDiscovery: Sendable {
+
+    public init() {}
+
+    /// Discover skills in `workspaceURL/.github/skills/*/SKILL.md`.
+    /// Returns descriptors for every skill with valid `name` and `description` frontmatter.
+    /// Never throws — missing directories or invalid files are silently skipped.
+    public func discover(in workspaceURL: URL) -> [SkillDescriptor] {
+        let skillsDir = workspaceURL
+            .appendingPathComponent(".github", isDirectory: true)
+            .appendingPathComponent("skills", isDirectory: true)
+
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: skillsDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var skills: [SkillDescriptor] = []
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            let skillFile = entry.appendingPathComponent("SKILL.md")
+            guard fm.fileExists(atPath: skillFile.path),
+                  let raw = try? String(contentsOf: skillFile, encoding: .utf8),
+                  let descriptor = parseSkillFrontmatter(raw, dirName: entry.lastPathComponent) else {
+                continue
+            }
+            skills.append(descriptor)
+        }
+        return skills.sorted { $0.name < $1.name }
+    }
+
+    /// Parse YAML frontmatter from a SKILL.md for `name` and `description`.
+    private func parseSkillFrontmatter(_ raw: String, dirName: String) -> SkillDescriptor? {
+        guard raw.hasPrefix("---\n"),
+              let closing = raw.range(of: "\n---\n") else { return nil }
+
+        let fmStart = raw.index(raw.startIndex, offsetBy: 4)
+        let frontmatter = String(raw[fmStart..<closing.lowerBound])
+
+        var name: String?
+        var description: String?
+        for line in frontmatter.split(separator: "\n", omittingEmptySubsequences: false) {
+            let text = String(line)
+            guard let colon = text.firstIndex(of: ":") else { continue }
+            let key = text[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+            var value = text[text.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            // Strip surrounding quotes
+            if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+                value = String(value.dropFirst().dropLast())
+            }
+            if key == "name" { name = value }
+            else if key == "description" { description = value }
+        }
+
+        guard let name, !name.isEmpty, let description, !description.isEmpty else { return nil }
+        let relativePath = ".github/skills/\(dirName)/SKILL.md"
+        return SkillDescriptor(name: name, description: description, filePath: relativePath)
+    }
+}
+
+// MARK: - Agent Runtime Profile
+
 public struct AgentRuntimeProfile: Sendable {
     public let defaultModel: String?
     public let description: String?
     public let tools: [String]?
     public let preambleBody: String?
     public let sections: [String: SystemMessageSectionAction]
+    /// Discovered on-device skills from `.github/skills/`.
+    public let skills: [SkillDescriptor]
 
     public init(
         defaultModel: String?,
         description: String?,
         tools: [String]?,
         preambleBody: String?,
-        sections: [String: SystemMessageSectionAction]
+        sections: [String: SystemMessageSectionAction],
+        skills: [SkillDescriptor] = []
     ) {
         self.defaultModel = defaultModel
         self.description = description
         self.tools = tools
         self.preambleBody = preambleBody
         self.sections = sections
+        self.skills = skills
     }
 }
 
@@ -85,19 +172,21 @@ public final class AgentProfileLoader: Sendable {
     public init() {}
 
     public func load(from workspaceURL: URL) throws -> AgentRuntimeProfile {
+        let skills = SkillDiscovery().discover(in: workspaceURL)
+
         let agentFileURL = workspaceURL
             .appendingPathComponent(".github", isDirectory: true)
             .appendingPathComponent("agents", isDirectory: true)
             .appendingPathComponent("main.agent.md")
 
         guard FileManager.default.fileExists(atPath: agentFileURL.path) else {
-            return AgentRuntimeProfile(defaultModel: nil, description: nil, tools: nil, preambleBody: nil, sections: [:])
+            return AgentRuntimeProfile(defaultModel: nil, description: nil, tools: nil, preambleBody: nil, sections: [:], skills: skills)
         }
 
         let raw = try String(contentsOf: agentFileURL, encoding: .utf8)
 
         guard let fmRange = frontmatterRange(in: raw) else {
-            return AgentRuntimeProfile(defaultModel: nil, description: nil, tools: nil, preambleBody: raw.trimmingCharacters(in: .whitespacesAndNewlines), sections: [:])
+            return AgentRuntimeProfile(defaultModel: nil, description: nil, tools: nil, preambleBody: raw.trimmingCharacters(in: .whitespacesAndNewlines), sections: [:], skills: skills)
         }
 
         let frontmatter = String(raw[fmRange.frontmatter])
@@ -111,7 +200,8 @@ public final class AgentProfileLoader: Sendable {
             description: parsedFrontmatter.description,
             tools: parsedFrontmatter.tools,
             preambleBody: parsedBody.preamble,
-            sections: parsedBody.sections
+            sections: parsedBody.sections,
+            skills: skills
         )
     }
 
