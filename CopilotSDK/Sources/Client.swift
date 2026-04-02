@@ -730,6 +730,9 @@ public struct SessionConfig: Sendable {
     /// App/workspace identifier for relay routing (relay v2).
     /// Routes to a specific workspace's pool on the relay server.
     public var appId: String?
+    /// APNs device token for push notifications (hex string).
+    /// Sent with session.create so the relay can push to this device.
+    public var deviceToken: String?
     public var onPermissionRequest: PermissionHandler?
     public var onUserInputRequest: UserInputHandler?
     public var onEvent: SessionEventHandler?
@@ -758,6 +761,7 @@ public struct SessionConfig: Sendable {
         clientId: String? = nil,
         snapshot: String? = nil,
         appId: String? = nil,
+        deviceToken: String? = nil,
         onPermissionRequest: PermissionHandler? = nil,
         onUserInputRequest: UserInputHandler? = nil,
         onEvent: SessionEventHandler? = nil
@@ -785,6 +789,7 @@ public struct SessionConfig: Sendable {
         self.clientId = clientId
         self.snapshot = snapshot
         self.appId = appId
+        self.deviceToken = deviceToken
         self.onPermissionRequest = onPermissionRequest
         self.onUserInputRequest = onUserInputRequest
         self.onEvent = onEvent
@@ -818,6 +823,7 @@ public struct SessionConfig: Sendable {
         if let clientId { p["clientId"] = .string(clientId) }
         if let snapshot { p["snapshot"] = .string(snapshot) }
         if let appId { p["appId"] = .string(appId) }
+        if let deviceToken { p["deviceToken"] = .string(deviceToken) }
         return p
     }
 }
@@ -1634,6 +1640,8 @@ public struct AgentConfig: Sendable {
     public var snapshot: String?
     /// App/workspace identifier for relay v2 routing.
     public var appId: String?
+    /// APNs device token for push notifications (hex string).
+    public var deviceToken: String?
 
     public init(
         model: String? = nil,
@@ -1644,6 +1652,7 @@ public struct AgentConfig: Sendable {
         clientId: String? = nil,
         snapshot: String? = nil,
         appId: String? = nil,
+        deviceToken: String? = nil,
         onResponse: @escaping @Sendable (String) async -> Void,
         onAskUser: @escaping @Sendable (String) async -> String,
         onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
@@ -1656,6 +1665,7 @@ public struct AgentConfig: Sendable {
         self.clientId = clientId
         self.snapshot = snapshot
         self.appId = appId
+        self.deviceToken = deviceToken
         self.onResponse = onResponse
         self.onAskUser = onAskUser
         self.onAskQuestions = onAskQuestions
@@ -1893,7 +1903,8 @@ public final class CopilotAgent: @unchecked Sendable {
             infiniteSessions: InfiniteSessionConfig(enabled: true),
             clientId: config.clientId,
             snapshot: config.snapshot,
-            appId: config.appId
+            appId: config.appId,
+            deviceToken: config.deviceToken
         )
     }
 }
@@ -1930,19 +1941,6 @@ public final class CopilotClient: @unchecked Sendable {
             protocolVersion = version
         }
         state = .connected
-    }
-
-    /// Register an APNs device token with the relay server for push notifications.
-    /// Call this after `start()` when you have a device token.
-    public func registerDeviceToken(_ token: String) async {
-        do {
-            let _ = try await connection.send(method: "register_device", params: [
-                "token": .string(token),
-            ])
-            NSLog("[CopilotClient] Device token registered with relay")
-        } catch {
-            NSLog("[CopilotClient] Failed to register device token: \(error.localizedDescription)")
-        }
     }
 
     /// Send a raw JSON-RPC notification (no id, no response expected).

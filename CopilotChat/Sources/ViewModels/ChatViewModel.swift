@@ -126,11 +126,6 @@ public final class ChatViewModel: ObservableObject {
             self.client = client
             try await client.start()
 
-            // Register APNs device token with relay (if available)
-            if let token = UserDefaults.standard.string(forKey: "apnsDeviceToken"), !token.isEmpty {
-                await client.registerDeviceToken(token)
-            }
-
             switch mode {
             case .session(let config):
                 try await connectSession(config: config)
