@@ -80,6 +80,18 @@ public final class SkillDiscovery: Sendable {
         let relativePath = ".github/skills/\(dirName)/SKILL.md"
         return SkillDescriptor(name: name, description: description, filePath: relativePath)
     }
+
+    /// Build the `<instructions><skills>…</skills></instructions>` section for the system prompt.
+    /// Returns nil if skills is empty.
+    public static func buildPromptSection(from skills: [SkillDescriptor]) -> String? {
+        guard !skills.isEmpty else { return nil }
+        var section = "<instructions>\nHere is a list of skills on this phone that contain domain specific knowledge on a variety of topics.\nEach skill comes with a description of the topic and a file path that contains the detailed instructions.\nWhen a user asks you to perform a task that falls within the domain of a skill, use the 'read_file' tool to acquire the full instructions from the file path.\n<skills>\n"
+        for skill in skills {
+            section += "<skill>\n<name>\(skill.name)</name>\n<description>\(skill.description)</description>\n<file>\(skill.filePath)</file>\n</skill>\n"
+        }
+        section += "</skills>\n</instructions>"
+        return section
+    }
 }
 
 // MARK: - Agent Runtime Profile

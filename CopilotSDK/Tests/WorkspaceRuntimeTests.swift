@@ -197,4 +197,58 @@ final class WorkspaceRuntimeTests: XCTestCase {
         XCTAssertEqual(profile.skills.count, 1)
         XCTAssertEqual(profile.skills[0].name, "solo")
     }
+
+    func testSkillsAppearInSystemPrompt() throws {
+        let workspace = try makeWorkspace()
+
+        // Create two skills
+        let skillsDir = workspace.appendingPathComponent(".github/skills", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillsDir.appendingPathComponent("photo-editor"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: skillsDir.appendingPathComponent("music-gen"), withIntermediateDirectories: true)
+
+        try """
+        ---
+        name: photo-editor
+        description: Edit photos with filters and crops
+        ---
+        # Photo Editor
+        Instructions...
+        """.write(to: skillsDir.appendingPathComponent("photo-editor/SKILL.md"), atomically: true, encoding: .utf8)
+
+        try """
+        ---
+        name: music-gen
+        description: Generate music from text prompts
+        ---
+        # Music Generation
+        Instructions...
+        """.write(to: skillsDir.appendingPathComponent("music-gen/SKILL.md"), atomically: true, encoding: .utf8)
+
+        // Load profile and build prompt section
+        let profile = try AgentProfileLoader().load(from: workspace)
+        let section = SkillDiscovery.buildPromptSection(from: profile.skills)
+
+        XCTAssertNotNil(section)
+        let prompt = section!
+
+        // Verify skills section structure
+        XCTAssertTrue(prompt.contains("<instructions>"))
+        XCTAssertTrue(prompt.contains("</instructions>"))
+        XCTAssertTrue(prompt.contains("<skills>"))
+        XCTAssertTrue(prompt.contains("</skills>"))
+        XCTAssertTrue(prompt.contains("use the 'read_file' tool"))
+
+        // Verify both skills are listed
+        XCTAssertTrue(prompt.contains("<name>photo-editor</name>"))
+        XCTAssertTrue(prompt.contains("<description>Edit photos with filters and crops</description>"))
+        XCTAssertTrue(prompt.contains("<file>.github/skills/photo-editor/SKILL.md</file>"))
+        XCTAssertTrue(prompt.contains("<name>music-gen</name>"))
+        XCTAssertTrue(prompt.contains("<description>Generate music from text prompts</description>"))
+        XCTAssertTrue(prompt.contains("<file>.github/skills/music-gen/SKILL.md</file>"))
+    }
+
+    func testBuildPromptSectionReturnsNilForEmptySkills() throws {
+        let result = SkillDiscovery.buildPromptSection(from: [])
+        XCTAssertNil(result)
+    }
 }
