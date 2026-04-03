@@ -99,7 +99,7 @@ public struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(viewModel.messages) { message in
+                    ForEach(viewModel.filteredMessages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
                     }
@@ -107,9 +107,9 @@ public struct ChatView: View {
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
-            .onChange(of: viewModel.messages.count) { _, _ in
+            .onChange(of: viewModel.filteredMessages.count) { _, _ in
                 // Auto-scroll to bottom on new messages
-                if let lastId = viewModel.messages.last?.id {
+                if let lastId = viewModel.filteredMessages.last?.id {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastId, anchor: .bottom)
                     }

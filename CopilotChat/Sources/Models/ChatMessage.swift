@@ -9,6 +9,7 @@ public struct ChatMessage: Identifiable, Sendable {
     public var content: [ContentBlock]
     public let timestamp: Date
     public var isStreaming: Bool
+    public var project: String?
 
     public enum Role: String, Sendable, Equatable {
         case user
@@ -39,13 +40,15 @@ public struct ChatMessage: Identifiable, Sendable {
         role: Role,
         content: [ContentBlock],
         timestamp: Date = Date(),
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        project: String? = nil
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
         self.isStreaming = isStreaming
+        self.project = project
     }
 }
 

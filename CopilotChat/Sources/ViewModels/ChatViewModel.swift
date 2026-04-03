@@ -73,6 +73,14 @@ public final class ChatViewModel: ObservableObject {
     /// to a specific workspace subdirectory.
     @Published public var projectScope: String?
 
+    /// Messages filtered by the current project scope.
+    /// When a project is selected, shows only messages tagged with that project (or untagged system messages).
+    /// When no project is selected, shows all messages.
+    public var filteredMessages: [ChatMessage] {
+        guard let scope = projectScope else { return messages }
+        return messages.filter { $0.project == nil || $0.project == scope }
+    }
+
     // MARK: - Configuration
 
     public let inputModes: InputMode
@@ -137,7 +145,8 @@ public final class ChatViewModel: ObservableObject {
             emoji = "🔔"
         }
         blocks.append(.text("\(emoji) **\(title)**\n\(body)"))
-        let msg = ChatMessage(role: .system, content: blocks)
+        let repo = (data["repo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let msg = ChatMessage(role: .system, content: blocks, project: repo)
         messages.append(msg)
     }
 
@@ -357,7 +366,8 @@ public final class ChatViewModel: ObservableObject {
         // Inject a system-like message indicating plan execution
         let header = ChatMessage(
             role: .user,
-            content: [.text("[Plan: \(plan.name)]\n\(plan.prompt)")]
+            content: [.text("[Plan: \(plan.name)]\n\(plan.prompt)")],
+            project: projectScope
         )
         messages.append(header)
         let messageCountBefore = messages.count
@@ -408,7 +418,8 @@ public final class ChatViewModel: ObservableObject {
         // Add user message to the chat (show original text, not the injection)
         let userMessage = ChatMessage(
             role: .user,
-            content: [.text(text)]
+            content: [.text(text)],
+            project: projectScope
         )
         messages.append(userMessage)
 
@@ -457,7 +468,7 @@ public final class ChatViewModel: ObservableObject {
         if !text.isEmpty {
             blocks.insert(.text(text), at: 0)
         }
-        messages.append(ChatMessage(role: .user, content: blocks))
+        messages.append(ChatMessage(role: .user, content: blocks, project: projectScope))
 
         chatState = .working
         let base64 = imageData.base64EncodedString()
@@ -532,7 +543,7 @@ public final class ChatViewModel: ObservableObject {
 
         // send_response delivers a final response — add as assistant message
         let blocks = parseContentBlocks(trimmed)
-        let msg = ChatMessage(role: .assistant, content: blocks)
+        let msg = ChatMessage(role: .assistant, content: blocks, project: projectScope)
         messages.append(msg)
     }
 
@@ -542,7 +553,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Add the question as an assistant message
         let blocks = parseContentBlocks(question)
-        messages.append(ChatMessage(role: .assistant, content: blocks))
+        messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
 
         // Wait for user reply via continuation
         return await withCheckedContinuation { continuation in
@@ -558,7 +569,7 @@ public final class ChatViewModel: ObservableObject {
 
         chatState = .waitingForQuestions(questions)
         activeQuestions = questions
-        messages.append(ChatMessage(role: .assistant, content: [.text("Please answer the questions below.")]))
+        messages.append(ChatMessage(role: .assistant, content: [.text("Please answer the questions below.")], project: projectScope))
 
         return await withCheckedContinuation { continuation in
             self.askQuestionsContinuation = continuation
@@ -680,7 +691,7 @@ public final class ChatViewModel: ObservableObject {
         } else {
             // Start a new streaming message
             let blocks = parseContentBlocks(delta)
-            messages.append(ChatMessage(role: .assistant, content: blocks, isStreaming: true))
+            messages.append(ChatMessage(role: .assistant, content: blocks, isStreaming: true, project: projectScope))
         }
     }
 
@@ -712,13 +723,13 @@ public final class ChatViewModel: ObservableObject {
             }
 
             let blocks = parseContentBlocks(trimmed)
-            messages.append(ChatMessage(role: .assistant, content: blocks))
+            messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
         }
     }
 
     /// Add a system message (for errors, status updates).
     private func appendSystemMessage(_ text: String) {
-        messages.append(ChatMessage(role: .system, content: [.text(text)]))
+        messages.append(ChatMessage(role: .system, content: [.text(text)], project: projectScope))
     }
 
     // MARK: - Todo Tool
