@@ -865,6 +865,10 @@ public final class CopilotSession: @unchecked Sendable {
     private var eventTask: Task<Void, Never>?
     private let eventStore = EventHandlerStore()
 
+    /// Handler for relay server notifications (usage, agent_progress, build status, etc.)
+    /// Called on any JSON-RPC `notification` method message from the relay.
+    public var onRelayNotification: ((_ type: String, _ params: [String: JSONValue]) -> Void)?
+
     init(sessionId: String, connection: JSONRPCConnection, config: SessionConfig? = nil, tools: [ToolDefinition]? = nil, hooks: SessionHooks? = nil) {
         self.sessionId = sessionId
         self.connection = connection
@@ -980,6 +984,16 @@ public final class CopilotSession: @unchecked Sendable {
         eventTask = Task { [weak self] in
             guard let self else { return }
             for await notification in self.connection.notifications {
+                // Handle relay server notifications (usage, agent_progress, build status)
+                if notification.method == "notification" {
+                    if case .object(let params) = notification.params {
+                        let type: String
+                        if case .string(let t) = params["type"] { type = t } else { type = "unknown" }
+                        self.onRelayNotification?(type, params)
+                    }
+                    continue
+                }
+
                 guard notification.method == "session.event",
                       case .object(let params) = notification.params,
                       case .object(let event) = params["event"],

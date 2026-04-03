@@ -86,6 +86,9 @@ public final class ChatViewModel: ObservableObject {
     public let inputModes: InputMode
     private let transport: Transport
     private let mode: ChatMode
+    /// Filter deciding which notification types to show in chat.
+    /// Returns true if the given type (e.g. "usage", "agent_progress", "build") should be displayed.
+    public let notificationFilter: (String) -> Bool
 
     // MARK: - Internal State
 
@@ -106,16 +109,19 @@ public final class ChatViewModel: ObservableObject {
     ///   - transport: WebSocket transport to connect to the relay.
     ///   - mode: `.session(config)` or `.agent(config)`.
     ///   - inputModes: Which input modes are available (.text, .speech, .attachment).
+    ///   - notificationFilter: Returns true if a notification type should show in chat.
     public init(
         transport: Transport,
         mode: ChatMode,
         inputModes: InputMode = .textAndSpeech,
-        usageTracker: UsageTracker = UsageTracker()
+        usageTracker: UsageTracker = UsageTracker(),
+        notificationFilter: @escaping (String) -> Bool = { _ in true }
     ) {
         self.transport = transport
         self.mode = mode
         self.inputModes = inputModes
         self.usageTracker = usageTracker
+        self.notificationFilter = notificationFilter
     }
 
     deinit {
@@ -204,6 +210,20 @@ public final class ChatViewModel: ObservableObject {
 
         // Subscribe to events
         await subscribeToEvents(session: session)
+
+        // Handle relay server notifications (usage, progress, build status)
+        session.onRelayNotification = { [weak self] type, params in
+            guard let self else { return }
+            guard self.notificationFilter(type) else { return }
+            let title: String
+            if case .string(let t) = params["title"] { title = t } else { title = type }
+            let body: String
+            if case .string(let b) = params["body"] { body = b } else { body = "" }
+            Task { @MainActor in
+                self.addNotification(title: title, body: body, data: ["type": type])
+            }
+        }
+
         usageTracker.resetSession()
         chatState = .idle
     }
@@ -247,6 +267,20 @@ public final class ChatViewModel: ObservableObject {
 
         // Subscribe to events on the underlying session
         await subscribeToEvents(session: agent.session)
+
+        // Handle relay server notifications (usage, progress, build status)
+        agent.session.onRelayNotification = { [weak self] type, params in
+            guard let self else { return }
+            guard self.notificationFilter(type) else { return }
+            let title: String
+            if case .string(let t) = params["title"] { title = t } else { title = type }
+            let body: String
+            if case .string(let b) = params["body"] { body = b } else { body = "" }
+            Task { @MainActor in
+                self.addNotification(title: title, body: body, data: ["type": type])
+            }
+        }
+
         chatState = .idle
     }
 
