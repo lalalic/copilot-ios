@@ -119,6 +119,28 @@ public final class ChatViewModel: ObservableObject {
         await client?.setDeviceToken(token)
     }
 
+    /// Add a push notification as a system message in the chat.
+    @MainActor
+    public func addNotification(title: String, body: String, data: [String: Any] = [:]) {
+        var blocks: [ChatMessage.ContentBlock] = []
+        let type = data["type"] as? String ?? "notification"
+        let emoji: String
+        switch type {
+        case "build":
+            let status = data["status"] as? String ?? ""
+            emoji = status == "success" ? "✅" : status == "failed" ? "❌" : "🔨"
+        case "testflight":
+            emoji = "🚀"
+        case "agent_progress":
+            emoji = "🤖"
+        default:
+            emoji = "🔔"
+        }
+        blocks.append(.text("\(emoji) **\(title)**\n\(body)"))
+        let msg = ChatMessage(role: .system, content: blocks)
+        messages.append(msg)
+    }
+
     // MARK: - Connection
 
     /// Connect to the relay and create a session or agent.
