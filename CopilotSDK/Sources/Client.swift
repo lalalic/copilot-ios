@@ -1952,6 +1952,16 @@ public final class CopilotClient: @unchecked Sendable {
         }
     }
 
+    /// Send device token to relay for APNs push notifications.
+    public func setDeviceToken(_ token: String) async {
+        do {
+            try await connection.sendNotification(method: "set_device_token", params: ["token": .string(token)])
+            NSLog("[CopilotClient] Sent device token to relay: \(token.prefix(8))...")
+        } catch {
+            NSLog("[CopilotClient] setDeviceToken error: \(error.localizedDescription)")
+        }
+    }
+
     /// Create a new session with full configuration.
     public func createSession(config: SessionConfig = SessionConfig()) async throws -> CopilotSession {
         let sessionId = config.sessionId ?? UUID().uuidString.lowercased()

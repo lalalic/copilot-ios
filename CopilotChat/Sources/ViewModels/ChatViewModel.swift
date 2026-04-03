@@ -114,6 +114,11 @@ public final class ChatViewModel: ObservableObject {
         agentTask?.cancel()
     }
 
+    /// Send APNs device token to relay for push notifications.
+    public func setDeviceToken(_ token: String) async {
+        await client?.setDeviceToken(token)
+    }
+
     // MARK: - Connection
 
     /// Connect to the relay and create a session or agent.
