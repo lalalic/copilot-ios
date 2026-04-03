@@ -134,8 +134,24 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Add a push notification as a system message in the chat.
+    /// Coding agent notifications (type: "coding_agent") are handled by CodingAgentNotificationHandler.
     @MainActor
     public func addNotification(title: String, body: String, data: [String: Any] = [:]) {
+        // Try coding agent handler first
+        if let notification = CodingAgentNotificationHandler.parse(title: title, body: body, userInfo: data) {
+            CodingAgentNotificationHandler.apply(
+                notification,
+                addMessage: { msgTitle, msgBody, repo in
+                    let blocks: [ChatMessage.ContentBlock] = [.text("**\(msgTitle)**\n\(msgBody)")]
+                    let msg = ChatMessage(role: .system, content: blocks, project: repo)
+                    self.messages.append(msg)
+                },
+                usageTracker: usageTracker
+            )
+            return
+        }
+        
+        // Non-coding-agent notifications: build, testflight, etc.
         var blocks: [ChatMessage.ContentBlock] = []
         let type = data["type"] as? String ?? "notification"
         let emoji: String
