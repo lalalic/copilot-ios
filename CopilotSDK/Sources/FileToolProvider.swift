@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, list_files, create_directory, create_new_project.
+    /// All file tools: read_file, write_file, list_files, create_directory, create_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, listFilesTool, createDirectoryTool, createNewProjectTool]
+        [readFileTool, writeFileTool, listFilesTool, createDirectoryTool, createProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -235,16 +235,33 @@ public final class FileToolProvider: Sendable {
         }
     }
 
-    private var createNewProjectTool: ToolDefinition {
+    private var createProjectTool: ToolDefinition {
         ToolDefinition(
-            name: "create_new_project",
-            description: "Create a new project directory under workspace root using .neo/templates/project as scaffold. The tool creates project folders and copies template files when present.",
+            name: "create_project",
+            description: "Create a new project in the workspace. Steps: 1) Read .neo/templates/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder from the template.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "name": .object([
                         "type": .string("string"),
-                        "description": .string("Project folder name, e.g. 'ProjectA' or 'video-campaign'.")
+                        "description": .string("Project folder name, e.g. 'FitnessTracker' or 'RecipeApp'.")
+                    ]),
+                    "description": .object([
+                        "type": .string("string"),
+                        "description": .string("One-line project description.")
+                    ]),
+                    "template": .object([
+                        "type": .string("string"),
+                        "description": .string("Template name from .neo/templates/ (default: 'project').")
+                    ]),
+                    "goal": .object([
+                        "type": .string("string"),
+                        "description": .string("Project goal (1-2 sentences).")
+                    ]),
+                    "features": .object([
+                        "type": .string("array"),
+                        "items": .object(["type": .string("string")]),
+                        "description": .string("List of MVP features.")
                     ])
                 ]),
                 "required": .array([.string("name")])
@@ -265,6 +282,14 @@ public final class FileToolProvider: Sendable {
                 return "Error: invalid project name '\(rawName)'"
             }
 
+            let description = dict["description"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
+            let templateName = dict["template"].flatMap { if case .string(let s) = $0 { return s } else { return nil } } ?? "project"
+            let goal = dict["goal"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
+            let features: [String] = {
+                guard case .array(let arr) = dict["features"] else { return [] }
+                return arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+            }()
+
             let projectURL = self.baseDirectory.appendingPathComponent(name, isDirectory: true)
             guard projectURL.path.hasPrefix(self.baseDirectory.path) else {
                 return "Error: invalid project path"
@@ -280,23 +305,77 @@ public final class FileToolProvider: Sendable {
                 let templateURL = self.baseDirectory
                     .appendingPathComponent(".neo", isDirectory: true)
                     .appendingPathComponent("templates", isDirectory: true)
-                    .appendingPathComponent("project", isDirectory: true)
+                    .appendingPathComponent(templateName, isDirectory: true)
 
                 if FileManager.default.fileExists(atPath: templateURL.path) {
                     try self.copyTemplateProject(from: templateURL, to: projectURL)
                 } else {
                     try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("docs", isDirectory: true), withIntermediateDirectories: true)
                     try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("progress", isDirectory: true), withIntermediateDirectories: true)
-                    let readme = "# \(name)\n\n## Goal\n\n## Features\n\n## Phase\n"
-                    try readme.write(to: projectURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
                 }
 
-                logger.info("create_new_project: \(name)")
-                return "Created project '\(name)'"
+                // Build README.md from provided info
+                let readme = self.buildProjectReadme(
+                    name: name,
+                    description: description,
+                    goal: goal,
+                    features: features
+                )
+                try readme.write(to: projectURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+                logger.info("create_project: \(name) (template: \(templateName))")
+                return "Created project '\(name)' from template '\(templateName)'"
             } catch {
                 return "Error creating project \(name): \(error.localizedDescription)"
             }
         }
+    }
+
+    private func buildProjectReadme(name: String, description: String?, goal: String?, features: [String]) -> String {
+        var lines: [String] = []
+
+        // Frontmatter
+        lines.append("---")
+        lines.append("name: \(name)")
+        if let description, !description.isEmpty {
+            lines.append("description: \(description)")
+        }
+        lines.append("---")
+        lines.append("")
+
+        // Goal
+        lines.append("# goal")
+        lines.append(goal ?? "define project goal with 1 or 2 sentences")
+        lines.append("")
+
+        // Features
+        lines.append("# feature")
+        if features.isEmpty {
+            lines.append("- [ ] title")
+        } else {
+            for feature in features {
+                lines.append("- [ ] \(feature)")
+            }
+        }
+        lines.append("")
+
+        // Strategy
+        lines.append("# strategy")
+        lines.append("define implementation strategy")
+        lines.append("")
+
+        // Implementation phases
+        lines.append("# implementation phrases")
+        lines.append("define high level phrases to implement goal")
+        lines.append("- [ ] title")
+        lines.append("")
+
+        // References
+        lines.append("# references")
+        lines.append("- **docs/**: project docs, detail requirements, design, knowledge, and etc")
+        lines.append("- **progress/**: project plan, todo, report, and etc")
+
+        return lines.joined(separator: "\n")
     }
 
     private func copyTemplateProject(from templateURL: URL, to projectURL: URL) throws {
