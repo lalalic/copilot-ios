@@ -101,6 +101,8 @@ public final class ChatViewModel: ObservableObject {
     /// Continuation for ask_questions — resumed when user submits structured replies.
     private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
     @Published public var activeQuestions: [AskQuestionItem] = []
+    /// Handles create_project_request delegation from relay (lazy-initialized on first use).
+    private var projectTaskHandler: ProjectTaskHandler?
 
     // MARK: - Init
 
@@ -227,17 +229,9 @@ public final class ChatViewModel: ObservableObject {
         // Subscribe to events
         await subscribeToEvents(session: session)
 
-        // Handle relay server notifications (usage, progress, build status)
+        // Handle relay server notifications (usage, progress, build status, delegation)
         session.onRelayNotification = { [weak self] type, params in
-            guard let self else { return }
-            guard self.notificationFilter(type) else { return }
-            let title: String
-            if case .string(let t) = params["title"] { title = t } else { title = type }
-            let body: String
-            if case .string(let b) = params["body"] { body = b } else { body = "" }
-            Task { @MainActor in
-                self.addNotification(title: title, body: body, data: ["type": type])
-            }
+            self?.handleRelayNotification(type: type, params: params)
         }
 
         usageTracker.resetSession()
@@ -284,20 +278,57 @@ public final class ChatViewModel: ObservableObject {
         // Subscribe to events on the underlying session
         await subscribeToEvents(session: agent.session)
 
-        // Handle relay server notifications (usage, progress, build status)
+        // Handle relay server notifications (usage, progress, build status, delegation)
         agent.session.onRelayNotification = { [weak self] type, params in
-            guard let self else { return }
-            guard self.notificationFilter(type) else { return }
-            let title: String
-            if case .string(let t) = params["title"] { title = t } else { title = type }
-            let body: String
-            if case .string(let b) = params["body"] { body = b } else { body = "" }
-            Task { @MainActor in
-                self.addNotification(title: title, body: body, data: ["type": type])
-            }
+            self?.handleRelayNotification(type: type, params: params)
         }
 
         chatState = .idle
+    }
+
+    // MARK: - Relay Notification Handling
+
+    private func handleRelayNotification(type: String, params: [String: JSONValue]) {
+        // Intercept create_project_request delegation from relay
+        if type == "create_project_request" {
+            Task {
+                let handler = self.getOrCreateProjectTaskHandler()
+                await handler.handleCreateProjectRequest(params: params)
+            }
+            return
+        }
+
+        // Generic notification display
+        guard notificationFilter(type) else { return }
+        let title: String
+        if case .string(let t) = params["title"] { title = t } else { title = type }
+        let body: String
+        if case .string(let b) = params["body"] { body = b } else { body = "" }
+        Task { @MainActor in
+            self.addNotification(title: title, body: body, data: ["type": type])
+        }
+    }
+
+    private func getOrCreateProjectTaskHandler() -> ProjectTaskHandler {
+        if let handler = projectTaskHandler { return handler }
+
+        // Derive HTTP proxy URL from the transport
+        let proxyURL: URL
+        if let wsTransport = transport as? WebSocketTransport {
+            proxyURL = ProjectTaskHandler.httpURL(from: wsTransport.url)
+        } else {
+            proxyURL = URL(string: "http://localhost:8766")!
+        }
+
+        let client = self.client
+        let handler = ProjectTaskHandler(
+            proxyBaseURL: proxyURL,
+            sendNotification: { [weak client] method, params in
+                await client?.sendNotification(method: method, params: params)
+            }
+        )
+        projectTaskHandler = handler
+        return handler
     }
 
     // MARK: - Event Subscription

@@ -8,7 +8,7 @@ private let sdkLog = Logger(subsystem: "com.copilot.sdk", category: "websocket")
 /// Works on both iOS and macOS.
 public final class WebSocketTransport: Transport, @unchecked Sendable {
     
-    private let url: URL
+    public let url: URL
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var streamContinuation: AsyncStream<Data>.Continuation?
