@@ -4,7 +4,7 @@ import os
 private let log = Logger(subsystem: "com.copilot.sdk", category: "project-task")
 
 /// Handles create_project_request delegation from the relay server.
-/// Performs GitHub operations via the relay's /github/* proxy,
+/// Creates repo, pushes template files from device, creates issue,
 /// then sends create_project_done back via WebSocket.
 public final class ProjectTaskHandler {
     
@@ -17,22 +17,22 @@ public final class ProjectTaskHandler {
     /// GitHub org for project creation.
     private let githubOrg: String
     
-    /// Template repo name.
-    private let templateRepo: String
-    
     /// Expo owner for app.json.
     private let expoOwner: String
     
+    /// Workspace directory on device (to read .templates/).
+    private let workspaceURL: URL
+    
     public init(
         proxyBaseURL: URL,
+        workspaceURL: URL,
         githubOrg: String = "neos-apps",
-        templateRepo: String = "expo-app-template",
         expoOwner: String = "neos-apps",
         sendNotification: @escaping (String, [String: JSONValue]) async -> Void
     ) {
         self.proxyBaseURL = proxyBaseURL
+        self.workspaceURL = workspaceURL
         self.githubOrg = githubOrg
-        self.templateRepo = templateRepo
         self.expoOwner = expoOwner
         self.sendNotification = sendNotification
     }
@@ -58,7 +58,7 @@ public final class ProjectTaskHandler {
     // MARK: - Handle Delegation
     
     /// Handle a create_project_request notification from the relay.
-    /// Performs GitHub operations via /github/* proxy, then reports done.
+    /// Creates repo, pushes template files from device, creates issue, reports done.
     public func handleCreateProjectRequest(params: [String: JSONValue]) async {
         guard case .string(let requestId) = params["requestId"],
               case .string(let repoName) = params["repoName"],
@@ -74,19 +74,25 @@ public final class ProjectTaskHandler {
         let bundleId: String
         if case .string(let bi) = params["bundleId"] { bundleId = bi } else { bundleId = "" }
         
-        log.info("Handling create_project_request: \(repoName) (\(appName))")
+        let projectType: String
+        if case .string(let pt) = params["projectType"] { projectType = pt } else { projectType = "expo-app" }
+        
+        log.info("Handling create_project_request: \(repoName) (\(appName)) type=\(projectType)")
         
         do {
-            // 1. Create repo from template
+            // 1. Read template files from device
+            let files = try readTemplateFiles(projectType: projectType, appName: appName, repoName: repoName, bundleId: bundleId)
+            log.info("Read \(files.count) template files from device")
+            
+            // 2. Create empty repo
             let createRes = try await githubProxy(
                 "POST",
-                "/repos/\(githubOrg)/\(templateRepo)/generate",
+                "/orgs/\(githubOrg)/repos",
                 body: [
-                    "owner": githubOrg,
                     "name": repoName,
                     "description": appName,
                     "private": false,
-                    "include_all_branches": false,
+                    "auto_init": false,
                 ] as [String: Any]
             )
             
@@ -96,11 +102,8 @@ public final class ProjectTaskHandler {
             
             log.info("Repo created: \(self.githubOrg)/\(repoName)")
             
-            // 2. Wait for repo to be ready (template generation is async)
-            try await Task.sleep(nanoseconds: 3_000_000_000) // 3s
-            
-            // 3. Customize app.json
-            try await customizeAppJson(repoName: repoName, appName: appName, bundleId: bundleId)
+            // 3. Push all files via Git trees API
+            try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
             
             // 4. Create issue with task spec
             let issueNumber = try await createIssue(
@@ -124,20 +127,77 @@ public final class ProjectTaskHandler {
         }
     }
     
-    // MARK: - GitHub Operations
+    // MARK: - Template Files
     
-    private func customizeAppJson(repoName: String, appName: String, bundleId: String) async throws {
-        // Fetch current app.json
-        let getRes = try await githubProxy("GET", "/repos/\(githubOrg)/\(repoName)/contents/app.json")
-        guard getRes.status == 200 else { return }
+    private struct TemplateFile {
+        let path: String
+        let data: Data
+        let isExecutable: Bool
+    }
+    
+    /// Read and merge template files from device filesystem.
+    /// Merges coding-agent-infra/ + projects/{projectType}/.
+    private func readTemplateFiles(projectType: String, appName: String, repoName: String, bundleId: String) throws -> [TemplateFile] {
+        let manager = FileManager.default
+        let templatesDir = workspaceURL.appendingPathComponent(".templates", isDirectory: true)
         
-        guard let json = getRes.json as? [String: Any],
-              let contentBase64 = json["content"] as? String,
-              let sha = json["sha"] as? String,
-              let contentData = Data(base64Encoded: contentBase64.replacingOccurrences(of: "\n", with: "")),
-              let contentStr = String(data: contentData, encoding: .utf8),
-              var appJson = try? JSONSerialization.jsonObject(with: Data(contentStr.utf8)) as? [String: Any],
-              var expo = appJson["expo"] as? [String: Any] else { return }
+        var files: [TemplateFile] = []
+        
+        // Read coding-agent-infra (always included)
+        let infraDir = templatesDir.appendingPathComponent("coding-agent-infra", isDirectory: true)
+        if manager.fileExists(atPath: infraDir.path) {
+            files.append(contentsOf: try readDirectory(infraDir))
+        }
+        
+        // Read project type template
+        let projectDir = templatesDir
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(projectType, isDirectory: true)
+        if manager.fileExists(atPath: projectDir.path) {
+            files.append(contentsOf: try readDirectory(projectDir))
+        }
+        
+        // Customize app.json and package.json in-memory
+        return files.map { file in
+            if file.path == "app.json", let customized = customizeAppJson(file.data, appName: appName, repoName: repoName, bundleId: bundleId) {
+                return TemplateFile(path: file.path, data: customized, isExecutable: file.isExecutable)
+            }
+            if file.path == "package.json", let customized = customizePackageJson(file.data, repoName: repoName, appName: appName) {
+                return TemplateFile(path: file.path, data: customized, isExecutable: file.isExecutable)
+            }
+            return file
+        }
+    }
+    
+    /// Recursively read all files from a directory, returning relative paths.
+    private func readDirectory(_ dir: URL) throws -> [TemplateFile] {
+        let manager = FileManager.default
+        var result: [TemplateFile] = []
+        
+        guard let enumerator = manager.enumerator(
+            at: dir,
+            includingPropertiesForKeys: [.isDirectoryKey, .isExecutableKey],
+            options: []
+        ) else { return result }
+        
+        while let item = enumerator.nextObject() as? URL {
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isExecutableKey])
+            if values.isDirectory == true { continue }
+            
+            let relativePath = item.path.replacingOccurrences(of: dir.path + "/", with: "")
+            guard !relativePath.isEmpty else { continue }
+            
+            let data = try Data(contentsOf: item)
+            let isExec = values.isExecutable == true && relativePath.hasSuffix(".sh")
+            result.append(TemplateFile(path: relativePath, data: data, isExecutable: isExec))
+        }
+        
+        return result
+    }
+    
+    private func customizeAppJson(_ data: Data, appName: String, repoName: String, bundleId: String) -> Data? {
+        guard var appJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var expo = appJson["expo"] as? [String: Any] else { return nil }
         
         expo["name"] = appName
         expo["slug"] = repoName
@@ -153,17 +213,83 @@ public final class ProjectTaskHandler {
         }
         
         appJson["expo"] = expo
+        return try? JSONSerialization.data(withJSONObject: appJson, options: [.prettyPrinted, .sortedKeys])
+    }
+    
+    private func customizePackageJson(_ data: Data, repoName: String, appName: String) -> Data? {
+        guard var pkgJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        pkgJson["name"] = repoName
+        pkgJson["description"] = appName
+        return try? JSONSerialization.data(withJSONObject: pkgJson, options: [.prettyPrinted, .sortedKeys])
+    }
+    
+    // MARK: - Git Trees API
+    
+    /// Push all files as a single commit via Git trees API.
+    private func pushFilesViaGitTrees(repoName: String, appName: String, files: [TemplateFile]) async throws {
+        let repoPath = "/repos/\(githubOrg)/\(repoName)"
         
-        let updatedData = try JSONSerialization.data(withJSONObject: appJson, options: [.prettyPrinted, .sortedKeys])
-        let updatedBase64 = updatedData.base64EncodedString()
+        // Create blobs for each file
+        var treeEntries: [[String: Any]] = []
+        for file in files {
+            let isText = !isBinaryFile(file.path)
+            let blobBody: [String: Any] = isText
+                ? ["content": String(data: file.data, encoding: .utf8) ?? "", "encoding": "utf-8"]
+                : ["content": file.data.base64EncodedString(), "encoding": "base64"]
+            
+            let blobRes = try await githubProxy("POST", "\(repoPath)/git/blobs", body: blobBody)
+            guard blobRes.status == 201,
+                  let json = blobRes.json as? [String: Any],
+                  let sha = json["sha"] as? String else {
+                log.warning("Failed to create blob for \(file.path)")
+                continue
+            }
+            
+            treeEntries.append([
+                "path": file.path,
+                "mode": file.isExecutable ? "100755" : "100644",
+                "type": "blob",
+                "sha": sha,
+            ])
+        }
         
-        _ = try await githubProxy("PUT", "/repos/\(githubOrg)/\(repoName)/contents/app.json", body: [
-            "message": "chore: configure app for \(appName)",
-            "content": updatedBase64,
-            "sha": sha,
+        // Create tree
+        let treeRes = try await githubProxy("POST", "\(repoPath)/git/trees", body: ["tree": treeEntries])
+        guard treeRes.status == 201,
+              let treeJson = treeRes.json as? [String: Any],
+              let treeSha = treeJson["sha"] as? String else {
+            throw ProjectTaskError.gitTreeCreation(body: treeRes.text)
+        }
+        
+        // Create initial commit (no parent)
+        let commitRes = try await githubProxy("POST", "\(repoPath)/git/commits", body: [
+            "message": "Initial commit: \(appName)",
+            "tree": treeSha,
         ])
+        guard commitRes.status == 201,
+              let commitJson = commitRes.json as? [String: Any],
+              let commitSha = commitJson["sha"] as? String else {
+            throw ProjectTaskError.gitCommitCreation(body: commitRes.text)
+        }
         
-        log.info("app.json customized for \(appName)")
+        // Create main branch ref
+        let refRes = try await githubProxy("POST", "\(repoPath)/git/refs", body: [
+            "ref": "refs/heads/main",
+            "sha": commitSha,
+        ])
+        guard refRes.status == 201 else {
+            throw ProjectTaskError.gitRefCreation(body: refRes.text)
+        }
+        
+        // Set main as default branch
+        _ = try await githubProxy("PATCH", repoPath, body: ["default_branch": "main"])
+        
+        log.info("Pushed \(treeEntries.count) files via Git trees API")
+    }
+    
+    private func isBinaryFile(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "ico", "webp", "pdf", "zip", "tar", "gz"].contains(ext)
     }
     
     private func createIssue(repoName: String, appName: String, taskDescription: String) async throws -> Int {
@@ -240,6 +366,9 @@ public final class ProjectTaskHandler {
 enum ProjectTaskError: LocalizedError {
     case repoCreation(status: Int, body: String)
     case issueCreation(status: Int, body: String)
+    case gitTreeCreation(body: String)
+    case gitCommitCreation(body: String)
+    case gitRefCreation(body: String)
     
     var errorDescription: String? {
         switch self {
@@ -247,6 +376,12 @@ enum ProjectTaskError: LocalizedError {
             return "Repo creation failed (HTTP \(status)): \(body.prefix(200))"
         case .issueCreation(let status, let body):
             return "Issue creation failed (HTTP \(status)): \(body.prefix(200))"
+        case .gitTreeCreation(let body):
+            return "Git tree creation failed: \(body.prefix(200))"
+        case .gitCommitCreation(let body):
+            return "Git commit creation failed: \(body.prefix(200))"
+        case .gitRefCreation(let body):
+            return "Git ref creation failed: \(body.prefix(200))"
         }
     }
 }

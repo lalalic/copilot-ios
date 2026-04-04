@@ -238,7 +238,7 @@ public final class FileToolProvider: Sendable {
     private var createProjectTool: ToolDefinition {
         ToolDefinition(
             name: "create_project",
-            description: "Create a new project in the workspace. Steps: 1) Read .neo/templates/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder from the template.",
+            description: "Create a new project in the workspace. Steps: 1) Read .templates/projects/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder from the template.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -252,7 +252,7 @@ public final class FileToolProvider: Sendable {
                     ]),
                     "template": .object([
                         "type": .string("string"),
-                        "description": .string("Template name from .neo/templates/ (default: 'project').")
+                        "description": .string("Template name from .templates/projects/ (default: 'general').")
                     ]),
                     "goal": .object([
                         "type": .string("string"),
@@ -283,7 +283,7 @@ public final class FileToolProvider: Sendable {
             }
 
             let description = dict["description"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
-            let templateName = dict["template"].flatMap { if case .string(let s) = $0 { return s } else { return nil } } ?? "project"
+            let templateName = dict["template"].flatMap { if case .string(let s) = $0 { return s } else { return nil } } ?? "general"
             let goal = dict["goal"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
             let features: [String] = {
                 guard case .array(let arr) = dict["features"] else { return [] }
@@ -303,8 +303,8 @@ public final class FileToolProvider: Sendable {
                 try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
 
                 let templateURL = self.baseDirectory
-                    .appendingPathComponent(".neo", isDirectory: true)
-                    .appendingPathComponent("templates", isDirectory: true)
+                    .appendingPathComponent(".templates", isDirectory: true)
+                    .appendingPathComponent("projects", isDirectory: true)
                     .appendingPathComponent(templateName, isDirectory: true)
 
                 if FileManager.default.fileExists(atPath: templateURL.path) {

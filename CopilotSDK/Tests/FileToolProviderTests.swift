@@ -68,7 +68,7 @@ final class FileToolProviderTests: XCTestCase {
     func testCreateProjectFromTemplate() async throws {
         // Set up a custom template
         let templateDir = tmpDir
-            .appendingPathComponent(".neo/templates/custom-app", isDirectory: true)
+            .appendingPathComponent(".templates/projects/custom-app", isDirectory: true)
         try FileManager.default.createDirectory(at: templateDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: templateDir.appendingPathComponent("assets", isDirectory: true),

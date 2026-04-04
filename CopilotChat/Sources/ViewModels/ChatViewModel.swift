@@ -103,6 +103,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public var activeQuestions: [AskQuestionItem] = []
     /// Handles create_project_request delegation from relay (lazy-initialized on first use).
     private var projectTaskHandler: ProjectTaskHandler?
+    
+    /// Workspace directory on device for reading templates.
+    private let workspaceURL: URL?
 
     // MARK: - Init
 
@@ -117,12 +120,14 @@ public final class ChatViewModel: ObservableObject {
         mode: ChatMode,
         inputModes: InputMode = .textAndSpeech,
         usageTracker: UsageTracker = UsageTracker(),
+        workspaceURL: URL? = nil,
         notificationFilter: @escaping (String) -> Bool = { _ in true }
     ) {
         self.transport = transport
         self.mode = mode
         self.inputModes = inputModes
         self.usageTracker = usageTracker
+        self.workspaceURL = workspaceURL
         self.notificationFilter = notificationFilter
     }
 
@@ -323,6 +328,7 @@ public final class ChatViewModel: ObservableObject {
         let client = self.client
         let handler = ProjectTaskHandler(
             proxyBaseURL: proxyURL,
+            workspaceURL: workspaceURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
             sendNotification: { [weak client] method, params in
                 await client?.sendNotification(method: method, params: params)
             }
