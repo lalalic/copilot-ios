@@ -179,6 +179,18 @@ public final class ChatViewModel: ObservableObject {
         messages.append(msg)
     }
 
+    // MARK: - Debug
+
+    /// Diagnostic string exposing private state for automation/testing.
+    public var debugInfo: String {
+        let m = String(describing: mode)
+        let hasAgent = agent != nil
+        let agentRunning = agent?.isRunning ?? false
+        let hasSession = session != nil
+        let hasClient = client != nil
+        return "mode=\(m) agent=\(hasAgent) agentRunning=\(agentRunning) session=\(hasSession) client=\(hasClient) chatState=\(chatState)"
+    }
+
     // MARK: - Connection
 
     /// Connect to the relay and create a session or agent.
@@ -543,6 +555,90 @@ public final class ChatViewModel: ObservableObject {
 
         default:
             break
+        }
+    }
+
+    /// Send a message with explicit text (bypasses inputText property).
+    /// Used by automation (AppAgent) to avoid race conditions with UI bindings.
+    /// When startAgent is true, starts the agent loop directly (avoids Task scheduling issues).
+    public func send(_ text: String, startAgent: Bool = false) async {
+        inputText = text
+        if startAgent {
+            // Direct agent start — bypasses the fire-and-forget Task in sendPrompt()
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            inputText = ""
+            messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope))
+            chatState = .working
+            if let agent {
+                if !agent.isRunning {
+                    // Start agent loop in background Task — agent.start() blocks until loop ends
+                    agentTask = Task { [weak self] in
+                        do {
+                            try await agent.start(prompt: trimmed)
+                        } catch {
+                            await MainActor.run {
+                                self?.appendSystemMessage("Agent error: \(error.localizedDescription)")
+                                self?.chatState = .error(error.localizedDescription)
+                            }
+                        }
+                    }
+                } else {
+                    // Agent already running — steer its session with the new prompt
+                    do {
+                        _ = try await agent.session.steer(prompt: trimmed)
+                    } catch {
+                        appendSystemMessage("Steer failed: \(error.localizedDescription)")
+                    }
+                }
+            } else if let session {
+                do {
+                    try await session.steer(prompt: trimmed)
+                } catch {
+                    appendSystemMessage("Steer failed: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            await send()
+        }
+    }
+
+    /// Send a prompt directly to the relay via the underlying session WebSocket.
+    /// Used by automation — sends the message and waits for session idle/on-hold.
+    /// Returns the last assistant message content for diagnostics.
+    public func sendToRelay(_ text: String) async -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "empty" }
+        
+        let beforeCount = messages.count
+        messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope))
+        chatState = .working
+
+        // Use the agent's session if in agent mode, otherwise the direct session
+        let targetSession = agent?.session ?? session
+        guard let targetSession else { return "no-session" }
+        
+        do {
+            _ = try await targetSession.send(prompt: trimmed)
+            
+            // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
+            for _ in 0..<60 {
+                try await Task.sleep(for: .seconds(1))
+                if case .working = chatState { continue }
+                break
+            }
+            
+            // Collect new assistant messages
+            let newMessages = messages.suffix(from: beforeCount + 1)
+                .filter { $0.role == .assistant }
+                .map { $0.fullText }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            
+            return newMessages.isEmpty ? "sent-no-reply" : newMessages
+        } catch {
+            chatState = .error(error.localizedDescription)
+            return "error: \(error.localizedDescription)"
         }
     }
 
