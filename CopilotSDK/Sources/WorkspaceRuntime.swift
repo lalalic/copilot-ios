@@ -139,22 +139,50 @@ public final class WorkspaceBootstrapper: Sendable {
             create: true
         )
         let workspaceURL = appSupport.appendingPathComponent(workspaceFolderName, isDirectory: true)
+        let workspaceExists = FileManager.default.fileExists(atPath: workspaceURL.path)
 
-        if FileManager.default.fileExists(atPath: workspaceURL.path) {
-            return workspaceURL
+        if !workspaceExists {
+            if let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip") {
+                try FileManager.default.unzipItem(at: zipURL, to: appSupport)
+            } else if let packageZipURL = Bundle.module.url(forResource: bundledZipName, withExtension: "zip") {
+                try FileManager.default.unzipItem(at: packageZipURL, to: appSupport)
+            }
+            if !FileManager.default.fileExists(atPath: workspaceURL.path) {
+                try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+            }
         }
 
-        if let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip") {
-            try FileManager.default.unzipItem(at: zipURL, to: appSupport)
-        } else if let packageZipURL = Bundle.module.url(forResource: bundledZipName, withExtension: "zip") {
-            try FileManager.default.unzipItem(at: packageZipURL, to: appSupport)
-        }
-
-        if !FileManager.default.fileExists(atPath: workspaceURL.path) {
-            try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
-        }
+        // Always sync .templates/ from bundle (they may be updated between app versions)
+        syncTemplatesFromBundle(bundle: bundle, workspaceURL: workspaceURL)
 
         return workspaceURL
+    }
+
+    /// Re-extract .templates/ directory from bundled zip on every launch.
+    private func syncTemplatesFromBundle(bundle: Bundle, workspaceURL: URL) {
+        let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
+            ?? Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
+        guard let zipURL else { return }
+
+        let manager = FileManager.default
+        let tempDir = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: tempDir) }
+
+        do {
+            try manager.unzipItem(at: zipURL, to: tempDir)
+            let extractedTemplates = tempDir
+                .appendingPathComponent(workspaceFolderName)
+                .appendingPathComponent(".templates")
+            guard manager.fileExists(atPath: extractedTemplates.path) else { return }
+
+            let destTemplates = workspaceURL.appendingPathComponent(".templates")
+            if manager.fileExists(atPath: destTemplates.path) {
+                try manager.removeItem(at: destTemplates)
+            }
+            try manager.copyItem(at: extractedTemplates, to: destTemplates)
+        } catch {
+            // Non-fatal: templates sync failure doesn't prevent app launch
+        }
     }
 }
 

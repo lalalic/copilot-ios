@@ -84,7 +84,7 @@ public final class ProjectTaskHandler {
             let files = try readTemplateFiles(projectType: projectType, appName: appName, repoName: repoName, bundleId: bundleId)
             log.info("Read \(files.count) template files from device")
             
-            // 2. Create empty repo
+            // 2. Create repo with initial commit (auto_init enables Git Trees API)
             let createRes = try await githubProxy(
                 "POST",
                 "/orgs/\(githubOrg)/repos",
@@ -92,7 +92,7 @@ public final class ProjectTaskHandler {
                     "name": repoName,
                     "description": appName,
                     "private": false,
-                    "auto_init": false,
+                    "auto_init": true,
                 ] as [String: Any]
             )
             
@@ -180,12 +180,19 @@ public final class ProjectTaskHandler {
             options: []
         ) else { return result }
         
+        // Resolve symlinks for consistent path comparison (iOS /var ↔ /private/var)
+        let dirResolved = dir.resolvingSymlinksInPath().path
+        
         while let item = enumerator.nextObject() as? URL {
             let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isExecutableKey])
             if values.isDirectory == true { continue }
             
-            let relativePath = item.path.replacingOccurrences(of: dir.path + "/", with: "")
-            guard !relativePath.isEmpty else { continue }
+            let itemResolved = item.resolvingSymlinksInPath().path
+            var relativePath = itemResolved.replacingOccurrences(of: dirResolved + "/", with: "")
+            // Strip leading "/" if path replacement didn't fully resolve
+            while relativePath.hasPrefix("/") { relativePath = String(relativePath.dropFirst()) }
+            guard !relativePath.isEmpty, relativePath != itemResolved else { continue }
+            log.info("Template file: \(relativePath) (dir: \(dir.lastPathComponent))")
             
             let data = try Data(contentsOf: item)
             let isExec = values.isExecutable == true && relativePath.hasSuffix(".sh")
@@ -229,6 +236,15 @@ public final class ProjectTaskHandler {
     private func pushFilesViaGitTrees(repoName: String, appName: String, files: [TemplateFile]) async throws {
         let repoPath = "/repos/\(githubOrg)/\(repoName)"
         
+        // Get the current main branch HEAD (repo was created with auto_init)
+        let refRes = try await githubProxy("GET", "\(repoPath)/git/ref/heads/main", body: nil)
+        guard refRes.status == 200,
+              let refJson = refRes.json as? [String: Any],
+              let refObj = refJson["object"] as? [String: Any],
+              let parentSha = refObj["sha"] as? String else {
+            throw ProjectTaskError.gitTreeCreation(body: "Failed to get main ref: \(refRes.text)")
+        }
+        
         // Create blobs for each file
         var treeEntries: [[String: Any]] = []
         for file in files {
@@ -253,7 +269,7 @@ public final class ProjectTaskHandler {
             ])
         }
         
-        // Create tree
+        // Create tree (no base_tree — replaces entire tree with our files)
         let treeRes = try await githubProxy("POST", "\(repoPath)/git/trees", body: ["tree": treeEntries])
         guard treeRes.status == 201,
               let treeJson = treeRes.json as? [String: Any],
@@ -261,28 +277,25 @@ public final class ProjectTaskHandler {
             throw ProjectTaskError.gitTreeCreation(body: treeRes.text)
         }
         
-        // Create initial commit (no parent)
+        // Create commit with parent (replaces auto_init README)
         let commitRes = try await githubProxy("POST", "\(repoPath)/git/commits", body: [
-            "message": "Initial commit: \(appName)",
+            "message": "Initial project: \(appName)",
             "tree": treeSha,
-        ])
+            "parents": [parentSha],
+        ] as [String: Any])
         guard commitRes.status == 201,
               let commitJson = commitRes.json as? [String: Any],
               let commitSha = commitJson["sha"] as? String else {
             throw ProjectTaskError.gitCommitCreation(body: commitRes.text)
         }
         
-        // Create main branch ref
-        let refRes = try await githubProxy("POST", "\(repoPath)/git/refs", body: [
-            "ref": "refs/heads/main",
+        // Update main branch ref to new commit
+        let updateRes = try await githubProxy("PATCH", "\(repoPath)/git/refs/heads/main", body: [
             "sha": commitSha,
         ])
-        guard refRes.status == 201 else {
-            throw ProjectTaskError.gitRefCreation(body: refRes.text)
+        guard updateRes.status == 200 else {
+            throw ProjectTaskError.gitRefCreation(body: updateRes.text)
         }
-        
-        // Set main as default branch
-        _ = try await githubProxy("PATCH", repoPath, body: ["default_branch": "main"])
         
         log.info("Pushed \(treeEntries.count) files via Git trees API")
     }
@@ -332,7 +345,15 @@ public final class ProjectTaskHandler {
     }
     
     private func githubProxy(_ method: String, _ path: String, body: [String: Any]? = nil) async throws -> ProxyResponse {
-        let url = proxyBaseURL.appendingPathComponent("github").appendingPathComponent(path)
+        // Build URL string directly to avoid appendingPathComponent encoding slashes
+        let baseStr = proxyBaseURL.absoluteString.hasSuffix("/")
+            ? String(proxyBaseURL.absoluteString.dropLast())
+            : proxyBaseURL.absoluteString
+        let cleanPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard let url = URL(string: "\(baseStr)/github\(cleanPath)") else {
+            throw ProjectTaskError.gitTreeCreation(body: "Invalid proxy URL for path: \(path)")
+        }
+        log.info("GitHub proxy: \(method) \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
