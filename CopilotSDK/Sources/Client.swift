@@ -984,11 +984,13 @@ public final class CopilotSession: @unchecked Sendable {
         eventTask = Task { [weak self] in
             guard let self else { return }
             for await notification in self.connection.notifications {
+                NSLog("[CopilotSDK] Event dispatch: method=%@", notification.method)
                 // Handle relay server notifications (usage, agent_progress, build status)
                 if notification.method == "notification" {
                     if case .object(let params) = notification.params {
                         let type: String
                         if case .string(let t) = params["type"] { type = t } else { type = "unknown" }
+                        NSLog("[CopilotSDK] Relay notification type=%@, hasHandler=%@", type, self.onRelayNotification != nil ? "yes" : "no")
                         self.onRelayNotification?(type, params)
                     }
                     continue
@@ -1761,7 +1763,7 @@ public final class CopilotAgent: @unchecked Sendable {
                     message = String(describing: args)
                 }
                 await onResponse(message)
-                return "Response delivered to user."
+                return "Response delivered to user. Now call ask_user to wait for the user's next message. Do NOT call any other tools or send_response again."
             }
         ))
 

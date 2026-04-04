@@ -15,18 +15,16 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     
     // MARK: - Product IDs
     
+    public static let topupProductID = "com.neox.credits.topup"
+    
     public static let productIDs: Set<String> = [
-        "com.neox.credits.starter",   // $4.99 → $3.50 credits
-        "com.neox.credits.standard",  // $9.99 → $7.50 credits
-        "com.neox.credits.pro",       // $29.99 → $25.00 credits
+        topupProductID,  // $9.99 → $7.50 credits
     ]
     
     /// How much credit (in USD equivalent) each product grants.
     public static let creditValues: [String: Double] = [
-        "com.neox.credits.test": 0.75,      // $1.00 test → $0.75 credits
-        "com.neox.credits.starter": 3.50,
-        "com.neox.credits.standard": 7.50,
-        "com.neox.credits.pro": 25.00,
+        "com.neox.credits.test": 0.75,      // sandbox test
+        topupProductID: 7.50,
     ]
     
     // MARK: - Dependencies
@@ -145,12 +143,8 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     /// Human-readable description of what a product gives.
     public static func productDescription(for productId: String) -> String {
         switch productId {
-        case "com.neox.credits.starter":
-            return "~700K tokens on GPT-4.1"
-        case "com.neox.credits.standard":
-            return "~1.5M tokens on GPT-4.1"
-        case "com.neox.credits.pro":
-            return "~5M tokens on GPT-4.1"
+        case topupProductID:
+            return "$7.50 credits · ~1.5M tokens on GPT-4.1"
         default:
             return ""
         }

@@ -23,8 +23,8 @@ public struct PaymentView: View {
                     BalanceCardView(usageTracker: usageTracker)
                 }
                 
-                // Credit packs
-                Section("Credit Packs") {
+                // Credit topup
+                Section("Top Up") {
                     if paymentManager.products.isEmpty {
                         HStack {
                             Spacer()
@@ -200,21 +200,11 @@ private struct CreditPackRow: View {
     }
     
     private var iconName: String {
-        switch product.id {
-        case "com.neox.credits.starter": return "star.fill"
-        case "com.neox.credits.standard": return "star.circle.fill"
-        case "com.neox.credits.pro": return "crown.fill"
-        default: return "creditcard.fill"
-        }
+        return "plus.circle.fill"
     }
     
     private var iconColor: Color {
-        switch product.id {
-        case "com.neox.credits.starter": return .blue
-        case "com.neox.credits.standard": return .purple
-        case "com.neox.credits.pro": return .orange
-        default: return .gray
-        }
+        return .green
     }
 }
 

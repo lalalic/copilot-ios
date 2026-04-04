@@ -238,6 +238,7 @@ final class JSONRPCConnection: @unchecked Sendable {
                 }
                 
             case .notification(let notification):
+                NSLog("[Connection] Notification received: method=%@", notification.method)
                 notificationsContinuation.yield(notification)
                 
             case .request(let id, let method, let params):

@@ -1,3 +1,8 @@
+---
+name: copilot-ios
+description: Swift SDK for AI-powered iOS apps — MCP client, native UI automation, AI camera, WebKit browser agent
+---
+
 # copilot-ios
 
 Swift packages for building AI-powered iOS apps with GitHub Copilot. Includes an MCP client SDK, native UI automation, AI-directed camera, and WebKit browser automation.
@@ -203,6 +208,14 @@ Override relay with env vars: `RELAY_HOST=localhost RELAY_PORT=8765 swift test`
 The production relay at `relay.ai.qili2.com:443` pools Copilot CLI sessions and provides WebSocket access.
 
 See [copilot-relay](https://github.com/lalalic/copilot-relay) for deployment, architecture, and configuration.
+
+## Docs
+
+| Doc | Description |
+|-----|-------------|
+| [On-Device Skills](docs/2026-04-01-on-device-skills-design.md) | On-device skill discovery design |
+| [Device Workspace Agent](docs/device-workspace-agent-profile-design.md) | Device workspace and agent profile |
+| [Site Adapters](design-site-adapters.md) | WebKitAgent site adapter design |
 
 ## Repository
 

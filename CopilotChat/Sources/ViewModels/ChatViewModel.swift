@@ -291,8 +291,8 @@ public final class ChatViewModel: ObservableObject {
     private func handleRelayNotification(type: String, params: [String: JSONValue]) {
         // Intercept create_project_request delegation from relay
         if type == "create_project_request" {
-            Task {
-                let handler = self.getOrCreateProjectTaskHandler()
+            nonisolated(unsafe) let handler = self.getOrCreateProjectTaskHandler()
+            Task { @MainActor in
                 await handler.handleCreateProjectRequest(params: params)
             }
             return
