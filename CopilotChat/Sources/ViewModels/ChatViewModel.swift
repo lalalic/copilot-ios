@@ -622,7 +622,8 @@ public final class ChatViewModel: ObservableObject {
             _ = try await targetSession.send(prompt: trimmed)
             
             // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
-            for _ in 0..<60 {
+            // 180s timeout for operations that involve tool calls (create_task, etc.)
+            for _ in 0..<180 {
                 try await Task.sleep(for: .seconds(1))
                 if case .working = chatState { continue }
                 break
