@@ -1080,7 +1080,11 @@ public final class CopilotSession: @unchecked Sendable {
                         }
                     }
                 case "external_tool.requested":
-                    await self.handleToolCall(data)
+                    // Spawn tool calls in a separate task to avoid blocking the event dispatch loop.
+                    // This is critical because tools like ask_user block until user responds,
+                    // which would prevent all subsequent notifications from being processed.
+                    let selfRef = self
+                    Task { await selfRef.handleToolCall(data) }
                 case "hooks.pre_tool_use":
                     await self.handleHookEvent("pre_tool_use", data: data)
                 case "hooks.post_tool_use":
