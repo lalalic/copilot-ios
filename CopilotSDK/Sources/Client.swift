@@ -719,10 +719,6 @@ public struct SessionConfig: Sendable {
     public var infiniteSessions: InfiniteSessionConfig?
     public var configDir: String?
     public var commands: [CommandDefinition]?
-    /// Stable client identifier for pool relay session pinning (relay v2).
-    /// When set, the relay pins the session to this clientId so the same user
-    /// can reconnect and resume context after disconnect.
-    public var clientId: String?
     /// Base64-encoded snapshot to restore on the server (relay v2).
     /// The relay extracts conversation context from the snapshot's events.jsonl
     /// and auto-injects it into the new session.
@@ -762,7 +758,6 @@ public struct SessionConfig: Sendable {
         infiniteSessions: InfiniteSessionConfig? = nil,
         configDir: String? = nil,
         commands: [CommandDefinition]? = nil,
-        clientId: String? = nil,
         snapshot: String? = nil,
         appId: String? = nil,
         deviceToken: String? = nil,
@@ -792,7 +787,6 @@ public struct SessionConfig: Sendable {
         self.infiniteSessions = infiniteSessions
         self.configDir = configDir
         self.commands = commands
-        self.clientId = clientId
         self.snapshot = snapshot
         self.appId = appId
         self.deviceToken = deviceToken
@@ -828,7 +822,6 @@ public struct SessionConfig: Sendable {
         if let infiniteSessions { p["infiniteSessions"] = infiniteSessions.wireFormat }
         if let configDir { p["configDir"] = .string(configDir) }
         if let commands { p["commands"] = .array(commands.map { $0.wireFormat }) }
-        if let clientId { p["clientId"] = .string(clientId) }
         if let snapshot { p["snapshot"] = .string(snapshot) }
         if let appId { p["appId"] = .string(appId) }
         if let deviceToken { p["deviceToken"] = .string(deviceToken) }
@@ -1664,8 +1657,6 @@ public struct AgentConfig: Sendable {
     public var onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)?
     /// Optional working directory for the agent.
     public var workingDirectory: String?
-    /// Stable client identifier for relay v2 session pinning.
-    public var clientId: String?
     /// Base64-encoded snapshot for relay v2 context recovery.
     public var snapshot: String?
     /// App/workspace identifier for relay v2 routing.
@@ -1683,7 +1674,6 @@ public struct AgentConfig: Sendable {
         sections: [String: SystemMessageSectionAction]? = nil,
         tools: [ToolDefinition] = [],
         workingDirectory: String? = nil,
-        clientId: String? = nil,
         snapshot: String? = nil,
         appId: String? = nil,
         deviceToken: String? = nil,
@@ -1698,7 +1688,6 @@ public struct AgentConfig: Sendable {
         self.sections = sections
         self.tools = tools
         self.workingDirectory = workingDirectory
-        self.clientId = clientId
         self.snapshot = snapshot
         self.appId = appId
         self.deviceToken = deviceToken
@@ -1939,7 +1928,6 @@ public final class CopilotAgent: @unchecked Sendable {
             systemMessage: systemMessage,
             workingDirectory: config.workingDirectory,
             infiniteSessions: InfiniteSessionConfig(enabled: true),
-            clientId: config.clientId,
             snapshot: config.snapshot,
             appId: config.appId,
             deviceToken: config.deviceToken,

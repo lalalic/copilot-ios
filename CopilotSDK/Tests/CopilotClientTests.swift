@@ -268,12 +268,12 @@ final class CopilotClientTests: XCTestCase {
     func testSessionConfigIncludesRelayV2Fields() async throws {
         let config = SessionConfig(
             model: "gpt-4.1",
-            clientId: "device-abc-123",
             snapshot: "base64snapshotdata==",
-            appId: "com.example.app"
+            appId: "com.example.app",
+            userId: "device-abc-123"
         )
         let params = config.buildParams(sessionId: "test-sid")
-        XCTAssertEqual(params["clientId"], .string("device-abc-123"))
+        XCTAssertEqual(params["userId"], .string("device-abc-123"))
         XCTAssertEqual(params["snapshot"], .string("base64snapshotdata=="))
         XCTAssertEqual(params["appId"], .string("com.example.app"))
         XCTAssertEqual(params["model"], .string("gpt-4.1"))
@@ -283,9 +283,9 @@ final class CopilotClientTests: XCTestCase {
     func testSessionConfigOmitsNilRelayV2Fields() async throws {
         let config = SessionConfig(model: "gpt-4.1")
         let params = config.buildParams(sessionId: "test-sid")
-        XCTAssertNil(params["clientId"])
         XCTAssertNil(params["snapshot"])
         XCTAssertNil(params["appId"])
+        XCTAssertNil(params["userId"])
     }
     
     func testCreateSessionParsesRelayV2ResumedResponse() async throws {
@@ -293,7 +293,7 @@ final class CopilotClientTests: XCTestCase {
         let tp = transport!
         try await startClient(cl, tp)
         
-        let config = SessionConfig(model: "gpt-4.1", clientId: "user-42")
+        let config = SessionConfig(model: "gpt-4.1", userId: "user-42")
         let sessionTask = Task { try await cl.createSession(config: config) }
         
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -319,7 +319,7 @@ final class CopilotClientTests: XCTestCase {
         let tp = transport!
         try await startClient(cl, tp)
         
-        let config = SessionConfig(model: "gpt-4.1", clientId: "user-42")
+        let config = SessionConfig(model: "gpt-4.1", userId: "user-42")
         let sessionTask = Task { try await cl.createSession(config: config) }
         
         try await Task.sleep(nanoseconds: 50_000_000)

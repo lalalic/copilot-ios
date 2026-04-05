@@ -634,7 +634,7 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 | `tools` | `[ToolDefinition]` | App-defined tools the model can call |
 | `onResponse` | `(String) -> Void` | Called when agent delivers results via `send_response` |
 | `onAskUser` | `(String) async -> String` | Called when agent asks a question via `ask_user` |
-| `clientId` | `String?` | Stable device ID for relay session pinning (reconnection) |
+| `userId` | `String?` | User identifier for session pinning and multi-user routing |
 | `appId` | `String?` | Routes to a specific workspace on the relay |
 | `snapshot` | `String?` | Base64 workspace snapshot for context recovery |
 | `workingDirectory` | `String?` | Working directory path |
@@ -696,14 +696,14 @@ When using the production relay (`relay.ai.qili2.com`), the agent supports:
 ```swift
 let agent = try await client.createAgent(config: AgentConfig(
     instructions: "You are Piggy, a toy pig companion.",
-    clientId: UIDevice.current.identifierForVendor?.uuidString,  // session pinning
+    userId: "user-123",                   // session pinning
     appId: "toybox",                 // workspace routing
     onResponse: { message in handleResponse(message) },
     onAskUser: { question in return getUserAnswer(question) }
 ))
 ```
 
-- **`clientId`**: Stable device UUID. If the client disconnects while the agent is waiting for input (`ask_user`), the relay holds the session. On reconnect with the same `clientId`, the session resumes exactly where it left off.
+- **`userId`**: User identifier for session pinning. If the client disconnects while the agent is waiting for input (`ask_user`), the relay holds the session. On reconnect with the same `userId`, the session resumes exactly where it left off.
 - **`appId`**: Routes to a workspace-specific CLI process on the relay. Each app can have its own instructions, skills, and files.
 - **`snapshot`**: If the relay held session expired, it returns a workspace snapshot. Pass this back on reconnect to restore conversation context.
 
@@ -756,7 +756,7 @@ any app that needs one-shot interactions rather than a continuous autonomous loo
 | Infinite sessions | Manual config | Enabled by default |
 | Resume control | `onTurnEnd` callback | Automatic |
 | User interaction | Custom implementation | Built-in `onAskUser` callback |
-| Relay pinning | Manual `clientId` in SessionConfig | Pass `clientId` in AgentConfig |
+| Relay pinning | Manual `userId` in SessionConfig | Pass `userId` in AgentConfig |
 
 ## Custom Providers
 
@@ -867,7 +867,7 @@ class ChatService {
         
         agent = try await client!.createAgent(config: AgentConfig(
             instructions: "You are a friendly assistant. Keep responses concise.",
-            clientId: UIDevice.current.identifierForVendor?.uuidString,
+            userId: "user-123",
             onResponse: { [weak self] message in
                 self?.capturedResponse = message
                 self?.speak(message)
@@ -950,7 +950,7 @@ The production relay at `wss://relay.ai.qili2.com` provides:
 
 - **Session pooling**: Pre-warmed CLI sessions for instant response
 - **Hold/resume**: If client disconnects during `ask_user`, session is held for 10 min
-- **Client pinning**: Same `clientId` reconnects to the same session
+- **User pinning**: Same `userId` reconnects to the same session
 - **Multi-workspace**: Route to different workspaces via `appId`
 - **Context recovery**: Workspace snapshots on hold expiry, restored on reconnect
 - **Agent loop injection**: `send_response` + `ask_user` tools and loop system message auto-injected

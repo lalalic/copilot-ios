@@ -315,23 +315,23 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 
     // MARK: - Relay v2 Features
 
-    /// Verify clientId is accepted for session pinning.
-    func testRelay_ClientId_SessionPinning() async throws {
+    /// Verify userId is used for session pinning.
+    func testRelay_UserId_SessionPinning() async throws {
         try await skipIfNoRelay()
 
-        let clientId = "test-\(UUID().uuidString.prefix(8))"
+        let userId = "test-\(UUID().uuidString.prefix(8))"
         let responses = AgentResponseCollector()
 
         let agent = try await client.createAgent(config: AgentConfig(
             instructions: "Respond immediately to any request.",
-            clientId: clientId,
+            userId: userId,
             onResponse: { message in
                 Task { await responses.add(message) }
             },
             onAskUser: { _ in "stop" }
         ))
 
-        XCTAssertFalse(agent.session.sessionId.isEmpty, "Session with clientId should be created")
+        XCTAssertFalse(agent.session.sessionId.isEmpty, "Session with userId should be created")
 
         let agentTask = Task {
             try await agent.start(prompt: "Say 'PINNED_OK' using send_response.")
@@ -350,20 +350,20 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         try? await Task.sleep(for: .seconds(1))
 
         let msgs = await responses.messages
-        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Should get response with clientId pinning")
-        print("[Relay] ClientId pinning responses: \(msgs)")
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Should get response with userId pinning")
+        print("[Relay] UserId pinning responses: \(msgs)")
     }
 
-    /// Verify agent with clientId works end-to-end.
-    func testRelay_Agent_WithClientId() async throws {
+    /// Verify agent with userId works end-to-end.
+    func testRelay_Agent_WithUserId() async throws {
         try await skipIfNoRelay()
 
         let responses = AgentResponseCollector()
-        let clientId = "agent-test-\(UUID().uuidString.prefix(8))"
+        let userId = "agent-test-\(UUID().uuidString.prefix(8))"
 
         let agent = try await client.createAgent(config: AgentConfig(
             instructions: "You are a test agent. Respond immediately.",
-            clientId: clientId,
+            userId: userId,
             onResponse: { message in
                 Task { await responses.add(message) }
             },
@@ -371,7 +371,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         ))
 
         let agentTask = Task {
-            try await agent.start(prompt: "Say 'CLIENT_ID_OK' using send_response.")
+            try await agent.start(prompt: "Say 'USER_ID_OK' using send_response.")
         }
 
         for _ in 0..<60 {
@@ -387,8 +387,8 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         try? await Task.sleep(for: .seconds(1))
 
         let msgs = await responses.messages
-        print("[Relay] Agent with clientId responses: \(msgs)")
-        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Agent with clientId should deliver responses")
+        print("[Relay] Agent with userId responses: \(msgs)")
+        XCTAssertGreaterThanOrEqual(msgs.count, 1, "Agent with userId should deliver responses")
     }
 
     // MARK: - Identity / Persona in System Prompt
