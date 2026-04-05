@@ -9,13 +9,15 @@ public struct Project: Identifiable, Hashable {
     public let url: URL
     public let fileCount: Int
     public let modifiedDate: Date?
+    public let repo: String?
 
-    public init(name: String, url: URL, fileCount: Int = 0, modifiedDate: Date? = nil) {
+    public init(name: String, url: URL, fileCount: Int = 0, modifiedDate: Date? = nil, repo: String? = nil) {
         self.id = name
         self.name = name
         self.url = url
         self.fileCount = fileCount
         self.modifiedDate = modifiedDate
+        self.repo = repo
     }
 }
 
@@ -145,7 +147,15 @@ public struct ProjectsView: View {
             let children = (try? fm.contentsOfDirectory(atPath: url.path))?.count ?? 0
             let modified = values?.contentModificationDate
 
-            return Project(name: name, url: url, fileCount: children, modifiedDate: modified)
+            // Read repo from package.json if present
+            let pkgURL = url.appendingPathComponent("package.json")
+            var repo: String? = nil
+            if let data = try? Data(contentsOf: pkgURL),
+               let pkg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                repo = pkg["repo"] as? String
+            }
+
+            return Project(name: name, url: url, fileCount: children, modifiedDate: modified, repo: repo)
         }
         .sorted { ($0.modifiedDate ?? .distantPast) > ($1.modifiedDate ?? .distantPast) }
     }

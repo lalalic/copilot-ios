@@ -117,6 +117,21 @@ public final class ProjectTaskHandler {
             try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
             NSLog("[ProjectTaskHandler] Step 3 done: files pushed")
             
+            // 3b. Save package.json locally so the project is self-describing
+            let projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
+            try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+            let localPkg: [String: Any] = [
+                "name": repoName,
+                "description": appName,
+                "repo": "\(githubOrg)/\(repoName)",
+                "bundleId": bundleId,
+                "projectType": projectType,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: projectDir.appendingPathComponent("package.json"))
+                NSLog("[ProjectTaskHandler] Saved local package.json for %@", repoName)
+            }
+            
             // 4. Create issue with task spec
             NSLog("[ProjectTaskHandler] Step 4: Creating issue...")
             let issueNumber = try await createIssue(
@@ -396,11 +411,12 @@ public final class ProjectTaskHandler {
     // MARK: - Repo Management
     
     /// Archive a GitHub repo via the relay's GitHub proxy.
-    public func archiveRepo(name: String) async {
-        let repoPath = "/repos/\(githubOrg)/\(name)"
+    /// - Parameter repo: Full repo path, e.g. "neos-apps/my-project"
+    public func archiveRepo(_ repo: String) async {
+        let repoPath = "/repos/\(repo)"
         do {
             let res = try await githubProxy("PATCH", repoPath, body: ["archived": true])
-            NSLog("[ProjectTaskHandler] archiveRepo %@: status=%d", name, res.status)
+            NSLog("[ProjectTaskHandler] archiveRepo %@: status=%d", repo, res.status)
         } catch {
             NSLog("[ProjectTaskHandler] archiveRepo error: %@", error.localizedDescription)
         }

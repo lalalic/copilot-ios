@@ -142,9 +142,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Archive a project's GitHub repo via the relay's GitHub proxy.
-    public func deleteProject(name: String) async {
+    public func archiveRepo(_ repo: String) async {
         nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
-        await handler.archiveRepo(name: name)
+        await handler.archiveRepo(repo)
     }
 
     /// Add a push notification as a system message in the chat.
