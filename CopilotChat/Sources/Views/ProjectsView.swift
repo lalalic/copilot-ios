@@ -2,18 +2,22 @@ import SwiftUI
 
 // MARK: - Project Model
 
-/// A workspace project — a top-level directory with metadata.
+/// A workspace project — a top-level directory with metadata from package.json.
 public struct Project: Identifiable, Hashable {
     public let id: String
     public let name: String
+    public let displayName: String
+    public let description: String?
     public let url: URL
     public let fileCount: Int
     public let modifiedDate: Date?
     public let repo: String?
 
-    public init(name: String, url: URL, fileCount: Int = 0, modifiedDate: Date? = nil, repo: String? = nil) {
+    public init(name: String, url: URL, fileCount: Int = 0, modifiedDate: Date? = nil, repo: String? = nil, displayName: String? = nil, description: String? = nil) {
         self.id = name
         self.name = name
+        self.displayName = displayName ?? name
+        self.description = description
         self.url = url
         self.fileCount = fileCount
         self.modifiedDate = modifiedDate
@@ -74,9 +78,14 @@ public struct ProjectsView: View {
                                     .foregroundStyle(.indigo)
                                     .frame(width: 28)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(project.name)
+                                    Text(project.displayName)
                                         .font(.body)
-                                    if project.fileCount > 0 {
+                                    if let desc = project.description, !desc.isEmpty {
+                                        Text(desc)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    } else if project.fileCount > 0 {
                                         Text("\(project.fileCount) items")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -147,15 +156,19 @@ public struct ProjectsView: View {
             let children = (try? fm.contentsOfDirectory(atPath: url.path))?.count ?? 0
             let modified = values?.contentModificationDate
 
-            // Read repo from package.json if present
+            // Read metadata from package.json if present
             let pkgURL = url.appendingPathComponent("package.json")
             var repo: String? = nil
+            var displayName: String? = nil
+            var description: String? = nil
             if let data = try? Data(contentsOf: pkgURL),
                let pkg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 repo = pkg["repo"] as? String
+                displayName = pkg["displayName"] as? String
+                description = pkg["description"] as? String
             }
 
-            return Project(name: name, url: url, fileCount: children, modifiedDate: modified, repo: repo)
+            return Project(name: name, url: url, fileCount: children, modifiedDate: modified, repo: repo, displayName: displayName, description: description)
         }
         .sorted { ($0.modifiedDate ?? .distantPast) > ($1.modifiedDate ?? .distantPast) }
     }

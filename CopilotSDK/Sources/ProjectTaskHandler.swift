@@ -122,7 +122,8 @@ public final class ProjectTaskHandler {
             try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
             let localPkg: [String: Any] = [
                 "name": repoName,
-                "description": appName,
+                "displayName": appName,
+                "description": taskDescription,
                 "repo": "\(githubOrg)/\(repoName)",
                 "bundleId": bundleId,
                 "projectType": projectType,
