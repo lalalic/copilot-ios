@@ -245,7 +245,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Inject manage_todo_list and get_attachment tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
+        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -268,6 +268,7 @@ public final class ChatViewModel: ObservableObject {
         guard let client else { return }
 
         // Inject manage_todo_list and get_attachment tools
+        config.tools.append(makeSendResponseTool())
         config.tools.append(makeTodoTool())
         config.tools.append(makeGetAttachmentTool())
         config.tools.append(makeCreatePlanTool())
@@ -1217,6 +1218,36 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             return "Error: \(error)"
         }
+    }
+
+    // MARK: - Send Response Tool
+
+    private func makeSendResponseTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "send_response",
+            description: "Send a response message to the user. Use this to deliver results instead of ending your turn.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "message": .object([
+                        "type": .string("string"),
+                        "description": .string("The response message to send to the user")
+                    ])
+                ]),
+                "required": .array([.string("message")])
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "response received" }
+                if case .object(let dict) = args, case .string(let message) = dict["message"] {
+                    await MainActor.run {
+                        let blocks = self.parseContentBlocks(message)
+                        self.messages.append(ChatMessage(role: .assistant, content: blocks, project: self.projectScope))
+                    }
+                }
+                return "response received"
+            }
+        )
     }
 
     // MARK: - Start Coding Task Tool
