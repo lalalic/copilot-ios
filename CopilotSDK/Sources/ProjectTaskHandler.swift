@@ -253,7 +253,14 @@ public final class ProjectTaskHandler {
         let repoPath = "/repos/\(githubOrg)/\(repoName)"
         
         // Get the current main branch HEAD (repo was created with auto_init)
-        let refRes = try await githubProxy("GET", "\(repoPath)/git/ref/heads/main", body: nil)
+        // Retry with delay — GitHub may not have the main ref ready immediately after auto_init
+        var refRes: ProxyResponse!
+        for attempt in 1...5 {
+            refRes = try await githubProxy("GET", "\(repoPath)/git/ref/heads/main", body: nil)
+            if refRes.status == 200 { break }
+            NSLog("[ProjectTaskHandler] GET main ref attempt %d → %d, retrying...", attempt, refRes.status)
+            try await Task.sleep(for: .seconds(Double(attempt)))
+        }
         guard refRes.status == 200,
               let refJson = refRes.json as? [String: Any],
               let refObj = refJson["object"] as? [String: Any],
