@@ -1647,7 +1647,7 @@ public struct AgentConfig: Sendable {
     /// When set, the agent loop instructions are auto-injected into `last_instructions`.
     /// Example: `["identity": .replace(content: "You are Piggy, a toy pig companion")]`
     public var sections: [String: SystemMessageSectionAction]?
-    /// Additional tools the agent can use (send_response and ask_user are auto-injected).
+    /// Additional tools the agent can use (send_response and ask_questions are auto-injected).
     public var tools: [ToolDefinition]
     /// Called when the agent uses send_response to deliver a result.
     public var onResponse: @Sendable (String) async -> Void
@@ -1723,7 +1723,7 @@ public final class CopilotAgent: @unchecked Sendable {
         defer { _isRunning = false }
 
         if session.resumed, let requestId = session.pendingRequestId {
-            // Session was on-hold with a pending ask_user. Answer it to resume the model.
+            // Session was on-hold with a pending ask_questions. Answer it to resume the model.
             try await session.respondToExternalTool(
                 requestId: requestId,
                 result: "User reconnected. Context: \(prompt)"
@@ -1731,12 +1731,12 @@ public final class CopilotAgent: @unchecked Sendable {
             // Enter the loop without sending an initial prompt (model is already running)
             try await session.loop(initialPrompt: nil) { [weak self] _ in
                 guard self?._isRunning == true else { return nil }
-                return "Continue working. Use send_response when you have results, or ask_user if you need input."
+                return "Continue working. Use send_response when you have results, or ask_questions if you need input."
             }
         } else {
             try await session.loop(initialPrompt: prompt) { [weak self] _ in
                 guard self?._isRunning == true else { return nil }
-                return "Continue working. Use send_response when you have results, or ask_user if you need input."
+                return "Continue working. Use send_response when you have results, or ask_questions if you need input."
             }
         }
     }
@@ -1775,40 +1775,12 @@ public final class CopilotAgent: @unchecked Sendable {
                     message = String(describing: args)
                 }
                 await onResponse(message)
-                return "Response delivered to user. Now call ask_user to wait for the user's next message. Do NOT call any other tools or send_response again."
+                return "Response delivered to user. Now call ask_questions to wait for the user's next message. Do NOT call any other tools or send_response again."
             }
         ))
 
         let onAskUser = config.onAskUser
         let onAskQuestions = config.onAskQuestions
-        tools.append(ToolDefinition(
-            name: "ask_user",
-            description: "Ask the user a question and wait for their answer. Use this when you need more information or when all tasks are completed to ask what to do next.",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "question": .object([
-                        "type": .string("string"),
-                        "description": .string("The question to ask the user"),
-                    ]),
-                ]),
-                "required": .array([.string("question")]),
-            ]),
-            skipPermission: true,
-            handler: { args in
-                let question: String
-                if case .object(let dict) = args, case .string(let q) = dict["question"] {
-                    question = q
-                } else if case .string(let q) = args {
-                    question = q
-                } else {
-                    question = "What would you like me to do next?"
-                }
-                let answer = await onAskUser(question)
-                return "User answered: \(answer)"
-            }
-        ))
-
         tools.append(ToolDefinition(
             name: "ask_questions",
             description: "Ask one or more structured questions with options and optional free-form input, then wait for the user's answers.",
@@ -1893,8 +1865,7 @@ public final class CopilotAgent: @unchecked Sendable {
         let agentLoopSuffix = """
         IMPORTANT: You are an autonomous agent running in an infinite loop.
         - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
-        - Use the `ask_user` tool when you need more information or when all tasks are done to ask what to do next.
-        - Use the `ask_questions` tool when you need structured choices (single-select, multi-select, or free-form answers).
+        - Use the `ask_questions` tool when you need more information or when all tasks are done.
         - Always use one of these tools before your turn ends.
         """
 
