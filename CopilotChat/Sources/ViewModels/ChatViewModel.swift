@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 import CopilotSDK
 
 // MARK: - Chat Mode
@@ -627,11 +628,26 @@ public final class ChatViewModel: ObservableObject {
             
             // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
             // 180s timeout for operations that involve tool calls (create_task, etc.)
-            for _ in 0..<180 {
-                try await Task.sleep(for: .seconds(1))
-                if case .working = chatState { continue }
-                break
+            var stateObserver: AnyCancellable?
+            let stateStream = AsyncStream<ChatState> { continuation in
+                stateObserver = self.$chatState.sink { state in
+                    continuation.yield(state)
+                }
             }
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for await state in stateStream {
+                        if case .working = state { continue }
+                        break
+                    }
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(180))
+                }
+                await group.next()
+                group.cancelAll()
+            }
+            stateObserver?.cancel()
             
             // Collect new assistant messages
             let newMessages = messages.suffix(from: beforeCount + 1)
