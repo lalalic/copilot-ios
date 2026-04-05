@@ -434,33 +434,21 @@ public final class ChatViewModel: ObservableObject {
             }
         }
 
-        // Usage tracking — record token consumption and cost
+        // Usage tracking — record token consumption and cost (server-calculated)
         await session.on(.assistantUsage) { [weak self] event in
             guard let self else { return }
-            if case .object(let data) = event.data {
+            if case .object(let data) = event.data,
+               let cost = data["cost"]?.doubleValue {
                 let model = data["model"]?.stringValue ?? "unknown"
                 let promptTokens = data["inputTokens"]?.intValue ?? data["prompt_tokens"]?.intValue ?? 0
                 let completionTokens = data["outputTokens"]?.intValue ?? data["completion_tokens"]?.intValue ?? 0
-                // Prefer server-calculated cost if available
-                let serverCost = data["cost"]?.doubleValue
                 Task { @MainActor in
-                    if let cost = serverCost {
-                        self.usageTracker.record(
-                            model: model,
-                            promptTokens: promptTokens,
-                            completionTokens: completionTokens,
-                            cost: cost
-                        )
-                    } else {
-                        let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
-                        self.usageTracker.record(
-                            model: model,
-                            promptTokens: promptTokens,
-                            completionTokens: completionTokens,
-                            inputMultiplier: inMult,
-                            outputMultiplier: outMult
-                        )
-                    }
+                    self.usageTracker.record(
+                        model: model,
+                        promptTokens: promptTokens,
+                        completionTokens: completionTokens,
+                        cost: cost
+                    )
                 }
             }
         }

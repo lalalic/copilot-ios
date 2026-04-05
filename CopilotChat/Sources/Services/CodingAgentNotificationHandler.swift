@@ -98,25 +98,14 @@ public struct CodingAgentNotificationHandler {
             addMessage("\(status.emoji) \(title)", body, repo)
             
         case .usage(let repo, let model, let promptTokens, let completionTokens, let serverCost):
-            // Record usage with server-calculated cost, or fall back to local calculation
-            if let tracker = usageTracker {
-                if let cost = serverCost {
-                    tracker.record(
-                        model: model,
-                        promptTokens: promptTokens,
-                        completionTokens: completionTokens,
-                        cost: cost
-                    )
-                } else {
-                    let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
-                    tracker.record(
-                        model: model,
-                        promptTokens: promptTokens,
-                        completionTokens: completionTokens,
-                        inputMultiplier: inMult,
-                        outputMultiplier: outMult
-                    )
-                }
+            // Record usage with server-calculated cost
+            if let tracker = usageTracker, let cost = serverCost {
+                tracker.record(
+                    model: model,
+                    promptTokens: promptTokens,
+                    completionTokens: completionTokens,
+                    cost: cost
+                )
             }
             // Don't show usage notifications in chat — just track silently
             _ = repo // suppress unused warning
