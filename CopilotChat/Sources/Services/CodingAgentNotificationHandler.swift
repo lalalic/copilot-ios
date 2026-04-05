@@ -28,7 +28,7 @@ public enum CodingAgentNotification {
     case progress(title: String, body: String, repo: String?, status: ProgressStatus)
     
     /// Token usage report for on-device cost tracking.
-    case usage(repo: String?, model: String, promptTokens: Int, completionTokens: Int, totalTokens: Int)
+    case usage(repo: String?, model: String, promptTokens: Int, completionTokens: Int, cost: Double?)
     
     public enum ProgressStatus: String {
         case info, success, warning, error
@@ -66,8 +66,8 @@ public struct CodingAgentNotificationHandler {
             let model = userInfo["model"] as? String ?? "unknown"
             let promptTokens = (userInfo["promptTokens"] as? Int) ?? 0
             let completionTokens = (userInfo["completionTokens"] as? Int) ?? 0
-            let totalTokens = (userInfo["totalTokens"] as? Int) ?? 0
-            return .usage(repo: repo, model: model, promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens)
+            let cost = userInfo["cost"] as? Double
+            return .usage(repo: repo, model: model, promptTokens: promptTokens, completionTokens: completionTokens, cost: cost)
             
         case "report_progress":
             let statusStr = userInfo["status"] as? String ?? "info"
@@ -97,17 +97,26 @@ public struct CodingAgentNotificationHandler {
         case .progress(let title, let body, let repo, let status):
             addMessage("\(status.emoji) \(title)", body, repo)
             
-        case .usage(let repo, let model, let promptTokens, let completionTokens, _):
-            // Record token usage for on-device cost tracking
+        case .usage(let repo, let model, let promptTokens, let completionTokens, let serverCost):
+            // Record usage with server-calculated cost, or fall back to local calculation
             if let tracker = usageTracker {
-                let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
-                tracker.record(
-                    model: model,
-                    promptTokens: promptTokens,
-                    completionTokens: completionTokens,
-                    inputMultiplier: inMult,
-                    outputMultiplier: outMult
-                )
+                if let cost = serverCost {
+                    tracker.record(
+                        model: model,
+                        promptTokens: promptTokens,
+                        completionTokens: completionTokens,
+                        cost: cost
+                    )
+                } else {
+                    let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
+                    tracker.record(
+                        model: model,
+                        promptTokens: promptTokens,
+                        completionTokens: completionTokens,
+                        inputMultiplier: inMult,
+                        outputMultiplier: outMult
+                    )
+                }
             }
             // Don't show usage notifications in chat — just track silently
             _ = repo // suppress unused warning

@@ -69,6 +69,35 @@ public class UsageTracker: ObservableObject, @unchecked Sendable {
     
     // MARK: - Recording
     
+    /// Record a single usage event with a pre-calculated cost (from server).
+    public func record(
+        model: String,
+        promptTokens: Int,
+        completionTokens: Int,
+        cost: Double
+    ) {
+        // Update per-model breakdown
+        var usage = sessionUsageByModel[model] ?? TokenUsage()
+        usage.promptTokens += promptTokens
+        usage.completionTokens += completionTokens
+        usage.cost += cost
+        sessionUsageByModel[model] = usage
+        
+        // Update session totals
+        sessionCost += cost
+        sessionTokens += promptTokens + completionTokens
+        
+        // Update lifetime totals
+        lifetimeCost += cost
+        lifetimeTokens += promptTokens + completionTokens
+        
+        // Deduct from balance
+        balance -= cost
+        if balance < 0 { balance = 0 }
+        
+        persist()
+    }
+
     /// Record a single usage event.
     public func record(
         model: String,

@@ -439,18 +439,28 @@ public final class ChatViewModel: ObservableObject {
             guard let self else { return }
             if case .object(let data) = event.data {
                 let model = data["model"]?.stringValue ?? "unknown"
-                // CLI uses inputTokens/outputTokens (camelCase)
                 let promptTokens = data["inputTokens"]?.intValue ?? data["prompt_tokens"]?.intValue ?? 0
                 let completionTokens = data["outputTokens"]?.intValue ?? data["completion_tokens"]?.intValue ?? 0
-                let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
+                // Prefer server-calculated cost if available
+                let serverCost = data["cost"]?.doubleValue
                 Task { @MainActor in
-                    self.usageTracker.record(
-                        model: model,
-                        promptTokens: promptTokens,
-                        completionTokens: completionTokens,
-                        inputMultiplier: inMult,
-                        outputMultiplier: outMult
-                    )
+                    if let cost = serverCost {
+                        self.usageTracker.record(
+                            model: model,
+                            promptTokens: promptTokens,
+                            completionTokens: completionTokens,
+                            cost: cost
+                        )
+                    } else {
+                        let (inMult, outMult) = CostCalculator.fallbackMultipliers(for: model)
+                        self.usageTracker.record(
+                            model: model,
+                            promptTokens: promptTokens,
+                            completionTokens: completionTokens,
+                            inputMultiplier: inMult,
+                            outputMultiplier: outMult
+                        )
+                    }
                 }
             }
         }
