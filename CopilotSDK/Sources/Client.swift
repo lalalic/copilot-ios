@@ -1131,6 +1131,7 @@ public final class CopilotSession: @unchecked Sendable {
                 "sessionId": .string(sessionId),
                 "requestId": .string(requestId),
                 "result": .string(result),
+                "__invocationToolName": .string(toolName),
             ])
             NSLog("[CopilotSDK] Tool result sent for '%@'", toolName)
             sdkLog.info("📤 Tool result sent for '\(toolName)'")
