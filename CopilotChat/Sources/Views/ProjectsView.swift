@@ -28,6 +28,7 @@ public struct ProjectsView: View {
     let onSelect: (Project?) -> Void
 
     @State private var projects: [Project] = []
+    @State private var projectToDelete: Project?
     @Environment(\.dismiss) private var dismiss
 
     public init(rootURL: URL, currentProject: String? = nil, onSelect: @escaping (Project?) -> Void) {
@@ -84,6 +85,13 @@ public struct ProjectsView: View {
                                 }
                             }
                         }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                projectToDelete = project
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -95,6 +103,21 @@ public struct ProjectsView: View {
                 }
             }
             .onAppear { loadProjects() }
+            .alert("Delete Project?", isPresented: Binding(
+                get: { projectToDelete != nil },
+                set: { if !$0 { projectToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { projectToDelete = nil }
+                Button("Delete", role: .destructive) {
+                    if let project = projectToDelete {
+                        deleteProject(project)
+                    }
+                }
+            } message: {
+                if let project = projectToDelete {
+                    Text("This will permanently delete \"\(project.name)\" and all its files.")
+                }
+            }
         }
     }
 
@@ -123,6 +146,14 @@ public struct ProjectsView: View {
             return Project(name: name, url: url, fileCount: children, modifiedDate: modified)
         }
         .sorted { ($0.modifiedDate ?? .distantPast) > ($1.modifiedDate ?? .distantPast) }
+    }
+
+    private func deleteProject(_ project: Project) {
+        try? FileManager.default.removeItem(at: project.url)
+        projects.removeAll { $0.id == project.id }
+        if currentProject == project.name {
+            onSelect(nil)
+        }
     }
 }
 
