@@ -733,6 +733,10 @@ public struct SessionConfig: Sendable {
     /// APNs device token for push notifications (hex string).
     /// Sent with session.create so the relay can push to this device.
     public var deviceToken: String?
+    /// APNs environment: "sandbox" or "production".
+    public var apnsEnv: String?
+    /// User identifier for multi-user routing.
+    public var userId: String?
     public var onPermissionRequest: PermissionHandler?
     public var onUserInputRequest: UserInputHandler?
     public var onEvent: SessionEventHandler?
@@ -762,6 +766,8 @@ public struct SessionConfig: Sendable {
         snapshot: String? = nil,
         appId: String? = nil,
         deviceToken: String? = nil,
+        apnsEnv: String? = nil,
+        userId: String? = nil,
         onPermissionRequest: PermissionHandler? = nil,
         onUserInputRequest: UserInputHandler? = nil,
         onEvent: SessionEventHandler? = nil
@@ -790,6 +796,8 @@ public struct SessionConfig: Sendable {
         self.snapshot = snapshot
         self.appId = appId
         self.deviceToken = deviceToken
+        self.apnsEnv = apnsEnv
+        self.userId = userId
         self.onPermissionRequest = onPermissionRequest
         self.onUserInputRequest = onUserInputRequest
         self.onEvent = onEvent
@@ -824,6 +832,8 @@ public struct SessionConfig: Sendable {
         if let snapshot { p["snapshot"] = .string(snapshot) }
         if let appId { p["appId"] = .string(appId) }
         if let deviceToken { p["deviceToken"] = .string(deviceToken) }
+        if let apnsEnv { p["apnsEnv"] = .string(apnsEnv) }
+        if let userId { p["userId"] = .string(userId) }
         return p
     }
 }
@@ -1662,6 +1672,10 @@ public struct AgentConfig: Sendable {
     public var appId: String?
     /// APNs device token for push notifications (hex string).
     public var deviceToken: String?
+    /// APNs environment: "sandbox" or "production".
+    public var apnsEnv: String?
+    /// User identifier for multi-user routing.
+    public var userId: String?
 
     public init(
         model: String? = nil,
@@ -1673,6 +1687,8 @@ public struct AgentConfig: Sendable {
         snapshot: String? = nil,
         appId: String? = nil,
         deviceToken: String? = nil,
+        apnsEnv: String? = nil,
+        userId: String? = nil,
         onResponse: @escaping @Sendable (String) async -> Void,
         onAskUser: @escaping @Sendable (String) async -> String,
         onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
@@ -1686,6 +1702,8 @@ public struct AgentConfig: Sendable {
         self.snapshot = snapshot
         self.appId = appId
         self.deviceToken = deviceToken
+        self.apnsEnv = apnsEnv
+        self.userId = userId
         self.onResponse = onResponse
         self.onAskUser = onAskUser
         self.onAskQuestions = onAskQuestions
@@ -1924,7 +1942,9 @@ public final class CopilotAgent: @unchecked Sendable {
             clientId: config.clientId,
             snapshot: config.snapshot,
             appId: config.appId,
-            deviceToken: config.deviceToken
+            deviceToken: config.deviceToken,
+            apnsEnv: config.apnsEnv,
+            userId: config.userId
         )
     }
 }
@@ -1973,9 +1993,12 @@ public final class CopilotClient: @unchecked Sendable {
     }
 
     /// Send device token to relay for APNs push notifications.
-    public func setDeviceToken(_ token: String) async {
+    public func setDeviceToken(_ token: String, apnsEnv: String? = nil, userId: String? = nil) async {
         do {
-            try await connection.sendNotification(method: "set_device_token", params: ["token": .string(token)])
+            var params: [String: JSONValue] = ["token": .string(token)]
+            if let apnsEnv { params["apnsEnv"] = .string(apnsEnv) }
+            if let userId { params["userId"] = .string(userId) }
+            try await connection.sendNotification(method: "set_device_token", params: params)
             NSLog("[CopilotClient] Sent device token to relay: \(token.prefix(8))...")
         } catch {
             NSLog("[CopilotClient] setDeviceToken error: \(error.localizedDescription)")

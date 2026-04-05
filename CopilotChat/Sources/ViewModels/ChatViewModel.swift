@@ -137,8 +137,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Send APNs device token to relay for push notifications.
-    public func setDeviceToken(_ token: String) async {
-        await client?.setDeviceToken(token)
+    public func setDeviceToken(_ token: String, apnsEnv: String? = nil, userId: String? = nil) async {
+        await client?.setDeviceToken(token, apnsEnv: apnsEnv, userId: userId)
     }
 
     /// Archive a project's GitHub repo via the relay's GitHub proxy.
