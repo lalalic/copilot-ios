@@ -306,11 +306,15 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Relay Notification Handling
 
     private func handleRelayNotification(type: String, params: [String: JSONValue]) {
+        NSLog("[ChatViewModel] handleRelayNotification: type=%@", type)
         // Intercept create_project_request delegation from relay
         if type == "create_project_request" {
+            NSLog("[ChatViewModel] create_project_request received, creating handler...")
             nonisolated(unsafe) let handler = self.getOrCreateProjectTaskHandler()
             Task { @MainActor in
+                NSLog("[ChatViewModel] Starting handleCreateProjectRequest...")
                 await handler.handleCreateProjectRequest(params: params)
+                NSLog("[ChatViewModel] handleCreateProjectRequest completed")
             }
             return
         }

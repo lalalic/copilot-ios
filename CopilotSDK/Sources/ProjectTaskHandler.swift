@@ -60,13 +60,17 @@ public final class ProjectTaskHandler {
     /// Handle a create_project_request notification from the relay.
     /// Creates repo, pushes template files from device, creates issue, reports done.
     public func handleCreateProjectRequest(params: [String: JSONValue]) async {
+        NSLog("[ProjectTaskHandler] handleCreateProjectRequest called with %d params", params.count)
         guard case .string(let requestId) = params["requestId"],
               case .string(let repoName) = params["repoName"],
               case .string(let appName) = params["appName"] else {
+            NSLog("[ProjectTaskHandler] Missing required params!")
             log.error("create_project_request missing required params")
             await sendDone(requestId: "unknown", error: "Missing required params (requestId, repoName, appName)")
             return
         }
+        
+        NSLog("[ProjectTaskHandler] requestId=%@, repoName=%@, appName=%@", requestId, repoName, appName)
         
         let taskDescription: String
         if case .string(let td) = params["taskDescription"] { taskDescription = td } else { taskDescription = "" }
@@ -78,13 +82,17 @@ public final class ProjectTaskHandler {
         if case .string(let pt) = params["projectType"] { projectType = pt } else { projectType = "expo-app" }
         
         log.info("Handling create_project_request: \(repoName) (\(appName)) type=\(projectType)")
+        NSLog("[ProjectTaskHandler] proxyBaseURL=%@", proxyBaseURL.absoluteString)
         
         do {
             // 1. Read template files from device
+            NSLog("[ProjectTaskHandler] Step 1: Reading template files...")
             let files = try readTemplateFiles(projectType: projectType, appName: appName, repoName: repoName, bundleId: bundleId)
+            NSLog("[ProjectTaskHandler] Step 1 done: %d files read", files.count)
             log.info("Read \(files.count) template files from device")
             
             // 2. Create repo with initial commit (auto_init enables Git Trees API)
+            NSLog("[ProjectTaskHandler] Step 2: Creating repo %@...", repoName)
             let createRes = try await githubProxy(
                 "POST",
                 "/orgs/\(githubOrg)/repos",
@@ -97,24 +105,31 @@ public final class ProjectTaskHandler {
             )
             
             guard createRes.status == 201 else {
+                NSLog("[ProjectTaskHandler] Step 2 failed: status=%d body=%@", createRes.status, createRes.text)
                 throw ProjectTaskError.repoCreation(status: createRes.status, body: createRes.text)
             }
             
+            NSLog("[ProjectTaskHandler] Step 2 done: repo created")
             log.info("Repo created: \(self.githubOrg)/\(repoName)")
             
             // 3. Push all files via Git trees API
+            NSLog("[ProjectTaskHandler] Step 3: Pushing files...")
             try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
+            NSLog("[ProjectTaskHandler] Step 3 done: files pushed")
             
             // 4. Create issue with task spec
+            NSLog("[ProjectTaskHandler] Step 4: Creating issue...")
             let issueNumber = try await createIssue(
                 repoName: repoName,
                 appName: appName,
                 taskDescription: taskDescription
             )
             
+            NSLog("[ProjectTaskHandler] Step 4 done: issue #%d created", issueNumber)
             log.info("Project created: \(self.githubOrg)/\(repoName) issue #\(issueNumber)")
             
             // 5. Report done
+            NSLog("[ProjectTaskHandler] Step 5: Sending done...")
             await sendDone(
                 requestId: requestId,
                 repo: "\(githubOrg)/\(repoName)",
@@ -122,6 +137,7 @@ public final class ProjectTaskHandler {
             )
             
         } catch {
+            NSLog("[ProjectTaskHandler] FAILED: %@", error.localizedDescription)
             log.error("create_project_request failed: \(error.localizedDescription)")
             await sendDone(requestId: requestId, error: error.localizedDescription)
         }
