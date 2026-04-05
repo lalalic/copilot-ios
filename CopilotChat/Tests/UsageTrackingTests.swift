@@ -100,11 +100,9 @@ struct UsageTrackerTests {
             model: "gpt-4.1",
             promptTokens: 1000,
             completionTokens: 500,
-            inputMultiplier: 0.20,
-            outputMultiplier: 0.80
+            cost: 0.006
         )
         
-        // Cost: (1000*0.20 + 500*0.80) * 0.00001 = 0.006
         #expect(abs(tracker.balance - (2.00 - 0.006)) < 0.000001)
         #expect(abs(tracker.sessionCost - 0.006) < 0.000001)
         #expect(tracker.sessionTokens == 1500)
@@ -115,8 +113,8 @@ struct UsageTrackerTests {
     func recordAccumulates() {
         let tracker = UsageTracker(defaults: .makeFresh())
         
-        tracker.record(model: "gpt-4.1", promptTokens: 100, completionTokens: 50, inputMultiplier: 0.20, outputMultiplier: 0.80)
-        tracker.record(model: "gpt-4.1", promptTokens: 200, completionTokens: 100, inputMultiplier: 0.20, outputMultiplier: 0.80)
+        tracker.record(model: "gpt-4.1", promptTokens: 100, completionTokens: 50, cost: 0.0006)
+        tracker.record(model: "gpt-4.1", promptTokens: 200, completionTokens: 100, cost: 0.0012)
         
         #expect(tracker.sessionTokens == 450) // 150 + 300
         #expect(tracker.lifetimeTokens == 450)
@@ -128,7 +126,7 @@ struct UsageTrackerTests {
         let tracker = UsageTracker(defaults: .makeFresh())
         
         // Drain balance with a huge request
-        tracker.record(model: "o3", promptTokens: 1_000_000, completionTokens: 1_000_000, inputMultiplier: 1.00, outputMultiplier: 4.00)
+        tracker.record(model: "o3", promptTokens: 1_000_000, completionTokens: 1_000_000, cost: 50.00)
         
         #expect(tracker.balance == 0.0)
     }
@@ -146,7 +144,7 @@ struct UsageTrackerTests {
     func resetSession() {
         let tracker = UsageTracker(defaults: .makeFresh())
         
-        tracker.record(model: "gpt-4.1", promptTokens: 1000, completionTokens: 500, inputMultiplier: 0.20, outputMultiplier: 0.80)
+        tracker.record(model: "gpt-4.1", promptTokens: 1000, completionTokens: 500, cost: 0.006)
         
         let lifetimeBefore = tracker.lifetimeTokens
         tracker.resetSession()
@@ -163,7 +161,7 @@ struct UsageTrackerTests {
         
         // Create tracker, use some tokens
         let tracker1 = UsageTracker(defaults: defaults)
-        tracker1.record(model: "gpt-4.1", promptTokens: 1000, completionTokens: 500, inputMultiplier: 0.20, outputMultiplier: 0.80)
+        tracker1.record(model: "gpt-4.1", promptTokens: 1000, completionTokens: 500, cost: 0.006)
         let savedBalance = tracker1.balance
         let savedLifetimeCost = tracker1.lifetimeCost
         
@@ -178,8 +176,8 @@ struct UsageTrackerTests {
     func perModelBreakdown() {
         let tracker = UsageTracker(defaults: .makeFresh())
         
-        tracker.record(model: "gpt-4.1", promptTokens: 100, completionTokens: 50, inputMultiplier: 0.20, outputMultiplier: 0.80)
-        tracker.record(model: "gpt-4o-mini", promptTokens: 200, completionTokens: 100, inputMultiplier: 0.015, outputMultiplier: 0.06)
+        tracker.record(model: "gpt-4.1", promptTokens: 100, completionTokens: 50, cost: 0.0006)
+        tracker.record(model: "gpt-4o-mini", promptTokens: 200, completionTokens: 100, cost: 0.00009)
         
         #expect(tracker.sessionUsageByModel.count == 2)
         #expect(tracker.sessionUsageByModel["gpt-4.1"]?.promptTokens == 100)
