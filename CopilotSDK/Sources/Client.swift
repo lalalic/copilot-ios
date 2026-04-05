@@ -1982,6 +1982,16 @@ public final class CopilotClient: @unchecked Sendable {
         }
     }
 
+    /// Delete a project from the relay (archives GitHub repo, removes from projects.json).
+    public func deleteProject(name: String) async {
+        do {
+            _ = try await connection.send(method: "delete_project", params: ["projectName": .string(name)])
+            NSLog("[CopilotClient] Deleted project from relay: \(name)")
+        } catch {
+            NSLog("[CopilotClient] deleteProject error: \(error.localizedDescription)")
+        }
+    }
+
     /// Create a new session with full configuration.
     public func createSession(config: SessionConfig = SessionConfig()) async throws -> CopilotSession {
         let sessionId = config.sessionId ?? UUID().uuidString.lowercased()

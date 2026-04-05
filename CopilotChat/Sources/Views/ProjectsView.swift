@@ -26,15 +26,17 @@ public struct ProjectsView: View {
     let rootURL: URL
     let currentProject: String?
     let onSelect: (Project?) -> Void
+    let onDelete: ((Project) -> Void)?
 
     @State private var projects: [Project] = []
     @State private var projectToDelete: Project?
     @Environment(\.dismiss) private var dismiss
 
-    public init(rootURL: URL, currentProject: String? = nil, onSelect: @escaping (Project?) -> Void) {
+    public init(rootURL: URL, currentProject: String? = nil, onSelect: @escaping (Project?) -> Void, onDelete: ((Project) -> Void)? = nil) {
         self.rootURL = rootURL
         self.currentProject = currentProject
         self.onSelect = onSelect
+        self.onDelete = onDelete
     }
 
     public var body: some View {
@@ -154,6 +156,7 @@ public struct ProjectsView: View {
         if currentProject == project.name {
             onSelect(nil)
         }
+        onDelete?(project)
     }
 }
 
