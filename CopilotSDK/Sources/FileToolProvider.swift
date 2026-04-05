@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, list_files, create_directory, create_project, start_coding_task.
+    /// All file tools: read_file, write_file, list_files, create_directory, create_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, listFilesTool, createDirectoryTool, createProjectTool, startCodingTaskTool]
+        [readFileTool, writeFileTool, listFilesTool, createDirectoryTool, createProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -403,37 +403,6 @@ public final class FileToolProvider: Sendable {
                 }
                 try manager.copyItem(at: item, to: destination)
             }
-        }
-    }
-
-    // MARK: - start_coding_task (relay-intercepted)
-
-    private var startCodingTaskTool: ToolDefinition {
-        ToolDefinition(
-            name: "start_coding_task",
-            description: "Start a coding task for a project. Creates a GitHub repo, creates an issue with the task spec, assigns the coding agent, and activates the CI/CD pipeline. Returns the repo URL and issue URL.",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "appName": .object([
-                        "type": .string("string"),
-                        "description": .string("Display name for the app (e.g., \"Weather App\")")
-                    ]),
-                    "taskDescription": .object([
-                        "type": .string("string"),
-                        "description": .string("Detailed description of what the app should do. Will be used as the issue body for the coding agent.")
-                    ]),
-                    "model": .object([
-                        "type": .string("string"),
-                        "description": .string("AI model for the coding agent. Supported: \"claude-sonnet-4.5\", \"claude-opus-4.5\", \"claude-opus-4.6\", \"gpt-5.2-codex\", or \"\" for Auto.")
-                    ])
-                ]),
-                "required": .array([.string("appName"), .string("taskDescription")])
-            ]),
-            skipPermission: true
-        ) { _ in
-            // Relay intercepts this tool call — handler is never executed client-side
-            return "start_coding_task is handled by the relay server"
         }
     }
 }

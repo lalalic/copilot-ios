@@ -55,7 +55,78 @@ public final class ProjectTaskHandler {
         }
     }
     
-    // MARK: - Handle Delegation
+    // MARK: - Tool handler (agent flow)
+
+    /// Create a project: repo + template files + issue.
+    /// Called as a tool handler when the agent calls start_coding_task.
+    /// Returns a JSON string with {repo, issueNumber} for the relay to parse and run activation.
+    public func createProject(appName: String, taskDescription: String, model: String = "") async -> String {
+        let slug = Self.slugify(appName)
+        let id = Self.shortId()
+        let repoName = "\(slug)-\(id)"
+        let bundleId = "com.neos.\(slug.replacingOccurrences(of: "-", with: ""))\(id)"
+
+        NSLog("[ProjectTaskHandler] createProject: %@ → %@", appName, repoName)
+
+        do {
+            // 1. Read template files from device
+            let files = try readTemplateFiles(projectType: "expo-app", appName: appName, repoName: repoName, bundleId: bundleId)
+            NSLog("[ProjectTaskHandler] Read %d template files", files.count)
+
+            // 2. Create repo
+            let createRes = try await githubProxy(
+                "POST",
+                "/orgs/\(githubOrg)/repos",
+                body: [
+                    "name": repoName,
+                    "description": appName,
+                    "private": false,
+                    "auto_init": true,
+                ] as [String: Any]
+            )
+            guard createRes.status == 201 else {
+                return "Error: Repo creation failed (HTTP \(createRes.status)): \(createRes.text.prefix(200))"
+            }
+
+            // 3. Push template files via Git Trees API
+            try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
+
+            // 3b. Save package.json locally
+            let projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
+            try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+            let localPkg: [String: Any] = [
+                "name": repoName, "displayName": appName, "description": taskDescription,
+                "repo": "\(githubOrg)/\(repoName)", "bundleId": bundleId, "projectType": "expo-app",
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: projectDir.appendingPathComponent("package.json"))
+            }
+
+            // 4. Create issue
+            let issueNumber = try await createIssue(repoName: repoName, appName: appName, taskDescription: taskDescription)
+
+            NSLog("[ProjectTaskHandler] Project created: %@/%@ issue #%d", githubOrg, repoName, issueNumber)
+            // Return JSON so relay can parse repo + issueNumber for activation
+            return "{\"repo\":\"\(githubOrg)/\(repoName)\",\"issueNumber\":\(issueNumber),\"bundleId\":\"\(bundleId)\"}"
+        } catch {
+            NSLog("[ProjectTaskHandler] createProject failed: %@", error.localizedDescription)
+            return "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private static func slugify(_ name: String) -> String {
+        name.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
+
+    private static func shortId() -> String {
+        let chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return String((0..<6).map { _ in chars.randomElement()! })
+    }
+
+    // MARK: - Handle Delegation (legacy)
     
     /// Handle a create_project_request notification from the relay.
     /// Creates repo, pushes template files from device, creates issue, reports done.

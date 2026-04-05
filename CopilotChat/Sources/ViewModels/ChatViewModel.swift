@@ -245,7 +245,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Inject manage_todo_list and get_attachment tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool()]
+        config.tools = (config.tools ?? []) + [makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -272,6 +272,7 @@ public final class ChatViewModel: ObservableObject {
         config.tools.append(makeGetAttachmentTool())
         config.tools.append(makeCreatePlanTool())
         config.tools.append(makeStripeCheckoutTool())
+        config.tools.append(makeStartCodingTaskTool())
 
         // Wrap onResponse to update UI
         let originalOnResponse = config.onResponse
@@ -314,17 +315,6 @@ public final class ChatViewModel: ObservableObject {
 
     private func handleRelayNotification(type: String, params: [String: JSONValue]) {
         NSLog("[ChatViewModel] handleRelayNotification: type=%@", type)
-        // Intercept create_project_request delegation from relay
-        if type == "create_project_request" {
-            NSLog("[ChatViewModel] create_project_request received, creating handler...")
-            nonisolated(unsafe) let handler = self.getOrCreateProjectTaskHandler()
-            Task { @MainActor in
-                NSLog("[ChatViewModel] Starting handleCreateProjectRequest...")
-                await handler.handleCreateProjectRequest(params: params)
-                NSLog("[ChatViewModel] handleCreateProjectRequest completed")
-            }
-            return
-        }
 
         // Generic notification display
         guard notificationFilter(type) else { return }
@@ -1227,6 +1217,51 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             return "Error: \(error)"
         }
+    }
+
+    // MARK: - Start Coding Task Tool
+
+    private func makeStartCodingTaskTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "start_coding_task",
+            description: "Start a coding task for a project. Creates a GitHub repo, creates an issue with the task spec, assigns the coding agent, and activates the CI/CD pipeline. Returns the repo URL and issue URL.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "appName": .object([
+                        "type": .string("string"),
+                        "description": .string("Display name for the app (e.g., \"Weather App\")")
+                    ]),
+                    "taskDescription": .object([
+                        "type": .string("string"),
+                        "description": .string("Detailed description of what the app should do. Will be used as the issue body for the coding agent.")
+                    ]),
+                    "model": .object([
+                        "type": .string("string"),
+                        "description": .string("AI model for the coding agent. Supported: \"claude-sonnet-4.5\", \"claude-opus-4.5\", \"claude-opus-4.6\", \"gpt-5.2-codex\", or \"\" for Auto.")
+                    ])
+                ]),
+                "required": .array([.string("appName"), .string("taskDescription")])
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "Error: view model deallocated" }
+                return await self.handleStartCodingTask(args)
+            }
+        )
+    }
+
+    private func handleStartCodingTask(_ args: JSONValue) async -> String {
+        guard case .object(let dict) = args,
+              case .string(let appName) = dict["appName"],
+              case .string(let taskDescription) = dict["taskDescription"] else {
+            return "Error: 'appName' and 'taskDescription' are required"
+        }
+        let model: String
+        if case .string(let m) = dict["model"] { model = m } else { model = "" }
+
+        let handler = getOrCreateProjectTaskHandler()
+        return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model)
     }
 }
 
