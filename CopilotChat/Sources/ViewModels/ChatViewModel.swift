@@ -631,7 +631,7 @@ public final class ChatViewModel: ObservableObject {
             _ = try await targetSession.send(prompt: trimmed)
             
             // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
-            // 180s timeout for operations that involve tool calls (create_task, etc.)
+            // 180s timeout for operations that involve tool calls (start_coding_task, etc.)
             var stateObserver: AnyCancellable?
             let stateStream = AsyncStream<ChatState> { continuation in
                 stateObserver = self.$chatState.sink { state in
