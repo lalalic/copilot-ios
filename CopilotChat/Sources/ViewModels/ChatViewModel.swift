@@ -141,9 +141,10 @@ public final class ChatViewModel: ObservableObject {
         await client?.setDeviceToken(token)
     }
 
-    /// Delete a project from the relay (archives GitHub repo, removes from projects.json).
+    /// Archive a project's GitHub repo via the relay's GitHub proxy.
     public func deleteProject(name: String) async {
-        await client?.deleteProject(name: name)
+        nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
+        await handler.archiveRepo(name: name)
     }
 
     /// Add a push notification as a system message in the chat.

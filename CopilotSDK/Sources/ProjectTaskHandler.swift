@@ -393,6 +393,19 @@ public final class ProjectTaskHandler {
         return ProxyResponse(status: httpResponse.statusCode, data: data, text: text)
     }
     
+    // MARK: - Repo Management
+    
+    /// Archive a GitHub repo via the relay's GitHub proxy.
+    public func archiveRepo(name: String) async {
+        let repoPath = "/repos/\(githubOrg)/\(name)"
+        do {
+            let res = try await githubProxy("PATCH", repoPath, body: ["archived": true])
+            NSLog("[ProjectTaskHandler] archiveRepo %@: status=%d", name, res.status)
+        } catch {
+            NSLog("[ProjectTaskHandler] archiveRepo error: %@", error.localizedDescription)
+        }
+    }
+
     // MARK: - Response
     
     private func sendDone(requestId: String, repo: String? = nil, issueNumber: Int? = nil, error: String? = nil) async {
