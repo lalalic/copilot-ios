@@ -1241,7 +1241,7 @@ public final class ChatViewModel: ObservableObject {
                 guard let self else { return "response received" }
                 if case .object(let dict) = args, case .string(let message) = dict["message"] {
                     await MainActor.run {
-                        let blocks = self.parseContentBlocks(message)
+                        let blocks = parseContentBlocks(message)
                         self.messages.append(ChatMessage(role: .assistant, content: blocks, project: self.projectScope))
                     }
                 }
@@ -1291,7 +1291,7 @@ public final class ChatViewModel: ObservableObject {
         let model: String
         if case .string(let m) = dict["model"] { model = m } else { model = "" }
 
-        let handler = getOrCreateProjectTaskHandler()
+        nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
         return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model)
     }
 }
