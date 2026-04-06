@@ -107,6 +107,7 @@ public final class ProjectTaskHandler {
                 localPkg = parsed
             }
             localPkg["name"] = repoName
+            localPkg["displayName"] = appName
             localPkg["repo"] = "\(githubOrg)/\(repoName)"
             localPkg["bundleId"] = bundleId
             if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
