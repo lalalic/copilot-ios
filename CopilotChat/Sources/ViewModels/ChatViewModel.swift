@@ -163,9 +163,11 @@ public final class ChatViewModel: ObservableObject {
             CodingAgentNotificationHandler.apply(
                 notification,
                 addMessage: { msgTitle, msgBody, repo in
-                    let blocks: [ChatMessage.ContentBlock] = [.text("**\(msgTitle)**\n\(msgBody)")]
+                    let text = "**\(msgTitle)**\n\(msgBody)"
+                    let blocks: [ChatMessage.ContentBlock] = [.text(text)]
                     let msg = ChatMessage(role: .system, content: blocks, project: repo)
                     self.messages.append(msg)
+                    self.sessionLogger?.log(role: "system", text: text, project: repo)
                 },
                 usageTracker: usageTracker
             )
@@ -187,10 +189,12 @@ public final class ChatViewModel: ObservableObject {
         default:
             emoji = "🔔"
         }
-        blocks.append(.text("\(emoji) **\(title)**\n\(body)"))
+        let text = "\(emoji) **\(title)**\n\(body)"
+        blocks.append(.text(text))
         let repo = (data["repo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let msg = ChatMessage(role: .system, content: blocks, project: repo)
         messages.append(msg)
+        sessionLogger?.log(role: "system", text: text, project: repo)
     }
 
     // MARK: - Debug
@@ -369,8 +373,13 @@ public final class ChatViewModel: ObservableObject {
         guard !history.isEmpty else { return }
 
         let restored = history.map { entry in
-            ChatMessage(
-                role: entry.role == "assistant" ? .assistant : .user,
+            let role: ChatMessage.Role = switch entry.role {
+            case "assistant": .assistant
+            case "system": .system
+            default: .user
+            }
+            return ChatMessage(
+                role: role,
                 content: entry.role == "assistant" ? parseContentBlocks(entry.text) : [.text(entry.text)],
                 timestamp: entry.timestamp,
                 project: entry.project
