@@ -110,6 +110,8 @@ public final class ChatViewModel: ObservableObject {
 
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
+    /// Recent notification keys for deduplication (title+body → timestamp).
+    private var recentNotifications: [(key: String, time: Date)] = []
 
     /// Clear all session history (JSONL files).
     public func clearSessionHistory() {
@@ -163,6 +165,13 @@ public final class ChatViewModel: ObservableObject {
     /// Coding agent notifications (type: "coding_agent") are handled by CodingAgentNotificationHandler.
     @MainActor
     public func addNotification(title: String, body: String, data: [String: Any] = [:]) {
+        // Deduplicate: skip if identical title+body was added within last 30 seconds
+        let dedupKey = "\(title)|\(body)"
+        let now = Date()
+        recentNotifications.removeAll { now.timeIntervalSince($0.time) > 30 }
+        if recentNotifications.contains(where: { $0.key == dedupKey }) { return }
+        recentNotifications.append((key: dedupKey, time: now))
+
         // Try coding agent handler first
         if let notification = CodingAgentNotificationHandler.parse(title: title, body: body, userInfo: data) {
             CodingAgentNotificationHandler.apply(
