@@ -184,6 +184,7 @@ public final class AttachmentStore: @unchecked Sendable {
         case "js":              return "text/javascript"
         case "ts":              return "text/typescript"
         case "json":            return "application/json"
+        case "jsonl":           return "application/jsonl"
         case "xml":             return "text/xml"
         case "yaml", "yml":     return "text/yaml"
         case "swift":           return "text/x-swift"
@@ -424,7 +425,7 @@ public final class AttachmentStore: @unchecked Sendable {
     }
     
     private static func isTextMimeType(_ mime: String) -> Bool {
-        mime == "application/json" || mime == "application/xml" || mime.hasPrefix("text/")
+        mime == "application/json" || mime == "application/jsonl" || mime == "application/xml" || mime.hasPrefix("text/")
     }
 }
 
