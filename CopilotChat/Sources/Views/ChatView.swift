@@ -9,6 +9,7 @@ public struct ChatView: View {
 
     @ObservedObject private var viewModel: ChatViewModel
     private let inputModes: InputMode
+    @State private var htmlPreviewURL: URL?
 
     /// Create a chat view.
     /// - Parameters:
@@ -85,6 +86,31 @@ public struct ChatView: View {
                     viewModel.objectWillChange.send()
                 }
             )
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            // Intercept workspace file links (relative paths become file:// URLs)
+            if url.pathExtension.lowercased() == "html" {
+                // Try to resolve relative to workspace
+                let resolved: URL
+                if url.isFileURL {
+                    resolved = url
+                } else {
+                    // Relative path — resolve against workspace
+                    let workspaceURL = viewModel.workspaceURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    resolved = workspaceURL.appendingPathComponent(url.path)
+                }
+                if FileManager.default.fileExists(atPath: resolved.path) {
+                    htmlPreviewURL = resolved
+                    return .handled
+                }
+            }
+            return .systemAction
+        })
+        .sheet(item: Binding(
+            get: { htmlPreviewURL.map { IdentifiableURL(url: $0) } },
+            set: { htmlPreviewURL = $0?.url }
+        )) { item in
+            HTMLPreviewView(fileURL: item.url)
         }
         .task {
             if viewModel.chatState == .disconnected {
@@ -165,3 +191,11 @@ public struct ChatView: View {
 /// ```
 public typealias CopilotChatView = ChatView
 public typealias CopilotChatViewModel = ChatViewModel
+
+
+// MARK: - Identifiable URL Wrapper
+
+private struct IdentifiableURL: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}

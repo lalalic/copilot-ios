@@ -106,7 +106,7 @@ public final class ChatViewModel: ObservableObject {
     private var projectTaskHandler: ProjectTaskHandler?
     
     /// Workspace directory on device for reading templates.
-    private let workspaceURL: URL?
+    public let workspaceURL: URL?
 
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
