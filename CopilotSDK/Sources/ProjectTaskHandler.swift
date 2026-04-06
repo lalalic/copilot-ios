@@ -100,12 +100,21 @@ public final class ProjectTaskHandler {
                 projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
                 try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
             }
-            let localPkg: [String: Any] = [
-                "name": repoName, "displayName": appName, "description": taskDescription,
-                "repo": "\(githubOrg)/\(repoName)", "bundleId": bundleId, "projectType": "expo-app",
-            ]
+            let pkgFile = projectDir.appendingPathComponent("package.json")
+            var localPkg: [String: Any] = [:]
+            // Merge into existing package.json if present
+            if let existing = try? Data(contentsOf: pkgFile),
+               let parsed = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
+                localPkg = parsed
+            }
+            localPkg["name"] = repoName
+            localPkg["displayName"] = appName
+            localPkg["description"] = taskDescription
+            localPkg["repo"] = "\(githubOrg)/\(repoName)"
+            localPkg["bundleId"] = bundleId
+            localPkg["projectType"] = "expo-app"
             if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: projectDir.appendingPathComponent("package.json"))
+                try? data.write(to: pkgFile)
             }
 
             // 4. Create issue
