@@ -389,9 +389,13 @@ public final class FileToolProvider: Sendable {
             options: [.skipsHiddenFiles]
         )
 
+        // Resolve symlinks for consistent path comparison (iOS /var ↔ /private/var)
+        let templateResolved = templateURL.resolvingSymlinksInPath().path
+
         while let item = enumerator?.nextObject() as? URL {
-            let relativePath = item.path.replacingOccurrences(of: templateURL.path + "/", with: "")
-            if relativePath.isEmpty { continue }
+            let itemResolved = item.resolvingSymlinksInPath().path
+            let relativePath = itemResolved.replacingOccurrences(of: templateResolved + "/", with: "")
+            if relativePath.isEmpty || relativePath == itemResolved { continue }
 
             let destination = projectURL.appendingPathComponent(relativePath)
             let values = try item.resourceValues(forKeys: Set(keys))
