@@ -317,11 +317,21 @@ public final class FileToolProvider: Sendable {
                 // Build README.md from provided info
                 let readme = self.buildProjectReadme(
                     name: name,
-                    description: description,
                     goal: goal,
                     features: features
                 )
                 try readme.write(to: projectURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+                // Write package.json with project metadata
+                let pkg: [String: Any] = [
+                    "name": name,
+                    "displayName": name,
+                    "description": description ?? "",
+                    "projectType": templateName,
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: pkg, options: [.prettyPrinted, .sortedKeys]) {
+                    try data.write(to: projectURL.appendingPathComponent("package.json"))
+                }
 
                 logger.info("create_project: \(name) (template: \(templateName))")
                 return "Created project '\(name)' from template '\(templateName)'"
@@ -331,17 +341,8 @@ public final class FileToolProvider: Sendable {
         }
     }
 
-    private func buildProjectReadme(name: String, description: String?, goal: String?, features: [String]) -> String {
+    private func buildProjectReadme(name: String, goal: String?, features: [String]) -> String {
         var lines: [String] = []
-
-        // Frontmatter
-        lines.append("---")
-        lines.append("name: \(name)")
-        if let description, !description.isEmpty {
-            lines.append("description: \(description)")
-        }
-        lines.append("---")
-        lines.append("")
 
         // Goal
         lines.append("# goal")
