@@ -1550,6 +1550,8 @@ public final class CopilotSession: @unchecked Sendable {
         }
 
         // Loop: wait for idle, then decide to resume or stop
+        var lastSendTime = ContinuousClock.now
+        var consecutiveFastTurns = 0
         while true {
             await loopControl.waitForIdle()
 
@@ -1565,9 +1567,23 @@ public final class CopilotSession: @unchecked Sendable {
                 throw CopilotError.serverError(error)
             }
 
+            // Detect rapid loop: if turns complete < 2s, back off exponentially
+            let elapsed = ContinuousClock.now - lastSendTime
+            if elapsed < .seconds(2) {
+                consecutiveFastTurns += 1
+                if consecutiveFastTurns >= 3 {
+                    let backoff = min(consecutiveFastTurns - 2, 5)
+                    print("[CopilotSession] Loop back-off: \(backoff)s (turn completed in \(elapsed))")
+                    try await Task.sleep(for: .seconds(backoff))
+                }
+            } else {
+                consecutiveFastTurns = 0
+            }
+
             // Ask client whether to continue
             if let resumePrompt = await onTurnEnd(self) {
                 await loopControl.setState(.toolRunning)
+                lastSendTime = ContinuousClock.now
                 _ = try await send(prompt: resumePrompt)
             } else {
                 break
