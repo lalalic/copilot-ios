@@ -363,6 +363,7 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Chat History
 
     private func loadChatHistory() {
+        guard messages.isEmpty else { return }
         guard let logger = sessionLogger else { return }
         let history = logger.loadHistory()
         guard !history.isEmpty else { return }
