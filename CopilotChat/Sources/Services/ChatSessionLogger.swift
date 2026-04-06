@@ -74,7 +74,7 @@ public final class ChatSessionLogger: Sendable {
                       let tsStr = obj["ts"] as? String else { continue }
 
                 // Skip tool call entries — only restore user/assistant messages
-                if role == "tool" || role == "tool_result" { continue }
+                if role == "tool_result" { continue }
 
                 let project = (obj["project"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let ts = isoFormatter.date(from: tsStr) ?? Date()
