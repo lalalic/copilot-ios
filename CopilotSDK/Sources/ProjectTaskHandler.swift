@@ -91,14 +91,13 @@ public final class ProjectTaskHandler {
             // 3. Push template files via Git Trees API
             try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
 
-            // 3b. Save package.json locally
-            // Rename scaffold directory (e.g. "habitflow/") to repo name (e.g. "habitflow-og9jir/")
+            // 3b. Update package.json in existing scaffold directory (or create new one)
             let scaffoldDir = workspaceURL.appendingPathComponent(slug, isDirectory: true)
-            let projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
-            if FileManager.default.fileExists(atPath: scaffoldDir.path) && !FileManager.default.fileExists(atPath: projectDir.path) {
-                try? FileManager.default.moveItem(at: scaffoldDir, to: projectDir)
-                NSLog("[ProjectTaskHandler] Renamed scaffold dir: %@ → %@", slug, repoName)
+            let projectDir: URL
+            if FileManager.default.fileExists(atPath: scaffoldDir.path) {
+                projectDir = scaffoldDir
             } else {
+                projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
                 try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
             }
             let localPkg: [String: Any] = [
