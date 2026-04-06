@@ -108,6 +108,9 @@ public final class ChatViewModel: ObservableObject {
     /// Workspace directory on device for reading templates.
     private let workspaceURL: URL?
 
+    /// Logs chat messages to .neo/reports/sessions/ as JSONL.
+    private var sessionLogger: ChatSessionLogger?
+
     // MARK: - Init
 
     /// Create a chat view model.
@@ -130,6 +133,10 @@ public final class ChatViewModel: ObservableObject {
         self.usageTracker = usageTracker
         self.workspaceURL = workspaceURL
         self.notificationFilter = notificationFilter
+
+        if let workspaceURL {
+            self.sessionLogger = ChatSessionLogger(workspaceURL: workspaceURL)
+        }
     }
 
     deinit {
@@ -259,6 +266,7 @@ public final class ChatViewModel: ObservableObject {
         }
 
         usageTracker.resetSession()
+        loadChatHistory()
         chatState = .idle
     }
 
@@ -309,6 +317,7 @@ public final class ChatViewModel: ObservableObject {
             self?.handleRelayNotification(type: type, params: params)
         }
 
+        loadChatHistory()
         chatState = .idle
     }
 
@@ -349,6 +358,24 @@ public final class ChatViewModel: ObservableObject {
         )
         projectTaskHandler = handler
         return handler
+    }
+
+    // MARK: - Chat History
+
+    private func loadChatHistory() {
+        guard let logger = sessionLogger else { return }
+        let history = logger.loadHistory()
+        guard !history.isEmpty else { return }
+
+        let restored = history.map { entry in
+            ChatMessage(
+                role: entry.role == "assistant" ? .assistant : .user,
+                content: [.text(entry.text)],
+                timestamp: entry.timestamp,
+                project: entry.project
+            )
+        }
+        messages.insert(contentsOf: restored, at: 0)
     }
 
     // MARK: - Event Subscription
@@ -521,6 +548,7 @@ public final class ChatViewModel: ObservableObject {
             project: projectScope
         )
         messages.append(userMessage)
+        sessionLogger?.log(role: "user", text: text, project: projectScope)
 
         // Clear attachments after sending
         if attachmentDesc != nil {
@@ -906,10 +934,12 @@ public final class ChatViewModel: ObservableObject {
                     messages.remove(at: lastIndex)
                 } else {
                     messages[lastIndex].isStreaming = false
+                    sessionLogger?.log(role: "assistant", text: messages[lastIndex].fullText, project: projectScope)
                 }
             } else {
                 messages[lastIndex].content = parseContentBlocks(trimmed)
                 messages[lastIndex].isStreaming = false
+                sessionLogger?.log(role: "assistant", text: trimmed, project: projectScope)
             }
         } else {
             guard !trimmed.isEmpty else { return }
@@ -923,6 +953,7 @@ public final class ChatViewModel: ObservableObject {
 
             let blocks = parseContentBlocks(trimmed)
             messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
+            sessionLogger?.log(role: "assistant", text: trimmed, project: projectScope)
         }
     }
 
