@@ -117,8 +117,9 @@ public final class ProjectTaskHandler {
             let issueNumber = try await createIssue(repoName: repoName, appName: appName, taskDescription: taskDescription)
 
             NSLog("[ProjectTaskHandler] Project created: %@/%@ issue #%d", githubOrg, repoName, issueNumber)
-            // Return JSON so relay can parse repo + issueNumber for activation
-            return "{\"repo\":\"\(githubOrg)/\(repoName)\",\"issueNumber\":\(issueNumber),\"bundleId\":\"\(bundleId)\"}"
+            // Return JSON so relay can parse repo + issueNumber + displayName for activation
+            let escapedName = appName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            return "{\"repo\":\"\(githubOrg)/\(repoName)\",\"issueNumber\":\(issueNumber),\"bundleId\":\"\(bundleId)\",\"displayName\":\"\(escapedName)\"}"
         } catch {
             NSLog("[ProjectTaskHandler] createProject failed: %@", error.localizedDescription)
             return "Error: \(error.localizedDescription)"
