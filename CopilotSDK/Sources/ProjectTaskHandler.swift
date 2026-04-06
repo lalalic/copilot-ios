@@ -91,23 +91,22 @@ public final class ProjectTaskHandler {
             // 3. Push template files via Git Trees API
             try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
 
-            // 3b. Update package.json in existing scaffold directory (or create new one)
+            // 3b. Rename scaffold directory to repoName and update package.json
             let scaffoldDir = workspaceURL.appendingPathComponent(slug, isDirectory: true)
-            let projectDir: URL
-            if FileManager.default.fileExists(atPath: scaffoldDir.path) {
-                projectDir = scaffoldDir
+            let projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
+            if FileManager.default.fileExists(atPath: scaffoldDir.path) && !FileManager.default.fileExists(atPath: projectDir.path) {
+                try? FileManager.default.moveItem(at: scaffoldDir, to: projectDir)
+                NSLog("[ProjectTaskHandler] Renamed scaffold dir: %@ → %@", slug, repoName)
             } else {
-                projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
                 try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
             }
             let pkgFile = projectDir.appendingPathComponent("package.json")
             var localPkg: [String: Any] = [:]
-            // Read existing package.json if present
             if let existing = try? Data(contentsOf: pkgFile),
                let parsed = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
                 localPkg = parsed
             }
-            // Only add repo-specific metadata (don't overwrite name/displayName/description)
+            localPkg["name"] = repoName
             localPkg["repo"] = "\(githubOrg)/\(repoName)"
             localPkg["bundleId"] = bundleId
             if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
