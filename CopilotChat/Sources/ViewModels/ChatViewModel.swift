@@ -163,8 +163,11 @@ public final class ChatViewModel: ObservableObject {
     /// Coding agent notifications (type: "coding_agent") are handled by CodingAgentNotificationHandler.
     @MainActor
     public func addNotification(title: String, body: String, data: [String: Any] = [:]) {
+        // Honor literal \n in body text
+        let displayBody = body.replacingOccurrences(of: "\\n", with: "\n")
+
         // Try coding agent handler first
-        if let notification = CodingAgentNotificationHandler.parse(title: title, body: body, userInfo: data) {
+        if let notification = CodingAgentNotificationHandler.parse(title: title, body: displayBody, userInfo: data) {
             CodingAgentNotificationHandler.apply(
                 notification,
                 addMessage: { msgTitle, msgBody, repo in
@@ -181,20 +184,7 @@ public final class ChatViewModel: ObservableObject {
         
         // Non-coding-agent notifications: build, testflight, etc.
         var blocks: [ChatMessage.ContentBlock] = []
-        let type = data["type"] as? String ?? "notification"
-        let emoji: String
-        switch type {
-        case "build":
-            let status = data["status"] as? String ?? ""
-            emoji = status == "success" ? "✅" : status == "failed" ? "❌" : "🔨"
-        case "testflight":
-            emoji = "🚀"
-        case "agent_progress":
-            emoji = "🤖"
-        default:
-            emoji = "🔔"
-        }
-        let text = "\(emoji) **\(title)**\n\(body)"
+        let text = "**\(title)**\n\(displayBody)"
         blocks.append(.text(text))
         let repo = (data["repo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let msg = ChatMessage(role: .system, content: blocks, project: repo)

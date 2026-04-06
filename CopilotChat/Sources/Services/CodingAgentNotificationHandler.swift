@@ -92,10 +92,10 @@ public struct CodingAgentNotificationHandler {
     ) {
         switch notification {
         case .message(let title, let body, let repo):
-            addMessage("🤖 \(title)", body, repo)
+            addMessage(title, body, repo)
             
         case .progress(let title, let body, let repo, let status):
-            addMessage("\(status.emoji) \(title)", body, repo)
+            addMessage(title, body, repo)
             
         case .usage(let repo, let model, let promptTokens, let completionTokens, let serverCost):
             // Record usage with server-calculated cost
