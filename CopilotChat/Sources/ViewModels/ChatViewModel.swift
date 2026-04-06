@@ -111,6 +111,11 @@ public final class ChatViewModel: ObservableObject {
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
 
+    /// Clear all session history (JSONL files).
+    public func clearSessionHistory() {
+        sessionLogger?.clearHistory()
+    }
+
     // MARK: - Init
 
     /// Create a chat view model.

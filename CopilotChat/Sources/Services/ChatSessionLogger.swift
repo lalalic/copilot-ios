@@ -48,6 +48,16 @@ public final class ChatSessionLogger: Sendable {
 
     // MARK: - History Loading
 
+    /// Delete all session JSONL files.
+    public func clearHistory() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.pathExtension == "jsonl" {
+            try? fm.removeItem(at: file)
+        }
+        logger.info("Cleared all session history files")
+    }
+
     /// Load the most recent messages across session files.
     /// Returns an array of (role, text, project, timestamp) tuples.
     public func loadHistory() -> [(role: String, text: String, project: String?, timestamp: Date)] {
