@@ -102,17 +102,14 @@ public final class ProjectTaskHandler {
             }
             let pkgFile = projectDir.appendingPathComponent("package.json")
             var localPkg: [String: Any] = [:]
-            // Merge into existing package.json if present
+            // Read existing package.json if present
             if let existing = try? Data(contentsOf: pkgFile),
                let parsed = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
                 localPkg = parsed
             }
-            localPkg["name"] = repoName
-            localPkg["displayName"] = appName
-            localPkg["description"] = taskDescription
+            // Only add repo-specific metadata (don't overwrite name/displayName/description)
             localPkg["repo"] = "\(githubOrg)/\(repoName)"
             localPkg["bundleId"] = bundleId
-            localPkg["projectType"] = "expo-app"
             if let data = try? JSONSerialization.data(withJSONObject: localPkg, options: [.prettyPrinted, .sortedKeys]) {
                 try? data.write(to: pkgFile)
             }
