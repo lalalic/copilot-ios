@@ -42,8 +42,7 @@ public struct ToolActivityView: View {
 
                 // Expanded list — show only the latest 5 calls
                 if isExpanded {
-                    let visibleCalls = toolCalls.count > 5 ? Array(toolCalls.suffix(5)) : toolCalls
-                    ForEach(visibleCalls) { call in
+                    ForEach(toolCalls) { call in
                         ToolCallRow(call: call)
                     }
                 }

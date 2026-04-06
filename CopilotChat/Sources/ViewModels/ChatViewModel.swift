@@ -430,6 +430,10 @@ public final class ChatViewModel: ObservableObject {
                 let args = data["arguments"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
                 Task { @MainActor in
                     self.toolCalls.append(ToolCallInfo(id: toolCallId, name: toolName, arguments: args))
+                    // Keep only the latest 5 tool calls visible in chat
+                    if self.toolCalls.count > 5 {
+                        self.toolCalls.removeFirst(self.toolCalls.count - 5)
+                    }
                 }
             }
         }
