@@ -371,7 +371,7 @@ public final class ChatViewModel: ObservableObject {
         let restored = history.map { entry in
             ChatMessage(
                 role: entry.role == "assistant" ? .assistant : .user,
-                content: [.text(entry.text)],
+                content: entry.role == "assistant" ? parseContentBlocks(entry.text) : [.text(entry.text)],
                 timestamp: entry.timestamp,
                 project: entry.project
             )
