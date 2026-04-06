@@ -386,9 +386,11 @@ public final class ChatViewModel: ObservableObject {
             case "system": .system
             default: .user
             }
+            // Honor literal \n in system notification text
+            let text = (entry.role == "system") ? entry.text.replacingOccurrences(of: "\\n", with: "\n") : entry.text
             return ChatMessage(
                 role: role,
-                content: entry.role == "assistant" ? parseContentBlocks(entry.text) : [.text(entry.text)],
+                content: entry.role == "assistant" ? parseContentBlocks(text) : [.text(text)],
                 timestamp: entry.timestamp,
                 project: entry.project
             )
