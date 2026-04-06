@@ -111,10 +111,6 @@ public final class ChatViewModel: ObservableObject {
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
 
-    /// Deduplication: last sent message text and timestamp to prevent double-sends.
-    private var lastSentText: String?
-    private var lastSentTime: Date?
-
     // MARK: - Init
 
     /// Create a chat view model.
@@ -543,16 +539,6 @@ public final class ChatViewModel: ObservableObject {
     public func send() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-
-        // Deduplicate: skip if same text sent within 5 seconds
-        if text == lastSentText,
-           let t = lastSentTime, Date().timeIntervalSince(t) < 5 {
-            inputText = ""
-            return
-        }
-        lastSentText = text
-        lastSentTime = Date()
-
         inputText = ""
 
         // Prepend attachment context if files are attached
