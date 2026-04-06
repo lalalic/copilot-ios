@@ -1600,6 +1600,27 @@ private final class LoopErrorFlag: @unchecked Sendable {
     }
 }
 
+/// Thread-safe counter to guard against runaway send_response spam.
+/// Incremented each time send_response is called; reset when ask_questions is called.
+private final class SendResponseCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _count = 0
+
+    func increment() -> Int {
+        lock.lock()
+        _count += 1
+        let v = _count
+        lock.unlock()
+        return v
+    }
+
+    func reset() {
+        lock.lock()
+        _count = 0
+        lock.unlock()
+    }
+}
+
 /// Internal actor to manage loop state
 private actor LoopControl {
     var state: CopilotSession.LoopState = .toolRunning
@@ -1750,6 +1771,9 @@ public final class CopilotAgent: @unchecked Sendable {
     static func buildTools(config: AgentConfig) -> [ToolDefinition] {
         var tools = config.tools
 
+        // Guard against runaway send_response calls within a single turn
+        let responseCounter = SendResponseCounter()
+
         let onResponse = config.onResponse
         tools.append(ToolDefinition(
             name: "send_response",
@@ -1765,7 +1789,12 @@ public final class CopilotAgent: @unchecked Sendable {
                 "required": .array([.string("message")]),
             ]),
             skipPermission: true,
-            handler: { args in
+            handler: { [responseCounter] args in
+                let count = responseCounter.increment()
+                if count > 2 {
+                    return "ERROR: You already called send_response \(count) times without calling ask_questions. You MUST call ask_questions NOW to wait for user input. Do NOT call send_response again."
+                }
+
                 let message: String
                 if case .object(let dict) = args, case .string(let msg) = dict["message"] {
                     message = msg
@@ -1834,7 +1863,8 @@ public final class CopilotAgent: @unchecked Sendable {
                 "required": .array([.string("questions")]),
             ]),
             skipPermission: true,
-            handler: { args in
+            handler: { [responseCounter] args in
+                responseCounter.reset()
                 if let onAskQuestions {
                     let result = await onAskQuestions(args)
                     if let data = try? JSONEncoder().encode(result), let text = String(data: data, encoding: .utf8) {
@@ -1863,10 +1893,11 @@ public final class CopilotAgent: @unchecked Sendable {
     /// Build the session config for an agent.
     static func buildSessionConfig(config: AgentConfig) -> SessionConfig {
         let agentLoopSuffix = """
-        IMPORTANT: You are an autonomous agent running in an infinite loop.
+        IMPORTANT: You are an autonomous agent.
         - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
+        - After calling `send_response`, you MUST immediately call `ask_questions` to wait for the user's next message.
+        - NEVER call `send_response` more than once without calling `ask_questions` in between.
         - Use the `ask_questions` tool when you need more information or when all tasks are done.
-        - Always use one of these tools before your turn ends.
         """
 
         let systemMessage: SystemMessageConfig?
