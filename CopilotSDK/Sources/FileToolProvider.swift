@@ -262,6 +262,10 @@ public final class FileToolProvider: Sendable {
                         "type": .string("array"),
                         "items": .object(["type": .string("string")]),
                         "description": .string("List of MVP features.")
+                    ]),
+                    "readme": .object([
+                        "type": .string("string"),
+                        "description": .string("Full README.md content. If provided, used as-is instead of the template. Should follow the template README structure (goal, features, strategy, implementation phases, references).")
                     ])
                 ]),
                 "required": .array([.string("name")])
@@ -289,6 +293,7 @@ public final class FileToolProvider: Sendable {
                 guard case .array(let arr) = dict["features"] else { return [] }
                 return arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
             }()
+            let readmeContent = dict["readme"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
 
             let projectURL = self.baseDirectory.appendingPathComponent(name, isDirectory: true)
             guard projectURL.path.hasPrefix(self.baseDirectory.path) else {
@@ -314,8 +319,8 @@ public final class FileToolProvider: Sendable {
                     try FileManager.default.createDirectory(at: projectURL.appendingPathComponent("progress", isDirectory: true), withIntermediateDirectories: true)
                 }
 
-                // Build README.md from provided info
-                let readme = self.buildProjectReadme(
+                // Use provided README or build from template
+                let readme = readmeContent ?? self.buildProjectReadme(
                     name: name,
                     goal: goal,
                     features: features
