@@ -434,6 +434,7 @@ public final class ChatViewModel: ObservableObject {
                     if self.toolCalls.count > 5 {
                         self.toolCalls.removeFirst(self.toolCalls.count - 5)
                     }
+                    self.sessionLogger?.log(role: "tool", text: "[\(toolName)] \(args ?? "")", project: self.projectScope)
                 }
             }
         }
@@ -447,6 +448,9 @@ public final class ChatViewModel: ObservableObject {
                     if let toolCallId, let idx = self.toolCalls.firstIndex(where: { $0.id == toolCallId }) {
                         self.toolCalls[idx].status = .completed
                         self.toolCalls[idx].result = result
+                        let name = self.toolCalls[idx].name
+                        let truncated = (result ?? "").prefix(500)
+                        self.sessionLogger?.log(role: "tool_result", text: "[\(name)] \(truncated)", project: self.projectScope)
                     }
                 }
             }
