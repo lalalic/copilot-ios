@@ -1718,16 +1718,29 @@ public struct AgentConfig: Sendable {
 
 /// An autonomous agent that runs in an infinite loop, delivering responses
 /// via `send_response` tool and asking for user input via `ask_user` tool.
+/// Thread-safe counter for tracking consecutive agent turns without user interaction.
+final class AgentLoopState: @unchecked Sendable {
+    private var lock = NSLock()
+    private var _turnsSinceAsk = 0
+
+    func incrementTurn() -> Int {
+        lock.lock(); _turnsSinceAsk += 1; let v = _turnsSinceAsk; lock.unlock(); return v
+    }
+    func reset() { lock.lock(); _turnsSinceAsk = 0; lock.unlock() }
+}
+
 public final class CopilotAgent: @unchecked Sendable {
     public let session: CopilotSession
     private let config: AgentConfig
     private var _isRunning = false
+    let loopState: AgentLoopState
 
     public var isRunning: Bool { _isRunning }
 
-    init(session: CopilotSession, config: AgentConfig) {
+    init(session: CopilotSession, config: AgentConfig, loopState: AgentLoopState) {
         self.session = session
         self.config = config
+        self.loopState = loopState
     }
 
     /// Start the agent with an initial prompt. Blocks until the agent stops.
@@ -1745,14 +1758,14 @@ public final class CopilotAgent: @unchecked Sendable {
                 result: "User reconnected. Context: \(prompt)"
             )
             // Enter the loop without sending an initial prompt (model is already running)
-            try await session.loop(initialPrompt: nil) { [weak self] _ in
+            try await session.loop(initialPrompt: nil) { [weak self] session in
                 guard self?._isRunning == true else { return nil }
-                return "Continue working. Use send_response when you have results, or ask_questions if you need input."
+                return self?.resumePrompt()
             }
         } else {
-            try await session.loop(initialPrompt: prompt) { [weak self] _ in
+            try await session.loop(initialPrompt: prompt) { [weak self] session in
                 guard self?._isRunning == true else { return nil }
-                return "Continue working. Use send_response when you have results, or ask_questions if you need input."
+                return self?.resumePrompt()
             }
         }
     }
@@ -1762,8 +1775,18 @@ public final class CopilotAgent: @unchecked Sendable {
         _isRunning = false
     }
 
+    /// Generate the resume prompt. After 3+ consecutive turns without ask_questions,
+    /// force the agent to ask the user for input instead of looping.
+    private func resumePrompt() -> String {
+        let turns = loopState.incrementTurn()
+        if turns >= 3 {
+            return "You have been looping without user interaction. Call ask_questions now to check if the user has new instructions."
+        }
+        return "Continue working. Use send_response when you have results, or ask_questions if you need input."
+    }
+
     /// Build the auto-injected tools for the agent pattern.
-    static func buildTools(config: AgentConfig) -> [ToolDefinition] {
+    static func buildTools(config: AgentConfig, loopState: AgentLoopState? = nil) -> [ToolDefinition] {
         var tools = config.tools
 
         let onResponse = config.onResponse
@@ -1851,6 +1874,7 @@ public final class CopilotAgent: @unchecked Sendable {
             ]),
             skipPermission: true,
             handler: { args in
+                loopState?.reset()
                 if let onAskQuestions {
                     let result = await onAskQuestions(args)
                     if let data = try? JSONEncoder().encode(result), let text = String(data: data, encoding: .utf8) {
@@ -1877,7 +1901,7 @@ public final class CopilotAgent: @unchecked Sendable {
     }
 
     /// Build the session config for an agent.
-    static func buildSessionConfig(config: AgentConfig) -> SessionConfig {
+    static func buildSessionConfig(config: AgentConfig, loopState: AgentLoopState? = nil) -> SessionConfig {
         let agentLoopSuffix = """
         IMPORTANT: You are an autonomous agent running in an infinite loop.
         - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
@@ -1912,7 +1936,7 @@ public final class CopilotAgent: @unchecked Sendable {
 
         return SessionConfig(
             model: config.model,
-            tools: buildTools(config: config),
+            tools: buildTools(config: config, loopState: loopState),
             systemMessage: systemMessage,
             workingDirectory: config.workingDirectory,
             infiniteSessions: InfiniteSessionConfig(enabled: true),
@@ -2077,9 +2101,10 @@ public final class CopilotClient: @unchecked Sendable {
     /// try await agent.start(prompt: "Build a REST API")
     /// ```
     public func createAgent(config: AgentConfig) async throws -> CopilotAgent {
-        let sessionConfig = CopilotAgent.buildSessionConfig(config: config)
+        let loopState = AgentLoopState()
+        let sessionConfig = CopilotAgent.buildSessionConfig(config: config, loopState: loopState)
         let session = try await createSession(config: sessionConfig)
-        return CopilotAgent(session: session, config: config)
+        return CopilotAgent(session: session, config: config, loopState: loopState)
     }
 
     /// Resume an existing session by its ID.
