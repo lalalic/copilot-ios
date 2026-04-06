@@ -48,7 +48,7 @@ public final class AppAgentToolProvider {
     private var appAgentTool: ToolDefinition {
         ToolDefinition(
             name: "app_agent",
-            description: "Native iOS app UI automation. Use 'command' to specify action: snapshot, tap, tap_xy, type, swipe, long_press, find, scroll_to, pick, screenshot.",
+            description: "Native iOS app UI automation. Use this tool to test and manipulate the app. Use 'command' to specify action: snapshot (get UI elements), tap (tap element by ref), tap_xy, type (enter text), swipe, long_press, find, scroll_to, pick, screenshot.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
