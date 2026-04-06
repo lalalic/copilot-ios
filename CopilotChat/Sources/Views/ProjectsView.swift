@@ -69,34 +69,34 @@ public struct ProjectsView: View {
 
                 Section("Projects") {
                     ForEach(projects) { project in
-                        Button {
-                            onSelect(project)
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Image(systemName: "square.stack.3d.up.fill")
-                                    .foregroundStyle(.indigo)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(project.displayName)
-                                        .font(.body)
-                                    if let desc = project.description, !desc.isEmpty {
-                                        Text(desc)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    } else if project.fileCount > 0 {
-                                        Text("\(project.fileCount) items")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if currentProject == project.name {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.tint)
+                        HStack {
+                            Image(systemName: "square.stack.3d.up.fill")
+                                .foregroundStyle(.indigo)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.displayName)
+                                    .font(.body)
+                                if let desc = project.description, !desc.isEmpty {
+                                    Text(desc)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                } else if project.fileCount > 0 {
+                                    Text("\(project.fileCount) items")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
+                            Spacer()
+                            if currentProject == project.name {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onSelect(project)
+                            dismiss()
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
