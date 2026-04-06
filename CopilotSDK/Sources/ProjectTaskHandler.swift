@@ -92,8 +92,15 @@ public final class ProjectTaskHandler {
             try await pushFilesViaGitTrees(repoName: repoName, appName: appName, files: files)
 
             // 3b. Save package.json locally
+            // Rename scaffold directory (e.g. "habitflow/") to repo name (e.g. "habitflow-og9jir/")
+            let scaffoldDir = workspaceURL.appendingPathComponent(slug, isDirectory: true)
             let projectDir = workspaceURL.appendingPathComponent(repoName, isDirectory: true)
-            try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: scaffoldDir.path) && !FileManager.default.fileExists(atPath: projectDir.path) {
+                try? FileManager.default.moveItem(at: scaffoldDir, to: projectDir)
+                NSLog("[ProjectTaskHandler] Renamed scaffold dir: %@ → %@", slug, repoName)
+            } else {
+                try? FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+            }
             let localPkg: [String: Any] = [
                 "name": repoName, "displayName": appName, "description": taskDescription,
                 "repo": "\(githubOrg)/\(repoName)", "bundleId": bundleId, "projectType": "expo-app",
