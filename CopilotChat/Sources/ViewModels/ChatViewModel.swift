@@ -336,8 +336,21 @@ public final class ChatViewModel: ObservableObject {
         if case .string(let t) = params["title"] { title = t } else { title = type }
         let body: String
         if case .string(let b) = params["body"] { body = b } else { body = "" }
+
+        // Convert JSONValue params to [String: Any] for addNotification
+        var data: [String: Any] = ["type": type]
+        for (key, value) in params {
+            switch value {
+            case .string(let s): data[key] = s
+            case .int(let n): data[key] = n
+            case .double(let n): data[key] = n
+            case .bool(let b): data[key] = b
+            default: break
+            }
+        }
+
         Task { @MainActor in
-            self.addNotification(title: title, body: body, data: ["type": type])
+            self.addNotification(title: title, body: body, data: data)
         }
     }
 
