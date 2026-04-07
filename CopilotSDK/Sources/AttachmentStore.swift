@@ -424,7 +424,7 @@ public final class AttachmentStore: @unchecked Sendable {
         #endif
     }
     
-    private static func isTextMimeType(_ mime: String) -> Bool {
+    public static func isTextMimeType(_ mime: String) -> Bool {
         mime == "application/json" || mime == "application/jsonl" || mime == "application/xml" || mime.hasPrefix("text/")
     }
 }

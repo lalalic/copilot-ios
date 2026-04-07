@@ -2,6 +2,9 @@ import Foundation
 import SwiftUI
 import Combine
 import CopilotSDK
+#if canImport(PDFKit)
+import PDFKit
+#endif
 
 // MARK: - Chat Mode
 
@@ -251,7 +254,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Inject manage_todo_list and view tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeViewTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
+        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeViewTool(), makeConvertToMarkdownTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -278,6 +281,7 @@ public final class ChatViewModel: ObservableObject {
         config.tools.append(makeSendResponseTool())
         config.tools.append(makeTodoTool())
         config.tools.append(makeViewTool())
+        config.tools.append(makeConvertToMarkdownTool())
         config.tools.append(makeCreatePlanTool())
         config.tools.append(makeStripeCheckoutTool())
         config.tools.append(makeStartCodingTaskTool())
@@ -1329,6 +1333,109 @@ public final class ChatViewModel: ObservableObject {
         }
         #endif
         return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"
+    }
+
+    // MARK: - Convert to Markdown Tool
+
+    /// Build the `convert_to_markdown` tool — converts files (PDF, DOC, etc.) to markdown text.
+    private func makeConvertToMarkdownTool() -> ToolDefinition {
+        ToolDefinition(
+            name: "convert_to_markdown",
+            description: "Convert a file to markdown text. Supports PDF (text extraction), and common text formats. Use this for non-image files that need content reading.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Filename from attached files, or a workspace-relative file path"),
+                    ]),
+                ]),
+                "required": .array([.string("path")]),
+            ]),
+            skipPermission: true,
+            handler: { [weak self] args in
+                guard let self else { return "Error: view model deallocated" }
+                return await self.handleConvertToMarkdown(args)
+            }
+        )
+    }
+
+    /// Handle `convert_to_markdown` tool call.
+    private func handleConvertToMarkdown(_ args: JSONValue) async -> String {
+        guard case .object(let dict) = args,
+              case .string(let path) = dict["path"] else {
+            return "Error: missing 'path' parameter"
+        }
+
+        // Try attachment store first
+        do {
+            let result = try await attachmentStore.loadSmart(name: path)
+            return formatSmartResult(path: path, result: result)
+        } catch AttachmentError.notFound {
+            // Not in attachments — try workspace
+        } catch {
+            return "Error: \(error)"
+        }
+
+        // Try workspace file
+        guard let workspaceURL else {
+            return "Error: no workspace configured"
+        }
+        let fileURL = workspaceURL.appendingPathComponent(path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return "Error: file not found at '\(path)'"
+        }
+
+        let ext = (path as NSString).pathExtension.lowercased()
+        let mime = AttachmentStore.mimeType(for: ext)
+
+        // PDF — extract text via PDFKit
+        if mime == "application/pdf" {
+            #if canImport(PDFKit)
+            if let document = PDFDocument(url: fileURL) {
+                let pageCount = document.pageCount
+                let maxPages = min(pageCount, 10)
+                var textContent = ""
+                for i in 0..<maxPages {
+                    if let page = document.page(at: i), let text = page.string {
+                        if !textContent.isEmpty { textContent += "\n\n" }
+                        textContent += "--- Page \(i + 1) ---\n\(text)"
+                    }
+                }
+                if pageCount > maxPages {
+                    textContent += "\n\n[... \(pageCount - maxPages) more pages not shown]"
+                }
+                return "# \(path)\n\n> PDF, \(pageCount) pages\n\n\(textContent)"
+            }
+            #endif
+            return "Error: failed to read PDF at '\(path)'"
+        }
+
+        // Text-like files — read directly
+        if mime.hasPrefix("text/") || AttachmentStore.isTextMimeType(mime) {
+            if let data = try? Data(contentsOf: fileURL),
+               let text = String(data: data, encoding: .utf8) {
+                return text
+            }
+            return "Error: failed to read text from '\(path)'"
+        }
+
+        return "Error: unsupported format '\(mime)' for markdown conversion. Supported: PDF, text files."
+    }
+
+    private func formatSmartResult(path: String, result: SmartAttachmentResult) -> String {
+        switch result {
+        case .pdfText(let text, let pageCount):
+            return "# \(path)\n\n> PDF, \(pageCount) pages\n\n\(text)"
+        case .text(let text):
+            return text
+        case .videoMetadata(let duration, let width, let height, _, _):
+            return "# \(path)\n\nVideo: \(width)×\(height), \(String(format: "%.1f", duration))s"
+        case .image:
+            return "Error: '\(path)' is an image. Use the `view` tool instead."
+        case .binary(_, let mimeType):
+            return "Error: unsupported format '\(mimeType)' for markdown conversion"
+        }
     }
 
     // MARK: - Send Response Tool
