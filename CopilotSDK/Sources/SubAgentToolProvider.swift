@@ -323,16 +323,12 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
             logger.info("[SubAgent] session tools: \(subAgentTools.map { $0.name }.joined(separator: ", "))")
 
-            // Use a unique agentId per invocation to force the relay to create a fresh session
-            // (relay generates deterministic session IDs from {appId}-{userId}-{agentId})
-            let uniqueAgentId = "\(agentName)-\(UUID().uuidString.prefix(8).lowercased())"
-
             let config = SessionConfig(
                 model: model,
+                sessionId: "subagent-\(UUID().uuidString.lowercased())",
                 tools: subAgentTools,
                 systemMessage: .replace(body),
-                userId: userId,
-                agentId: uniqueAgentId
+                userId: userId
             )
 
             let session = try await client.createSession(config: config)
