@@ -118,6 +118,11 @@ public final class ChatViewModel: ObservableObject {
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
 
+    /// Diagnostic: whether agent is non-nil (for testing tools).
+    public var hasAgentForDiag: Bool { agent != nil }
+    /// Diagnostic: whether session is non-nil (for testing tools).
+    public var hasSessionForDiag: Bool { session != nil }
+
     /// Clear all session history (JSONL files).
     public func clearSessionHistory() {
         sessionLogger?.clearHistory()
@@ -1272,6 +1277,7 @@ public final class ChatViewModel: ObservableObject {
                 ]),
                 "required": .array([.string("path")]),
             ]),
+            overridesBuiltInTool: true,
             skipPermission: true,
             handler: { [weak self] args in
                 guard let self else { return "Error: view model deallocated" }
