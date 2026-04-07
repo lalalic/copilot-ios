@@ -1118,7 +1118,15 @@ public final class CopilotSession: @unchecked Sendable {
         guard case .string(let toolName) = data["toolName"],
               case .string(let requestId) = data["requestId"] else { return }
 
-        let args = data["arguments"] ?? .null
+        // Arguments may be a JSON-encoded string or an already-parsed object
+        let args: JSONValue
+        if case .string(let argsStr) = data["arguments"],
+           let argsData = argsStr.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(JSONValue.self, from: argsData) {
+            args = parsed
+        } else {
+            args = data["arguments"] ?? .null
+        }
 
         guard let handler = toolHandlers[toolName] else {
             NSLog("[CopilotSDK] No handler for tool '%@' — skipping", toolName)
@@ -1243,9 +1251,24 @@ public final class CopilotSession: @unchecked Sendable {
 
         // Register temporary event handlers via on()
         await self.on(.assistantMessage) { event in
-            if case .object(let data) = event.data,
-               case .string(let content) = data["content"] {
-                Task { await waiter.setContent(content) }
+            if case .object(let data) = event.data {
+                // content may be a plain string, an array of content blocks, or absent
+                let text: String?
+                switch data["content"] {
+                case .string(let s):
+                    text = s
+                case .array(let blocks):
+                    // [{"type":"text","text":"..."}] format
+                    text = blocks.compactMap { block -> String? in
+                        if case .object(let b) = block, case .string(let t) = b["text"] { return t }
+                        return nil
+                    }.joined()
+                default:
+                    text = nil
+                }
+                if let text, !text.isEmpty {
+                    Task { await waiter.setContent(text) }
+                }
             }
         }
 

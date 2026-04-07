@@ -42,6 +42,18 @@ public final class WebSocketTransport: Transport, @unchecked Sendable {
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
+
+        // Wait for WebSocket handshake to complete by sending a protocol-level ping
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            task.sendPing { error in
+                if let error {
+                    cont.resume(throwing: error)
+                } else {
+                    cont.resume()
+                }
+            }
+        }
+
         NSLog("[CopilotSDK] WebSocket connected to %@", url.absoluteString)
         sdkLog.info("🔌 WebSocket connected to \(self.url)")
         
