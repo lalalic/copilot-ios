@@ -407,4 +407,112 @@ public final class WebAgentToolProvider {
         lines.append("To verify: web_agent command=site site=<name> action=auth_check")
         return lines.joined(separator: "\n")
     }
+
+    // MARK: - Convertio File Conversion
+
+    /// Convert a file to another format using convertio.co.
+    /// Returns the path to the converted file in the workspace downloads directory.
+    public func convertFile(filePath: String, outputFormat: String) async throws -> String {
+        let fileURL = URL(fileURLWithPath: filePath)
+        guard FileManager.default.fileExists(atPath: filePath) else {
+            return "Error: file not found at '\(filePath)'"
+        }
+
+        let inputExt = fileURL.pathExtension.lowercased()
+        let targetFormat = outputFormat.lowercased()
+
+        // 1. Navigate to convertio with format pre-selected
+        let convertioURL = "https://convertio.co/\(inputExt)-\(targetFormat)/"
+        _ = try await manager.navigate(to: convertioURL)
+        try await Task.sleep(for: .seconds(3))
+
+        // 2. Find and set the file input
+        let setFileJS = """
+        (function() {
+            const inputs = document.querySelectorAll('input[type="file"]');
+            if (inputs.length === 0) return JSON.stringify({error: "no_file_input"});
+            // Tag it for upload
+            inputs[0].setAttribute('data-wa-ref', 'convertio-file-input');
+            return JSON.stringify({ok: true, count: inputs.length});
+        })()
+        """
+        let inputResult = try await manager.evaluateJSPublic(setFileJS)
+        if inputResult.contains("no_file_input") {
+            return "Error: could not find file input on convertio.co"
+        }
+
+        // 3. Upload the file
+        _ = try await manager.upload(ref: "convertio-file-input", filePath: filePath)
+        try await Task.sleep(for: .seconds(2))
+
+        // 4. Click the Convert button
+        let clickConvertJS = """
+        (function() {
+            // Look for the convert/start button
+            const buttons = Array.from(document.querySelectorAll('button, a'));
+            const convertBtn = buttons.find(b => {
+                const text = (b.textContent || '').toLowerCase().trim();
+                return text === 'convert' || text === 'start' || text.includes('convert');
+            });
+            if (convertBtn) {
+                convertBtn.click();
+                return JSON.stringify({ok: true});
+            }
+            return JSON.stringify({error: "convert_button_not_found"});
+        })()
+        """
+        let clickResult = try await manager.evaluateJSPublic(clickConvertJS)
+        if clickResult.contains("convert_button_not_found") {
+            return "Error: could not find Convert button on convertio.co"
+        }
+
+        // 5. Wait for conversion (poll for download link, max 60s)
+        var downloadURL: String?
+        for _ in 0..<30 {
+            try await Task.sleep(for: .seconds(2))
+
+            let checkJS = """
+            (function() {
+                // Look for download link/button
+                const links = Array.from(document.querySelectorAll('a'));
+                const dlLink = links.find(a => {
+                    const text = (a.textContent || '').toLowerCase().trim();
+                    const href = (a.href || '').toLowerCase();
+                    return (text === 'download' || text.includes('download'))
+                        && (href.includes('dl.convertio') || href.includes('/download/'));
+                });
+                if (dlLink) return JSON.stringify({url: dlLink.href});
+
+                // Check for errors
+                const errorEl = document.querySelector('.error-message, .alert-danger, [class*="error"]');
+                if (errorEl && errorEl.textContent.trim()) {
+                    return JSON.stringify({error: errorEl.textContent.trim()});
+                }
+
+                return JSON.stringify({waiting: true});
+            })()
+            """
+            let status = try await manager.evaluateJSPublic(checkJS)
+            if let data = status.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let url = json["url"] as? String {
+                    downloadURL = url
+                    break
+                }
+                if let error = json["error"] as? String {
+                    return "Error: convertio conversion failed — \(error)"
+                }
+            }
+        }
+
+        guard let dlURL = downloadURL else {
+            return "Error: convertio conversion timed out after 60s"
+        }
+
+        // 6. Download the converted file
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        let outputFilename = "\(baseName).\(targetFormat)"
+        let result = try await manager.download(url: dlURL, filename: outputFilename)
+        return result
+    }
 }

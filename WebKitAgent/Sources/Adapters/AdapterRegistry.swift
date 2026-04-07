@@ -156,6 +156,36 @@ public final class AdapterRegistry {
 
         // Xiaohongshu adapters (browser-based)
         registerXiaohongshuAdapters()
+
+        // Convertio adapter (file conversion)
+        registerConvertioAdapters()
+    }
+
+    // MARK: - Convertio Adapters
+
+    private func registerConvertioAdapters() {
+        let convert = """
+        site: convertio
+        name: convert
+        description: Convert a file to another format via convertio.co
+        auth: none
+        requiresBrowser: true
+        preNavigate: https://convertio.co/
+        waitSeconds: 3
+        args:
+          filePath:
+            type: string
+            description: Absolute path to the file to convert
+          outputFormat:
+            type: string
+            default: txt
+            description: Target format (e.g. txt, md, pdf, docx)
+        script: |
+          (() => {
+            return JSON.stringify({status: "ready", message: "Convertio page loaded. Use upload and click commands to complete conversion."});
+          })()
+        """
+        try? register(yaml: convert)
     }
 
     // MARK: - Xiaohongshu Adapters

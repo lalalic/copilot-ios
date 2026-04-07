@@ -111,6 +111,10 @@ public final class ChatViewModel: ObservableObject {
     /// Workspace directory on device for reading templates.
     public let workspaceURL: URL?
 
+    /// External file converter — set by the app to delegate conversion to a site adapter (e.g., convertio.co).
+    /// Takes (filePath, outputFormat) and returns the path to the converted file or an error string.
+    public var fileConverter: (@Sendable (String, String) async throws -> String)?
+
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
 
@@ -1420,7 +1424,26 @@ public final class ChatViewModel: ObservableObject {
             return "Error: failed to read text from '\(path)'"
         }
 
-        return "Error: unsupported format '\(mime)' for markdown conversion. Supported: PDF, text files."
+        // Unsupported format — try external converter (convertio.co site adapter)
+        if let converter = fileConverter {
+            do {
+                let result = try await converter(fileURL.path, "txt")
+                // Read the converted file
+                if result.hasPrefix("Error") {
+                    return result
+                }
+                // result is the download path — read the text from it
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: result)),
+                   let text = String(data: data, encoding: .utf8) {
+                    return text
+                }
+                return result
+            } catch {
+                return "Error: external conversion failed — \(error.localizedDescription)"
+            }
+        }
+
+        return "Error: unsupported format '\(mime)' for markdown conversion. Supported: PDF, text files. Set up the convertio.co site adapter for other formats."
     }
 
     private func formatSmartResult(path: String, result: SmartAttachmentResult) -> String {
