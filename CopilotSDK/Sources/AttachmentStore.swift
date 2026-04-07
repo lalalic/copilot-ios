@@ -111,14 +111,14 @@ public final class AttachmentStore: @unchecked Sendable {
     ///
     /// Format:
     /// ```
-    /// [Attached files — use get_attachment to read contents]
+    /// [Attached files — use `view` tool to see images]
     /// 1. notes.txt (text/plain, 1.2 KB)
     /// 2. photo.jpg (image/jpeg, 245.7 KB)
     /// ```
     public func promptDescription() -> String? {
         guard !entries.isEmpty else { return nil }
         
-        var lines = ["[Attached files — use get_attachment to read contents]"]
+        var lines = ["[Attached files — use `view` tool to see images]"]
         for (i, entry) in entries.enumerated() {
             let sizeStr = Self.formatFileSize(entry.fileSize)
             lines.append("\(i + 1). \(entry.displayName) (\(entry.mimeType), \(sizeStr))")

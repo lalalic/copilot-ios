@@ -60,7 +60,7 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Lazy Attachments
 
     /// Per-session attachment registry. Files are added eagerly (metadata only)
-    /// and loaded lazily when the model calls `get_attachment`.
+    /// and loaded lazily when the model calls `view`.
     public let attachmentStore = AttachmentStore()
 
     // MARK: - Plan Store
@@ -249,9 +249,9 @@ public final class ChatViewModel: ObservableObject {
     private func connectSession(config: SessionConfig) async throws {
         guard let client else { return }
 
-        // Inject manage_todo_list and get_attachment tools
+        // Inject manage_todo_list and view tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeGetAttachmentTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
+        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeViewTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -274,10 +274,10 @@ public final class ChatViewModel: ObservableObject {
     private func connectAgent(config: inout AgentConfig) async throws {
         guard let client else { return }
 
-        // Inject manage_todo_list and get_attachment tools
+        // Inject manage_todo_list and view tools
         config.tools.append(makeSendResponseTool())
         config.tools.append(makeTodoTool())
-        config.tools.append(makeGetAttachmentTool())
+        config.tools.append(makeViewTool())
         config.tools.append(makeCreatePlanTool())
         config.tools.append(makeStripeCheckoutTool())
         config.tools.append(makeStartCodingTaskTool())
@@ -1248,44 +1248,87 @@ public final class ChatViewModel: ObservableObject {
         return "Stripe checkout link (external): \(checkoutURL)\nNote: Apple IAP remains the default in-app credit flow."
     }
 
-    /// Build the `get_attachment` tool definition.
-    /// The model calls this to lazily load file contents that were listed in the prompt.
-    private func makeGetAttachmentTool() -> ToolDefinition {
+    /// Build the `view` tool definition.
+    /// The model calls this to view images — either from attachments or workspace files.
+    private func makeViewTool() -> ToolDefinition {
         ToolDefinition(
-            name: "get_attachment",
-            description: "Load the contents of an attached file by name. Returns text content directly, or base64-encoded data for binary files.",
+            name: "view",
+            description: "View an image by name or path. Returns auto-resized base64 image data for vision models. Only works with image files (jpg, png, gif, webp, heic, bmp, tiff, svg).",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "name": .object([
+                    "path": .object([
                         "type": .string("string"),
-                        "description": .string("The exact file name from the attached files list"),
+                        "description": .string("Image filename from attached files, or a workspace-relative file path"),
                     ]),
                 ]),
-                "required": .array([.string("name")]),
+                "required": .array([.string("path")]),
             ]),
             skipPermission: true,
             handler: { [weak self] args in
                 guard let self else { return "Error: view model deallocated" }
-                return await self.handleGetAttachment(args)
+                return await self.handleView(args)
             }
         )
     }
 
-    /// Handle `get_attachment` tool call — load file data from the store.
-    /// Uses smart loading: auto-resizes images, extracts PDF text, returns video metadata.
-    private func handleGetAttachment(_ args: JSONValue) async -> String {
+    /// Handle `view` tool call — load and return image data.
+    /// Checks attachments first, then workspace files.
+    private func handleView(_ args: JSONValue) async -> String {
         guard case .object(let dict) = args,
-              case .string(let name) = dict["name"] else {
-            return "Error: missing 'name' parameter"
+              case .string(let path) = dict["path"] else {
+            return "Error: missing 'path' parameter"
         }
 
+        // Check if it's an image by extension
+        let ext = (path as NSString).pathExtension.lowercased()
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff", "tif", "svg"]
+        guard imageExtensions.contains(ext) else {
+            return "Error: '\(path)' is not an image file. The view tool only supports images (\(imageExtensions.sorted().joined(separator: ", ")))."
+        }
+
+        // Try attachment store first
         do {
-            let result = try await attachmentStore.loadSmart(name: name)
+            let result = try await attachmentStore.loadSmart(name: path)
             return result.modelDescription
+        } catch AttachmentError.notFound {
+            // Not in attachments — try workspace path
         } catch {
             return "Error: \(error)"
         }
+
+        // Try workspace file
+        guard let workspaceURL else {
+            return "Error: no workspace configured"
+        }
+        let fileURL = workspaceURL.appendingPathComponent(path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return "Error: image not found at '\(path)'"
+        }
+
+        // Load image directly and resize
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return "Error: failed to read image at '\(path)'"
+        }
+        let mime = AttachmentStore.mimeType(for: ext)
+        #if canImport(UIKit)
+        if let image = UIImage(data: data) {
+            let maxDim: CGFloat = 1024
+            let size = image.size
+            if size.width > maxDim || size.height > maxDim {
+                let scale = min(maxDim / size.width, maxDim / size.height)
+                let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+                UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+                let resized = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+                if let resized, let jpegData = resized.jpegData(compressionQuality: 0.85) {
+                    return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
+                }
+            }
+        }
+        #endif
+        return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"
     }
 
     // MARK: - Send Response Tool
