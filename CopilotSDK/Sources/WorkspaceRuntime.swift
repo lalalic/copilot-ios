@@ -155,6 +155,9 @@ public final class WorkspaceBootstrapper: Sendable {
         // Always sync .templates/ from bundle (they may be updated between app versions)
         syncTemplatesFromBundle(bundle: bundle, workspaceURL: workspaceURL)
 
+        // Always sync .github/agents/ from bundle (new agents may be added between versions)
+        syncAgentsFromBundle(bundle: bundle, workspaceURL: workspaceURL)
+
         return workspaceURL
     }
 
@@ -182,6 +185,42 @@ public final class WorkspaceBootstrapper: Sendable {
             try manager.copyItem(at: extractedTemplates, to: destTemplates)
         } catch {
             // Non-fatal: templates sync failure doesn't prevent app launch
+        }
+    }
+
+    /// Sync .github/agents/ from bundled zip — adds new agents without overwriting user-modified ones.
+    private func syncAgentsFromBundle(bundle: Bundle, workspaceURL: URL) {
+        let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
+            ?? Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
+        guard let zipURL else { return }
+
+        let manager = FileManager.default
+        let tempDir = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: tempDir) }
+
+        do {
+            try manager.unzipItem(at: zipURL, to: tempDir)
+            let extractedAgents = tempDir
+                .appendingPathComponent(workspaceFolderName)
+                .appendingPathComponent(".github")
+                .appendingPathComponent("agents")
+            guard manager.fileExists(atPath: extractedAgents.path) else { return }
+
+            let destAgents = workspaceURL
+                .appendingPathComponent(".github")
+                .appendingPathComponent("agents")
+            try manager.createDirectory(at: destAgents, withIntermediateDirectories: true)
+
+            // Only add new files, don't overwrite existing
+            let files = try manager.contentsOfDirectory(at: extractedAgents, includingPropertiesForKeys: nil)
+            for file in files {
+                let dest = destAgents.appendingPathComponent(file.lastPathComponent)
+                if !manager.fileExists(atPath: dest.path) {
+                    try manager.copyItem(at: file, to: dest)
+                }
+            }
+        } catch {
+            // Non-fatal
         }
     }
 }
