@@ -13,7 +13,7 @@ public final class MemoryToolProvider: Sendable {
     }
 
     public var tools: [ToolDefinition] {
-        [memoryReadTool, memoryAppendTool, memoryWriteSectionTool, memoryLogSessionTool, memoryListTool]
+        [memoryReadTool, memoryAppendTool, memoryWriteSectionTool, memoryLogSessionTool, memoryListTool, memorySearchTool, memoryDeleteTool]
     }
 
     private var neoDirectory: URL {
@@ -25,10 +25,21 @@ public final class MemoryToolProvider: Sendable {
     }
 
     private func ensureNeoDirectories() {
-        try? FileManager.default.createDirectory(at: neoDirectory, withIntermediateDirectories: true)
-        let reports = neoDirectory.appendingPathComponent("reports", isDirectory: true)
-        let sessions = reports.appendingPathComponent("sessions", isDirectory: true)
-        try? FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let dirs = [
+            neoDirectory,
+            neoDirectory.appendingPathComponent("memory/topics", isDirectory: true),
+            neoDirectory.appendingPathComponent("memory/projects", isDirectory: true),
+            neoDirectory.appendingPathComponent("knowledge", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/sessions", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/subagents", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/daily", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/weekly", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/monthly", isDirectory: true),
+        ]
+        for dir in dirs {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
     }
 
     private func resolveNeoPath(_ path: String?) -> URL? {
@@ -356,5 +367,151 @@ public final class MemoryToolProvider: Sendable {
             }.sorted()
             return names.joined(separator: "\n")
         }
+    }
+
+    private var memorySearchTool: ToolDefinition {
+        ToolDefinition(
+            name: "memory_search",
+            description: "Search across all .neo memory files for a keyword or phrase. Returns matching lines with file paths.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "type": .string("string"),
+                        "description": .string("Text to search for (case-insensitive)")
+                    ]),
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional directory to search within, e.g. '.neo/memory/topics'. Defaults to '.neo'")
+                    ])
+                ]),
+                "required": .array([.string("query")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: MemoryToolProvider unavailable" }
+            guard case .object(let dict) = args,
+                  case .string(let query) = dict["query"] else {
+                return "Error: 'query' required"
+            }
+            let path: String?
+            if case .string(let p) = dict["path"] { path = p } else { path = nil }
+
+            let searchRoot = self.resolveNeoPath(path) ?? self.neoDirectory
+            let lowerQuery = query.lowercased()
+            var results: [String] = []
+            let maxResults = 50
+
+            self.searchFiles(in: searchRoot, query: lowerQuery, results: &results, maxResults: maxResults)
+
+            if results.isEmpty {
+                return "No matches found for '\(query)'"
+            }
+            return results.joined(separator: "\n")
+        }
+    }
+
+    private func searchFiles(in directory: URL, query: String, results: inout [String], maxResults: Int) {
+        guard results.count < maxResults else { return }
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { return }
+
+        for item in contents.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard results.count < maxResults else { return }
+            let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDir {
+                searchFiles(in: item, query: query, results: &results, maxResults: maxResults)
+            } else if item.pathExtension == "md" || item.pathExtension == "txt" {
+                guard let content = try? String(contentsOf: item, encoding: .utf8) else { continue }
+                let relativePath = item.path.replacingOccurrences(of: baseDirectory.path + "/", with: "")
+                let lines = content.components(separatedBy: "\n")
+                for (lineNum, line) in lines.enumerated() {
+                    guard results.count < maxResults else { return }
+                    if line.lowercased().contains(query) {
+                        results.append("\(relativePath):\(lineNum + 1): \(line.trimmingCharacters(in: .whitespaces))")
+                    }
+                }
+            }
+        }
+    }
+
+    private var memoryDeleteTool: ToolDefinition {
+        ToolDefinition(
+            name: "memory_delete",
+            description: "Delete a memory file or a section within a file under .neo.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Path under .neo/ to delete, e.g. '.neo/memory/topics/old-topic.md'")
+                    ]),
+                    "section": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional: delete only this section from the file instead of the whole file")
+                    ])
+                ]),
+                "required": .array([.string("path")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: MemoryToolProvider unavailable" }
+            guard case .object(let dict) = args,
+                  case .string(let path) = dict["path"] else {
+                return "Error: 'path' required"
+            }
+            let section: String?
+            if case .string(let s) = dict["section"] { section = s } else { section = nil }
+
+            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+
+            if let section {
+                // Delete section from file
+                let content = try self.readString(at: url)
+                guard !content.isEmpty else { return "File not found or empty" }
+                let cleaned = self.removeSection(section, from: content)
+                try self.writeString(cleaned, to: url)
+                memoryLogger.info("memory_delete section '\(section, privacy: .public)' from \(url.lastPathComponent, privacy: .public)")
+                return "Deleted section '\(section)' from \(url.lastPathComponent)"
+            } else {
+                // Delete entire file
+                guard FileManager.default.fileExists(atPath: url.path) else { return "File not found" }
+                try FileManager.default.removeItem(at: url)
+                memoryLogger.info("memory_delete file: \(url.lastPathComponent, privacy: .public)")
+                return "Deleted \(url.lastPathComponent)"
+            }
+        }
+    }
+
+    private func removeSection(_ section: String, from content: String) -> String {
+        let target = section.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = content.components(separatedBy: "\n")
+        var start: Int?
+        var end: Int?
+
+        for (index, line) in lines.enumerated() {
+            if line.hasPrefix("## ") || line.hasPrefix("# ") {
+                let title = line
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "## ", with: "")
+                    .replacingOccurrences(of: "# ", with: "")
+                if start == nil, title.caseInsensitiveCompare(target) == .orderedSame {
+                    start = index
+                    continue
+                }
+                if start != nil {
+                    end = index
+                    break
+                }
+            }
+        }
+
+        guard let start else { return content }
+        let stop = end ?? lines.count
+        var resultLines = Array(lines[0..<start])
+        if stop < lines.count {
+            resultLines.append(contentsOf: lines[stop...])
+        }
+        return resultLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 }
