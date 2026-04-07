@@ -45,7 +45,13 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: - Published State
 
-    @Published public var messages: [ChatMessage] = []
+    @Published public var messages: [ChatMessage] = [] {
+        didSet {
+            if messages.count > 100 {
+                messages.removeFirst(messages.count - 100)
+            }
+        }
+    }
     @Published public var toolCalls: [ToolCallInfo] = []
     @Published public var todoItems: [TodoItem] = []
     @Published public var chatState: ChatState = .disconnected
