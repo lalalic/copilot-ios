@@ -659,6 +659,15 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Send a hidden message that the model receives but the user doesn't see.
+    /// Used for system-triggered prompts like onboarding.
+    public func sendHidden(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        chatState = .working
+        await sendPrompt(trimmed)
+    }
+
     /// Send a prompt directly to the relay via the underlying session WebSocket.
     /// Used by automation — sends the message and waits for session idle/on-hold.
     /// Returns the last assistant message content for diagnostics.
