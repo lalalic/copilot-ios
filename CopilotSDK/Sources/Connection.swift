@@ -26,10 +26,12 @@ enum FramingMode {
 // MARK: - Remote Error
 
 /// Error received from JSON-RPC peer.
-struct JSONRPCRemoteError: Error {
+struct JSONRPCRemoteError: Error, LocalizedError {
     let code: Int
     let message: String
     let data: JSONValue?
+
+    var errorDescription: String? { "JSONRPCRemoteError(\(code)): \(message)" }
 }
 
 // MARK: - Pending Request Storage (actor-isolated)

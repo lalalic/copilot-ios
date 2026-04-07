@@ -737,8 +737,11 @@ public final class ChatViewModel: ObservableObject {
             
             return newMessages.isEmpty ? "sent-no-reply" : newMessages
         } catch {
-            chatState = .error(error.localizedDescription)
-            return "error: \(error.localizedDescription)"
+            let msg = error.localizedDescription
+            appendSystemMessage("Error: \(msg)")
+            // Auto-recover to idle so subsequent MCP calls aren't permanently blocked
+            chatState = .idle
+            return "error: \(msg)"
         }
     }
 
