@@ -733,6 +733,9 @@ public struct SessionConfig: Sendable {
     public var apnsEnv: String?
     /// User identifier for multi-user routing.
     public var userId: String?
+    /// Agent identifier for sub-agent sessions.
+    /// When set, the relay creates a separate session with ID: {appId}-{userId}-{agentId}
+    public var agentId: String?
     public var onPermissionRequest: PermissionHandler?
     public var onUserInputRequest: UserInputHandler?
     public var onEvent: SessionEventHandler?
@@ -763,6 +766,7 @@ public struct SessionConfig: Sendable {
         deviceToken: String? = nil,
         apnsEnv: String? = nil,
         userId: String? = nil,
+        agentId: String? = nil,
         onPermissionRequest: PermissionHandler? = nil,
         onUserInputRequest: UserInputHandler? = nil,
         onEvent: SessionEventHandler? = nil
@@ -792,6 +796,7 @@ public struct SessionConfig: Sendable {
         self.deviceToken = deviceToken
         self.apnsEnv = apnsEnv
         self.userId = userId
+        self.agentId = agentId
         self.onPermissionRequest = onPermissionRequest
         self.onUserInputRequest = onUserInputRequest
         self.onEvent = onEvent
@@ -827,6 +832,7 @@ public struct SessionConfig: Sendable {
         if let deviceToken { p["deviceToken"] = .string(deviceToken) }
         if let apnsEnv { p["apnsEnv"] = .string(apnsEnv) }
         if let userId { p["userId"] = .string(userId) }
+        if let agentId { p["agentId"] = .string(agentId) }
         return p
     }
 }
