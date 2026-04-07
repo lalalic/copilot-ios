@@ -156,6 +156,10 @@ public final class SubAgentToolProvider: @unchecked Sendable {
                         "type": .string("string"),
                         "description": .string("Model override (default: from agent frontmatter or gpt-4.1-mini)"),
                     ]),
+                    "async": .object([
+                        "type": .string("boolean"),
+                        "description": .string("If true, run in background and return immediately with a task ID. Result is written to .neo/reports/subagents/{taskId}.md"),
+                    ]),
                 ]),
                 "required": .array([.string("agent"), .string("task")]),
             ]),
@@ -167,8 +171,9 @@ public final class SubAgentToolProvider: @unchecked Sendable {
     }
 
     /// Build the report_progress tool for a specific sub-agent name.
-    private func buildReportProgressTool(agentName: String) -> ToolDefinition {
+    private func buildReportProgressTool(agentName: String, taskId: String?) -> ToolDefinition {
         let progressCallback = onProgress
+        let reportsDir = workspaceURL.appendingPathComponent(".neo/reports/subagents", isDirectory: true)
         return ToolDefinition(
             name: "report_progress",
             description: "Report progress on the current task back to the parent agent. Use this for long-running tasks to keep the parent informed.",
@@ -192,6 +197,18 @@ public final class SubAgentToolProvider: @unchecked Sendable {
                 }
                 logger.info("[\(agentName)] progress: \(status)")
                 progressCallback?(agentName, status)
+
+                // For async tasks, append progress to the report file
+                if let taskId {
+                    let reportFile = reportsDir.appendingPathComponent("\(taskId).md")
+                    let line = "- [\(ISO8601DateFormatter().string(from: Date()))] \(status)\n"
+                    if let handle = try? FileHandle(forWritingTo: reportFile) {
+                        handle.seekToEndOfFile()
+                        handle.write(line.data(using: .utf8) ?? Data())
+                        handle.closeFile()
+                    }
+                }
+
                 return "Progress reported."
             }
         )
@@ -206,6 +223,11 @@ public final class SubAgentToolProvider: @unchecked Sendable {
         return allTools.filter { allowed.contains($0.name) }
     }
 
+    /// Directory for async sub-agent reports
+    private var reportsDirectory: URL {
+        workspaceURL.appendingPathComponent(".neo/reports/subagents", isDirectory: true)
+    }
+
     private func handleRunSubAgent(_ args: JSONValue) async -> String {
         guard case .object(let dict) = args,
               case .string(let agentName) = dict["agent"],
@@ -216,6 +238,9 @@ public final class SubAgentToolProvider: @unchecked Sendable {
         let modelOverride: String?
         if case .string(let m) = dict["model"] { modelOverride = m } else { modelOverride = nil }
 
+        let isAsync: Bool
+        if case .bool(let a) = dict["async"] { isAsync = a } else { isAsync = false }
+
         // Load agent file with frontmatter
         guard let (frontmatter, body) = loadAgent(agentName) else {
             let available = availableAgents()
@@ -223,17 +248,25 @@ public final class SubAgentToolProvider: @unchecked Sendable {
         }
 
         let model = modelOverride ?? frontmatter.model ?? "gpt-4.1-mini"
-        logger.info("Starting sub-agent '\(agentName)' (model: \(model)) with task: \(task.prefix(100))")
+
+        if isAsync {
+            return await runAsync(agentName: agentName, task: task, model: model, frontmatter: frontmatter, body: body)
+        } else {
+            return await runSync(agentName: agentName, task: task, model: model, frontmatter: frontmatter, body: body)
+        }
+    }
+
+    /// Run sub-agent synchronously — blocks until complete.
+    private func runSync(agentName: String, task: String, model: String, frontmatter: AgentFrontmatter, body: String) async -> String {
+        logger.info("Starting sub-agent '\(agentName)' sync (model: \(model)) with task: \(task.prefix(100))")
 
         do {
-            // Create a separate WS connection for the sub-agent
             let transport = WebSocketTransport(host: relayHost, port: relayPort)
             let client = CopilotClient(transport: transport)
             try await client.start()
 
-            // Build tools: filter by frontmatter, add report_progress
             var subAgentTools = filterTools(toolsBuilder(), allowedNames: frontmatter.tools)
-            subAgentTools.append(buildReportProgressTool(agentName: agentName))
+            subAgentTools.append(buildReportProgressTool(agentName: agentName, taskId: nil))
 
             let config = SessionConfig(
                 model: model,
@@ -245,13 +278,11 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
             let session = try await client.createSession(config: config)
 
-            // Run the task and wait for result
             let result = try await session.sendAndWait(
                 prompt: task,
                 timeout: 180
             ) ?? "Sub-agent completed with no output"
 
-            // Disconnect the sub-agent session
             try? await session.disconnect()
 
             logger.info("Sub-agent '\(agentName)' completed: \(result.prefix(200))")
@@ -261,5 +292,47 @@ public final class SubAgentToolProvider: @unchecked Sendable {
             logger.error("Sub-agent '\(agentName)' failed: \(error.localizedDescription)")
             return "Error running sub-agent '\(agentName)': \(error.localizedDescription)"
         }
+    }
+
+    /// Run sub-agent asynchronously — returns immediately with task ID,
+    /// writes result to .neo/reports/subagents/{taskId}.md
+    private func runAsync(agentName: String, task: String, model: String, frontmatter: AgentFrontmatter, body: String) async -> String {
+        let taskId = "\(agentName)-\(Int(Date().timeIntervalSince1970))"
+
+        // Create report file
+        try? FileManager.default.createDirectory(at: reportsDirectory, withIntermediateDirectories: true)
+        let reportFile = reportsDirectory.appendingPathComponent("\(taskId).md")
+        let header = "# Sub-agent: \(agentName)\n\nTask: \(task)\nStarted: \(ISO8601DateFormatter().string(from: Date()))\nStatus: running\n\n## Progress\n"
+        try? header.write(to: reportFile, atomically: true, encoding: .utf8)
+
+        logger.info("Starting sub-agent '\(agentName)' async (taskId: \(taskId))")
+
+        // Fire and forget
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.runSync(
+                agentName: agentName, task: task, model: model,
+                frontmatter: frontmatter, body: body
+            )
+
+            // Write final result
+            let footer = "\n## Result\n\n\(result)\n\nCompleted: \(ISO8601DateFormatter().string(from: Date()))\nStatus: completed\n"
+            if let handle = try? FileHandle(forWritingTo: reportFile) {
+                handle.seekToEndOfFile()
+                handle.write(footer.data(using: .utf8) ?? Data())
+                handle.closeFile()
+            }
+
+            // Update status line
+            if let content = try? String(contentsOf: reportFile, encoding: .utf8) {
+                let updated = content.replacingOccurrences(of: "Status: running", with: "Status: completed")
+                try? updated.write(to: reportFile, atomically: true, encoding: .utf8)
+            }
+
+            self.onProgress?(agentName, "completed")
+            logger.info("Async sub-agent '\(agentName)' (taskId: \(taskId)) completed")
+        }
+
+        return "Sub-agent '\(agentName)' started in background. Task ID: \(taskId)\nProgress/result will be written to: .neo/reports/subagents/\(taskId).md\nUse memory_read tool to check the report."
     }
 }
