@@ -190,9 +190,15 @@ public final class WorkspaceBootstrapper: Sendable {
 
     /// Sync .github/agents/ from bundled zip — adds new agents without overwriting user-modified ones.
     private func syncAgentsFromBundle(bundle: Bundle, workspaceURL: URL) {
-        let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
-            ?? Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
-        guard let zipURL else { return }
+        let mainURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
+        let moduleURL = Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
+        let zipURL = mainURL ?? moduleURL
+        NSLog("[Workspace] syncAgents: mainURL=%@ moduleURL=%@ bundledZipName=%@",
+              mainURL?.path ?? "nil", moduleURL?.path ?? "nil", bundledZipName)
+        guard let zipURL else {
+            NSLog("[Workspace] syncAgents: no zip found (bundledZipName=%@)", bundledZipName)
+            return
+        }
 
         let manager = FileManager.default
         let tempDir = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -204,7 +210,10 @@ public final class WorkspaceBootstrapper: Sendable {
                 .appendingPathComponent(workspaceFolderName)
                 .appendingPathComponent(".github")
                 .appendingPathComponent("agents")
-            guard manager.fileExists(atPath: extractedAgents.path) else { return }
+            guard manager.fileExists(atPath: extractedAgents.path) else {
+                NSLog("[Workspace] syncAgents: no agents dir in zip at %@", extractedAgents.path)
+                return
+            }
 
             let destAgents = workspaceURL
                 .appendingPathComponent(".github")
@@ -213,14 +222,17 @@ public final class WorkspaceBootstrapper: Sendable {
 
             // Only add new files, don't overwrite existing
             let files = try manager.contentsOfDirectory(at: extractedAgents, includingPropertiesForKeys: nil)
+            var added = 0
             for file in files {
                 let dest = destAgents.appendingPathComponent(file.lastPathComponent)
                 if !manager.fileExists(atPath: dest.path) {
                     try manager.copyItem(at: file, to: dest)
+                    added += 1
                 }
             }
+            NSLog("[Workspace] syncAgents: %d agents in zip, %d newly added to %@", files.count, added, destAgents.path)
         } catch {
-            // Non-fatal
+            NSLog("[Workspace] syncAgents error: %@", error.localizedDescription)
         }
     }
 }

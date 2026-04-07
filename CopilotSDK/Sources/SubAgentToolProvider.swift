@@ -241,10 +241,17 @@ public final class SubAgentToolProvider: @unchecked Sendable {
         let isAsync: Bool
         if case .bool(let a) = dict["async"] { isAsync = a } else { isAsync = false }
 
-        // Load agent file with frontmatter
-        guard let (frontmatter, body) = loadAgent(agentName) else {
-            let available = availableAgents()
-            return "Error: agent '\(agentName)' not found. Available: \(available.joined(separator: ", "))"
+        // Load agent file or fall back to built-in default
+        let frontmatter: AgentFrontmatter
+        let body: String
+        if let loaded = loadAgent(agentName) {
+            frontmatter = loaded.frontmatter
+            body = loaded.body
+        } else {
+            // Built-in fallback — no agent file needed, minimal tools
+            logger.info("Agent '\(agentName)' not found on disk, using built-in default")
+            frontmatter = AgentFrontmatter(tools: [])  // no tools for simple tasks
+            body = "You are a helpful assistant. Complete the task thoroughly and concisely. Respond with just the result."
         }
 
         let model = modelOverride ?? frontmatter.model ?? "gpt-4.1-mini"
@@ -259,36 +266,42 @@ public final class SubAgentToolProvider: @unchecked Sendable {
     /// Run sub-agent synchronously — blocks until complete.
     private func runSync(agentName: String, task: String, model: String, frontmatter: AgentFrontmatter, body: String) async -> String {
         logger.info("Starting sub-agent '\(agentName)' sync (model: \(model)) with task: \(task.prefix(100))")
+        logger.info("[SubAgent] runSync start: agent=\(agentName) model=\(model) tools=\(frontmatter.tools?.count ?? -1)")
 
         do {
             let transport = WebSocketTransport(host: relayHost, port: relayPort)
             let client = CopilotClient(transport: transport)
             try await client.start()
+            logger.info("[SubAgent] client started, creating session...")
 
             var subAgentTools = filterTools(toolsBuilder(), allowedNames: frontmatter.tools)
             subAgentTools.append(buildReportProgressTool(agentName: agentName, taskId: nil))
+            logger.info("[SubAgent] session tools: \(subAgentTools.map { $0.name }.joined(separator: ", "))")
 
             let config = SessionConfig(
                 model: model,
                 tools: subAgentTools,
-                systemMessage: .loop(body),
+                systemMessage: .replace(body),
                 userId: userId,
                 agentId: agentName
             )
 
             let session = try await client.createSession(config: config)
+            logger.info("[SubAgent] session created (id=\(session.sessionId.prefix(8))), sending prompt...")
 
             let result = try await session.sendAndWait(
                 prompt: task,
-                timeout: 180
+                timeout: 60  // 60s for simple tasks, not 180
             ) ?? "Sub-agent completed with no output"
 
+            logger.info("[SubAgent] result: \(result.prefix(200))")
             try? await session.disconnect()
 
             logger.info("Sub-agent '\(agentName)' completed: \(result.prefix(200))")
             return result
 
         } catch {
+            logger.info("[SubAgent] error: \(error.localizedDescription)")
             logger.error("Sub-agent '\(agentName)' failed: \(error.localizedDescription)")
             return "Error running sub-agent '\(agentName)': \(error.localizedDescription)"
         }

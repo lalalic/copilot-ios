@@ -700,7 +700,10 @@ public final class ChatViewModel: ObservableObject {
 
         // Use the agent's session if in agent mode, otherwise the direct session
         let targetSession = agent?.session ?? session
-        guard let targetSession else { return "no-session" }
+        guard let targetSession else {
+            chatState = .idle
+            return "no-session"
+        }
         
         do {
             _ = try await targetSession.send(prompt: trimmed)
