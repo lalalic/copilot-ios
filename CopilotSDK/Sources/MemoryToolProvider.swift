@@ -41,6 +41,30 @@ public final class MemoryToolProvider: Sendable {
         for dir in dirs {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
+
+        // Seed user profile template
+        let profileFile = neoDirectory.appendingPathComponent("memory/user-profile.md")
+        if !fm.fileExists(atPath: profileFile.path) {
+            let template = """
+            # User Profile
+
+            ## Identity
+            - Name:
+            - Timezone:
+            - Language:
+
+            ## Preferences
+            - Communication style:
+            - Verbosity:
+
+            ## Context
+            - Current focus:
+            - Key projects:
+
+            ## Notes
+            """
+            try? template.write(to: profileFile, atomically: true, encoding: .utf8)
+        }
     }
 
     private func resolveNeoPath(_ path: String?) -> URL? {
