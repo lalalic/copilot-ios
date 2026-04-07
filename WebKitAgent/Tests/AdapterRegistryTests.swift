@@ -275,4 +275,40 @@ final class AdapterRegistryTests: XCTestCase {
         XCTAssertTrue(output.contains("wechat:"))
         XCTAssertTrue(output.contains("xiaohongshu:"))
     }
+
+    // MARK: - Convertio Adapter
+
+    func testConvertioAdapterRegistered() {
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "convertio", action: "convert")
+        XCTAssertNotNil(adapter, "Convertio convert adapter should be registered")
+    }
+
+    func testConvertioAdapterProperties() {
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "convertio", action: "convert")!
+        XCTAssertEqual(adapter.site, "convertio")
+        XCTAssertEqual(adapter.name, "convert")
+        XCTAssertTrue(adapter.requiresBrowser)
+    }
+
+    func testConvertioAdapterHasCorrectArgs() {
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "convertio", action: "convert")!
+        let argNames = adapter.args.map(\.name)
+        XCTAssertTrue(argNames.contains("filePath"), "Should have filePath arg")
+        XCTAssertTrue(argNames.contains("outputFormat"), "Should have outputFormat arg")
+    }
+
+    func testConvertioAdapterDescription() {
+        registry.loadBundledAdapters()
+        let adapter = registry.find(site: "convertio", action: "convert")!
+        XCTAssertTrue(adapter.adapterDescription?.contains("convertio") ?? false)
+    }
+
+    func testListFormattedIncludesConvertio() {
+        registry.loadBundledAdapters()
+        let output = registry.listFormatted()
+        XCTAssertTrue(output.contains("convertio:"))
+    }
 }
