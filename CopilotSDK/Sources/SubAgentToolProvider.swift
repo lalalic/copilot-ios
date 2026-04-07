@@ -335,4 +335,16 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
         return "Sub-agent '\(agentName)' started in background. Task ID: \(taskId)\nProgress/result will be written to: .neo/reports/subagents/\(taskId).md\nUse memory_read tool to check the report."
     }
+
+    // MARK: - Public API for programmatic invocation
+
+    /// Run a named agent programmatically (not via tool call).
+    /// Used by ReportScheduler and other system triggers.
+    public func runAgent(name: String, task: String, model: String? = nil) async -> String {
+        guard let (frontmatter, body) = loadAgent(name) else {
+            return "Error: agent '\(name)' not found"
+        }
+        let resolvedModel = model ?? frontmatter.model ?? "gpt-4.1-mini"
+        return await runSync(agentName: name, task: task, model: resolvedModel, frontmatter: frontmatter, body: body)
+    }
 }
