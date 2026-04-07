@@ -159,72 +159,41 @@ public class PlanStore {
 
     // MARK: - Seed Reports
 
-    private static let reportPlanIds = [
-        "report-daily", "report-weekly", "report-monthly"
-    ]
-
     private func seedReportPlansIfNeeded() {
         let existingIds = Set(plans.map(\.id))
-        guard !existingIds.contains("report-daily") else { return }
+        guard !existingIds.contains("memory-reports") else { return }
 
-        let memoryTools = [
-            "memory_read", "memory_append", "memory_write_section",
-            "memory_list", "memory_search", "memory_get_yesterday"
-        ]
-
-        let daily = Plan(
-            id: "report-daily",
-            name: "Daily Report",
+        let plan = Plan(
+            id: "memory-reports",
+            name: "Memory Reports",
             prompt: """
-            Generate yesterday's daily report.
-            1. Use memory_list to check .neo/reports/sessions/ for yesterday's session log (YYYY-MM-DD.jsonl)
-            2. Use memory_read to read the session log
-            3. Summarize into sections: Summary, Tasks Completed, Key Decisions, Open Items
-            4. Use memory_write_section to write each section to .neo/reports/daily/YYYY-MM-DD.md
-            Keep it concise, under 500 words. If no session log exists, skip.
+            Run the memory sub-agent to generate reports. Use run_sub_agent with agent "memory" and the following task:
+
+            Generate memory reports for today. Check the current date and:
+
+            1. ALWAYS: Generate yesterday's daily report
+               - Read .neo/reports/sessions/ for yesterday's JSONL log
+               - Summarize into .neo/reports/daily/YYYY-MM-DD.md (Summary, Tasks, Decisions, Open Items)
+               - Skip if no session log exists or daily report already exists
+
+            2. IF MONDAY: Also generate last week's weekly report
+               - Read daily reports from past 7 days in .neo/reports/daily/
+               - Write .neo/reports/weekly/YYYY-WXX.md (Week Summary, Accomplishments, Projects, Next Week)
+
+            3. IF 1st OF MONTH: Also generate last month's monthly report
+               - Read weekly reports from .neo/reports/weekly/
+               - Write .neo/reports/monthly/YYYY-MM.md (Month Summary, Milestones, Patterns, Goals)
+
+            4. IF JANUARY 1st: Also generate last year's yearly report
+               - Read monthly reports from .neo/reports/monthly/
+               - Write .neo/reports/yearly/YYYY.md (Year Summary, Major Milestones, Growth, Next Year Goals)
             """,
             schedule: .interval(seconds: 86400),
             model: "gpt-4.1-mini",
             enabled: true,
-            tools: memoryTools
+            tools: ["run_sub_agent"]
         )
 
-        let weekly = Plan(
-            id: "report-weekly",
-            name: "Weekly Report (Monday)",
-            prompt: """
-            Generate last week's weekly report. Only run on Mondays.
-            1. Use memory_list to find daily reports from the past 7 days in .neo/reports/daily/
-            2. Use memory_read to read each daily report
-            3. Summarize into: Week Summary, Accomplishments, Projects Progress, Next Week
-            4. Write to .neo/reports/weekly/YYYY-WXX.md using memory_write_section
-            If no daily reports exist, skip.
-            """,
-            schedule: .interval(seconds: 604800),
-            model: "gpt-4.1-mini",
-            enabled: true,
-            tools: memoryTools
-        )
-
-        let monthly = Plan(
-            id: "report-monthly",
-            name: "Monthly Report (1st)",
-            prompt: """
-            Generate last month's monthly report. Only run on the 1st of the month.
-            1. Use memory_list to find weekly reports in .neo/reports/weekly/
-            2. Use memory_read to read weekly reports from last month
-            3. Summarize into: Month Summary, Key Milestones, Patterns, Goals Review
-            4. Write to .neo/reports/monthly/YYYY-MM.md using memory_write_section
-            If no weekly reports exist, skip.
-            """,
-            schedule: .interval(seconds: 2592000),
-            model: "gpt-4.1-mini",
-            enabled: true,
-            tools: memoryTools
-        )
-
-        createPlan(daily)
-        createPlan(weekly)
-        createPlan(monthly)
+        createPlan(plan)
     }
 }

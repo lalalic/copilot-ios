@@ -36,6 +36,7 @@ public final class MemoryToolProvider: Sendable {
             neoDirectory.appendingPathComponent("reports/daily", isDirectory: true),
             neoDirectory.appendingPathComponent("reports/weekly", isDirectory: true),
             neoDirectory.appendingPathComponent("reports/monthly", isDirectory: true),
+            neoDirectory.appendingPathComponent("reports/yearly", isDirectory: true),
         ]
         for dir in dirs {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
