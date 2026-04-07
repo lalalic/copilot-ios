@@ -696,56 +696,81 @@ public final class ChatViewModel: ObservableObject {
         
         let beforeCount = messages.count
         messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope))
-        chatState = .working
 
-        // Use the agent's session if in agent mode, otherwise the direct session
-        let targetSession = agent?.session ?? session
-        guard let targetSession else {
-            chatState = .idle
-            return "no-session"
+        // In loop mode, the model may be blocked waiting for ask_questions or ask_user response.
+        // Answer the pending question with the user's text to unblock the model,
+        // rather than sending a new session.send (which would deadlock).
+        let needsSend: Bool
+        switch chatState {
+        case .waitingForQuestions(let questions):
+            guard let first = questions.first else {
+                needsSend = true
+                break
+            }
+            submitAskQuestions([
+                first.header: AskQuestionAnswer(selected: [], freeText: trimmed, skipped: false)
+            ])
+            needsSend = false
+        case .waitingForUser:
+            askUserContinuation?.resume(returning: trimmed)
+            askUserContinuation = nil
+            chatState = .working
+            needsSend = false
+        default:
+            needsSend = true
         }
-        
-        do {
-            _ = try await targetSession.send(prompt: trimmed)
+
+        if needsSend {
+            chatState = .working
+
+            // Use the agent's session if in agent mode, otherwise the direct session
+            let targetSession = agent?.session ?? session
+            guard let targetSession else {
+                chatState = .idle
+                return "no-session"
+            }
             
-            // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
-            // 180s timeout for operations that involve tool calls (start_coding_task, etc.)
-            var stateObserver: AnyCancellable?
-            let stateStream = AsyncStream<ChatState> { continuation in
-                stateObserver = self.$chatState.sink { state in
-                    continuation.yield(state)
+            do {
+                _ = try await targetSession.send(prompt: trimmed)
+            } catch {
+                let msg = error.localizedDescription
+                appendSystemMessage("Error: \(msg)")
+                chatState = .idle
+                return "error: \(msg)"
+            }
+        }
+
+        // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
+        // 180s timeout for operations that involve tool calls (start_coding_task, etc.)
+        var stateObserver: AnyCancellable?
+        let stateStream = AsyncStream<ChatState> { continuation in
+            stateObserver = self.$chatState.sink { state in
+                continuation.yield(state)
+            }
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await state in stateStream {
+                    if case .working = state { continue }
+                    break
                 }
             }
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    for await state in stateStream {
-                        if case .working = state { continue }
-                        break
-                    }
-                }
-                group.addTask {
-                    try? await Task.sleep(for: .seconds(180))
-                }
-                await group.next()
-                group.cancelAll()
+            group.addTask {
+                try? await Task.sleep(for: .seconds(180))
             }
-            stateObserver?.cancel()
-            
-            // Collect new assistant messages
-            let newMessages = messages.suffix(from: beforeCount + 1)
-                .filter { $0.role == .assistant }
-                .map { $0.fullText }
-                .filter { !$0.isEmpty }
-                .joined(separator: "\n")
-            
-            return newMessages.isEmpty ? "sent-no-reply" : newMessages
-        } catch {
-            let msg = error.localizedDescription
-            appendSystemMessage("Error: \(msg)")
-            // Auto-recover to idle so subsequent MCP calls aren't permanently blocked
-            chatState = .idle
-            return "error: \(msg)"
+            await group.next()
+            group.cancelAll()
         }
+        stateObserver?.cancel()
+
+        // Collect new assistant messages
+        let newMessages = messages.suffix(from: beforeCount + 1)
+            .filter { $0.role == .assistant }
+            .map { $0.fullText }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+
+        return newMessages.isEmpty ? "sent-no-reply" : newMessages
     }
 
     /// Send a message with an image attachment.
