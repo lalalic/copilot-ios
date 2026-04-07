@@ -32,6 +32,15 @@ public final class MCPServer {
     private var listener: NWListener?
     private var toolHandlers: [String: ToolHandler] = [:]
     private var mcpTools: [[String: Any]] = []
+    // Dedicated queue for all network I/O — avoids blocking on MainActor
+    private let httpQueue = DispatchQueue(label: "mcp-server-http", qos: .userInitiated)
+    // Snapshot of state for nonisolated access from httpQueue
+    // Written on MainActor during register/start, read on httpQueue — safe by construction
+    nonisolated(unsafe) private var _snapshotName: String = ""
+    nonisolated(unsafe) private var _snapshotVersion: String = ""
+    nonisolated(unsafe) private var _snapshotTools: [[String: Any]] = []
+    nonisolated(unsafe) private var _snapshotHandlers: [String: ToolHandler] = [:]
+    nonisolated(unsafe) private var _snapshotToolNames: [String] = []
 
     /// Whether the server is currently listening.
     @Published public private(set) var isRunning = false
@@ -53,6 +62,7 @@ public final class MCPServer {
             toolHandlers[tool.name] = tool.handler
             mcpTools.append(buildMCPSchema(tool))
         }
+        refreshSnapshots()
     }
 
     /// Register a single tool by name, description, schema, and handler.
@@ -65,12 +75,22 @@ public final class MCPServer {
             "description": description,
             "inputSchema": inputSchema
         ])
+        refreshSnapshots()
     }
 
     /// Unregister a tool by name.
     public func unregister(name: String) {
         toolHandlers.removeValue(forKey: name)
         mcpTools.removeAll { ($0["name"] as? String) == name }
+        refreshSnapshots()
+    }
+
+    private func refreshSnapshots() {
+        _snapshotName = name
+        _snapshotVersion = version
+        _snapshotTools = mcpTools
+        _snapshotHandlers = toolHandlers
+        _snapshotToolNames = toolNames
     }
 
     /// All registered tool names.
@@ -82,6 +102,13 @@ public final class MCPServer {
 
     /// Start listening for MCP connections.
     public func start() throws {
+        // Snapshot MainActor-isolated state for use on httpQueue
+        _snapshotName = name
+        _snapshotVersion = version
+        _snapshotTools = mcpTools
+        _snapshotHandlers = toolHandlers
+        _snapshotToolNames = toolNames
+
         let parameters = NWParameters.tcp
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
 
@@ -104,13 +131,13 @@ public final class MCPServer {
             }
         }
 
+        let queue = httpQueue
         listener.newConnectionHandler = { [weak self] connection in
-            Task { @MainActor in
-                self?.handleConnection(connection)
-            }
+            guard let self else { return }
+            self.setupConnection(connection, queue: queue)
         }
 
-        listener.start(queue: .main)
+        listener.start(queue: httpQueue)
         self.listener = listener
     }
 
@@ -121,88 +148,73 @@ public final class MCPServer {
         isRunning = false
     }
 
-    // MARK: - HTTP Connection Handling
+    // MARK: - HTTP Connection Handling (runs on httpQueue, NOT MainActor)
 
-    private func handleConnection(_ connection: NWConnection) {
+    /// Set up a new connection — called from httpQueue via newConnectionHandler.
+    nonisolated private func setupConnection(_ connection: NWConnection, queue: DispatchQueue) {
         connection.stateUpdateHandler = { [weak self] state in
             if case .ready = state {
-                Task { @MainActor in
-                    self?.receiveHTTPRequest(connection: connection)
-                }
+                self?.receiveHTTPData(connection: connection, accumulated: Data())
             }
         }
-        connection.start(queue: .main)
+        connection.start(queue: queue)
     }
 
-    private func receiveHTTPRequest(connection: NWConnection) {
-        // Start accumulating TCP segments until we have the full HTTP request.
-        accumulateHTTPData(connection: connection, accumulated: Data())
-    }
-
-    /// Recursively accumulate TCP segments until the full HTTP body (per Content-Length) is received.
-    /// This handles WiFi TCP fragmentation where a single HTTP request arrives across multiple segments.
-    private func accumulateHTTPData(connection: NWConnection, accumulated: Data) {
+    /// Accumulate TCP data until full HTTP request is received, then process it.
+    nonisolated private func receiveHTTPData(connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) { [weak self] content, _, isComplete, error in
-            Task { @MainActor in
-                guard let self else { return }
+            guard let self else { return }
 
-                if let error {
-                    self.log("Receive error: \(error)")
-                    connection.cancel()
-                    return
-                }
-
-                var data = accumulated
-                if let content, !content.isEmpty {
-                    data.append(content)
-                }
-
-                // Check if we have a complete HTTP request
-                if let raw = String(data: data, encoding: .utf8),
-                   let headerEnd = raw.range(of: "\r\n\r\n") {
-                    // Parse Content-Length from headers
-                    let headers = String(raw[raw.startIndex..<headerEnd.lowerBound])
-                    var expectedContentLength = 0
-                    for line in headers.split(separator: "\r\n") {
-                        if line.lowercased().hasPrefix("content-length:") {
-                            let valStr = line.split(separator: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-                            expectedContentLength = Int(valStr) ?? 0
-                            break
-                        }
-                    }
-
-                    let headerEndOffset = raw.distance(from: raw.startIndex, to: headerEnd.upperBound)
-                    let bodyLength = data.count - headerEndOffset
-
-                    if expectedContentLength == 0 || bodyLength >= expectedContentLength {
-                        // Complete request — process it
-                        await self.handleHTTPRequest(raw: String(data: data, encoding: .utf8) ?? raw, connection: connection)
-                        return
-                    }
-                    // Body incomplete — fall through to continue accumulating
-                }
-
-                // If connection closed or no new data arrived on an empty buffer, give up
-                if isComplete || (content == nil && accumulated.isEmpty) {
-                    if data.isEmpty {
-                        connection.cancel()
-                    } else if let raw = String(data: data, encoding: .utf8) {
-                        await self.handleHTTPRequest(raw: raw, connection: connection)
-                    } else {
-                        connection.cancel()
-                    }
-                    return
-                }
-
-                // Not enough data yet — keep accumulating
-                self.accumulateHTTPData(connection: connection, accumulated: data)
+            if error != nil {
+                connection.cancel()
+                return
             }
+
+            var data = accumulated
+            if let content, !content.isEmpty {
+                data.append(content)
+            }
+
+            // Check if we have a complete HTTP request
+            if let raw = String(data: data, encoding: .utf8),
+               let headerEnd = raw.range(of: "\r\n\r\n") {
+                let headers = String(raw[raw.startIndex..<headerEnd.lowerBound])
+                var expectedContentLength = 0
+                for line in headers.split(separator: "\r\n") {
+                    if line.lowercased().hasPrefix("content-length:") {
+                        let valStr = line.split(separator: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                        expectedContentLength = Int(valStr) ?? 0
+                        break
+                    }
+                }
+
+                let headerEndOffset = raw.distance(from: raw.startIndex, to: headerEnd.upperBound)
+                let bodyLength = data.count - headerEndOffset
+
+                if expectedContentLength == 0 || bodyLength >= expectedContentLength {
+                    self.processHTTPRequest(raw: String(data: data, encoding: .utf8) ?? raw, connection: connection)
+                    return
+                }
+            }
+
+            if isComplete || (content == nil && accumulated.isEmpty) {
+                if data.isEmpty {
+                    connection.cancel()
+                } else if let raw = String(data: data, encoding: .utf8) {
+                    self.processHTTPRequest(raw: raw, connection: connection)
+                } else {
+                    connection.cancel()
+                }
+                return
+            }
+
+            self.receiveHTTPData(connection: connection, accumulated: data)
         }
     }
 
-    // MARK: - HTTP Request Router
+    // MARK: - HTTP Request Router (nonisolated — runs on httpQueue)
 
-    private func handleHTTPRequest(raw: String, connection: NWConnection) async {
+    nonisolated private func processHTTPRequest(raw: String, connection: NWConnection) {
         let lines = raw.split(separator: "\r\n", omittingEmptySubsequences: false)
         guard let requestLine = lines.first else {
             sendHTTP(connection: connection, status: 400, body: nil)
@@ -238,19 +250,17 @@ public final class MCPServer {
 
         switch (method, path) {
         case ("POST", "/mcp"):
-            await handleMCPPost(body: body, connection: connection)
+            handleMCPPostNonisolated(body: body, connection: connection)
 
         case ("GET", "/mcp"):
-            // Server-initiated SSE — not needed for basic operation
             sendHTTP(connection: connection, status: 405, body: nil)
 
         case ("DELETE", "/mcp"):
-            // Session termination
             sendHTTP(connection: connection, status: 200, body: nil)
 
         case ("GET", "/"):
             let info: [String: Any] = [
-                "name": name,
+                "name": _snapshotName,
                 "mcp_endpoint": "/mcp",
                 "protocol": "MCP (Streamable HTTP)"
             ]
@@ -261,20 +271,19 @@ public final class MCPServer {
         }
     }
 
-    // MARK: - MCP JSON-RPC Handler
+    // MARK: - MCP JSON-RPC Handler (nonisolated)
 
-    private func handleMCPPost(body: Data?, connection: NWConnection) async {
+    nonisolated private func handleMCPPostNonisolated(body: Data?, connection: NWConnection) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             sendJSONRPCError(connection: connection, id: nil, code: -32700, message: "Parse error")
             return
         }
 
-        let id = json["id"]  // Int, String, or nil (notification)
+        let id = json["id"]
         let method = json["method"] as? String
         let params = json["params"] as? [String: Any] ?? [:]
 
-        // Notifications (no id) — acknowledge with 202
         guard id != nil else {
             sendHTTP(connection: connection, status: 202, body: nil)
             return
@@ -289,58 +298,45 @@ public final class MCPServer {
         case "initialize":
             let result: [String: Any] = [
                 "protocolVersion": "2025-03-26",
-                "capabilities": [
-                    "tools": ["listChanged": false]
-                ],
-                "serverInfo": [
-                    "name": name,
-                    "version": version
-                ]
+                "capabilities": ["tools": ["listChanged": false]],
+                "serverInfo": ["name": _snapshotName, "version": _snapshotVersion]
             ]
             sendJSONRPCResult(connection: connection, id: id, result: result)
 
         case "tools/list":
-            sendJSONRPCResult(connection: connection, id: id, result: [
-                "tools": mcpTools
-            ])
+            sendJSONRPCResult(connection: connection, id: id, result: ["tools": _snapshotTools])
 
         case "tools/call":
             guard let toolName = params["name"] as? String else {
                 sendJSONRPCError(connection: connection, id: id, code: -32602, message: "Missing tool name")
                 return
             }
-
-            guard let handler = toolHandlers[toolName] else {
+            guard let handler = _snapshotHandlers[toolName] else {
                 sendJSONRPCError(connection: connection, id: id, code: -32602,
-                    message: "Tool '\(toolName)' not found. Available: \(toolNames.joined(separator: ", "))")
+                    message: "Tool '\(toolName)' not found. Available: \(_snapshotToolNames.joined(separator: ", "))")
                 return
             }
 
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let jsonArgs = Self.toJSONValue(arguments)
 
-            do {
-                let result = try await handler(jsonArgs)
-
-                // Heuristic: long single-line strings are likely base64 images
-                let isImage = result.count > 1000 && !result.contains("\n")
-
-                let content: [[String: Any]]
-                if isImage {
-                    content = [["type": "image", "data": result, "mimeType": "image/jpeg"]]
-                } else {
-                    content = [["type": "text", "text": result]]
+            // Tool handlers may need MainActor — run in a detached task
+            Task.detached { [weak self] in
+                do {
+                    let result = try await handler(jsonArgs)
+                    let isImage = result.count > 1000 && !result.contains("\n")
+                    let content: [[String: Any]] = isImage
+                        ? [["type": "image", "data": result, "mimeType": "image/jpeg"]]
+                        : [["type": "text", "text": result]]
+                    self?.sendJSONRPCResult(connection: connection, id: id, result: [
+                        "content": content, "isError": false
+                    ])
+                } catch {
+                    self?.sendJSONRPCResult(connection: connection, id: id, result: [
+                        "content": [["type": "text", "text": "Error: \(error.localizedDescription)"]],
+                        "isError": true
+                    ])
                 }
-
-                sendJSONRPCResult(connection: connection, id: id, result: [
-                    "content": content,
-                    "isError": false
-                ])
-            } catch {
-                sendJSONRPCResult(connection: connection, id: id, result: [
-                    "content": [["type": "text", "text": "Error: \(error.localizedDescription)"]],
-                    "isError": true
-                ])
             }
 
         case "ping":
@@ -351,9 +347,9 @@ public final class MCPServer {
         }
     }
 
-    // MARK: - HTTP Response Helpers
+    // MARK: - HTTP Response Helpers (nonisolated for httpQueue access)
 
-    private func sendJSONRPCResult(connection: NWConnection, id: Any?, result: [String: Any]) {
+    nonisolated private func sendJSONRPCResult(connection: NWConnection, id: Any?, result: [String: Any]) {
         var response: [String: Any] = [
             "jsonrpc": "2.0",
             "result": result
@@ -362,7 +358,7 @@ public final class MCPServer {
         sendJSON(connection: connection, status: 200, json: response)
     }
 
-    private func sendJSONRPCError(connection: NWConnection, id: Any?, code: Int, message: String) {
+    nonisolated private func sendJSONRPCError(connection: NWConnection, id: Any?, code: Int, message: String) {
         var response: [String: Any] = [
             "jsonrpc": "2.0",
             "error": ["code": code, "message": message]
@@ -371,7 +367,7 @@ public final class MCPServer {
         sendJSON(connection: connection, status: 200, json: response)
     }
 
-    private func sendJSON(connection: NWConnection, status: Int, json: [String: Any]) {
+    nonisolated private func sendJSON(connection: NWConnection, status: Int, json: [String: Any]) {
         guard let jsonData = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]) else {
             connection.cancel()
             return
@@ -379,7 +375,7 @@ public final class MCPServer {
         sendHTTP(connection: connection, status: status, body: jsonData, contentType: "application/json")
     }
 
-    private func sendHTTP(connection: NWConnection, status: Int, body: Data?,
+    nonisolated private func sendHTTP(connection: NWConnection, status: Int, body: Data?,
                           contentType: String = "application/json",
                           extraHeaders: [String: String] = [:]) {
         let statusText: String
