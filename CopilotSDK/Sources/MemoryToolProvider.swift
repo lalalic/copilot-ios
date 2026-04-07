@@ -13,7 +13,7 @@ public final class MemoryToolProvider: Sendable {
     }
 
     public var tools: [ToolDefinition] {
-        [memoryReadTool, memoryAppendTool, memoryWriteSectionTool, memoryLogSessionTool, memoryListTool, memorySearchTool, memoryDeleteTool]
+        [memoryReadTool, memoryAppendTool, memoryWriteSectionTool, memoryLogSessionTool, memoryListTool, memorySearchTool, memoryDeleteTool, memoryGetYesterdayTool]
     }
 
     private var neoDirectory: URL {
@@ -513,5 +513,58 @@ public final class MemoryToolProvider: Sendable {
             resultLines.append(contentsOf: lines[stop...])
         }
         return resultLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+    }
+
+    private var memoryGetYesterdayTool: ToolDefinition {
+        ToolDefinition(
+            name: "memory_get_yesterday",
+            description: "Get yesterday's daily summary. Returns the daily report from .neo/reports/daily/ for the previous day, giving context about what was done.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "date": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional date in YYYY-MM-DD format. Defaults to yesterday.")
+                    ])
+                ])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: MemoryToolProvider unavailable" }
+
+            let targetDate: String
+            if case .object(let dict) = args, case .string(let d) = dict["date"], !d.isEmpty {
+                targetDate = d
+            } else {
+                let cal = Calendar.current
+                let yesterday = cal.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+                let fmt = DateFormatter()
+                fmt.dateFormat = "yyyy-MM-dd"
+                targetDate = fmt.string(from: yesterday)
+            }
+
+            let dailyFile = self.neoDirectory
+                .appendingPathComponent("reports/daily/\(targetDate).md")
+
+            if FileManager.default.fileExists(atPath: dailyFile.path) {
+                let content = try self.readString(at: dailyFile)
+                return content.isEmpty ? "Daily report for \(targetDate) is empty." : content
+            }
+
+            // Fall back to session log for that day
+            let sessionFile = self.neoDirectory
+                .appendingPathComponent("reports/sessions/\(targetDate).jsonl")
+
+            if FileManager.default.fileExists(atPath: sessionFile.path) {
+                let raw = try self.readString(at: sessionFile)
+                let lines = raw.components(separatedBy: "\n").filter { !$0.isEmpty }
+                if lines.isEmpty {
+                    return "No activity found for \(targetDate)."
+                }
+                return "No daily summary yet for \(targetDate). Raw session log (\(lines.count) entries):\n\n\(raw)"
+            }
+
+            return "No data found for \(targetDate). No daily report or session log exists."
+        }
     }
 }
