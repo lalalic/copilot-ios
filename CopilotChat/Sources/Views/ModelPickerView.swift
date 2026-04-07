@@ -24,9 +24,18 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
         self.description = description
     }
     
-    /// Cost per 100K tokens (assuming 50/50 input/output split).
-    public var costPer100K: Double {
-        (50_000 * inputMultiplier + 50_000 * outputMultiplier) * CostCalculator.baseUnitCost
+    /// Combined multiplier (weighted average: 30% input, 70% output).
+    public var multiplier: Double {
+        inputMultiplier * 0.3 + outputMultiplier * 0.7
+    }
+    
+    /// Display string for the multiplier, e.g. "0.6x" or "1x".
+    public var multiplierLabel: String {
+        if multiplier >= 1.0 {
+            return String(format: "%.1fx", multiplier)
+        } else {
+            return String(format: "%.2fx", multiplier)
+        }
     }
 }
 
@@ -133,13 +142,9 @@ public struct ModelPickerView: View {
             Section {
                 HStack {
                     Spacer()
-                    VStack(spacing: 4) {
-                        Text("Cost = tokens × multiplier × $0.00001")
-                            .font(.caption2)
-                        Text("Free tier: $2.00 on any model")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.secondary)
+                    Text("Higher multiplier = more capable, more expensive")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Spacer()
                 }
             }
@@ -159,35 +164,17 @@ private struct ModelRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Model icon
-                Image(systemName: iconName)
-                    .font(.title3)
-                    .foregroundStyle(iconColor)
-                    .frame(width: 28)
-                
-                // Name + description
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.name)
-                        .font(.body)
-                        .fontWeight(isSelected ? .semibold : .regular)
-                        .foregroundStyle(.primary)
-                    Text(model.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(model.name)
+                    .font(.body)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(.primary)
                 
                 Spacer()
                 
-                // Cost badge
-                Text(CostCalculator.formatCost(model.costPer100K) + "/100K")
-                    .font(.caption2.monospacedDigit())
+                Text(model.multiplierLabel)
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.secondary.opacity(0.12), in: Capsule())
                 
-                // Checkmark
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.blue)
@@ -196,24 +183,6 @@ private struct ModelRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-    
-    private var iconName: String {
-        switch model.tier {
-        case .fast: return "bolt.fill"
-        case .balanced: return "star.fill"
-        case .powerful: return "flame.fill"
-        case .reasoning: return "brain.head.profile"
-        }
-    }
-    
-    private var iconColor: Color {
-        switch model.tier {
-        case .fast: return .green
-        case .balanced: return .blue
-        case .powerful: return .orange
-        case .reasoning: return .purple
-        }
     }
 }
 
@@ -232,16 +201,17 @@ public struct ModelBadgeView: View {
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: tierIcon)
-                    .font(.caption2)
                 Text(displayName)
                     .font(.caption2)
                     .fontWeight(.medium)
+                Text(model?.multiplierLabel ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(tierColor)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(tierColor.opacity(0.12), in: Capsule())
+            .background(.secondary.opacity(0.12), in: Capsule())
         }
     }
     
@@ -251,25 +221,5 @@ public struct ModelBadgeView: View {
     
     private var displayName: String {
         model?.name ?? modelId
-    }
-    
-    private var tierIcon: String {
-        switch model?.tier {
-        case .fast: return "bolt.fill"
-        case .balanced: return "star.fill"
-        case .powerful: return "flame.fill"
-        case .reasoning: return "brain.head.profile"
-        case .none: return "cpu"
-        }
-    }
-    
-    private var tierColor: Color {
-        switch model?.tier {
-        case .fast: return .green
-        case .balanced: return .blue
-        case .powerful: return .orange
-        case .reasoning: return .purple
-        case .none: return .gray
-        }
     }
 }

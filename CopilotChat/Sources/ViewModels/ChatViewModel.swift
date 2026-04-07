@@ -1327,19 +1327,21 @@ public final class ChatViewModel: ObservableObject {
         let mime = AttachmentStore.mimeType(for: ext)
         #if canImport(UIKit)
         if let image = UIImage(data: data) {
-            let maxDim: CGFloat = 1024
+            let maxDim: CGFloat = 768
             let size = image.size
-            if size.width > maxDim || size.height > maxDim {
-                let scale = min(maxDim / size.width, maxDim / size.height)
-                let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-                UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
-                image.draw(in: CGRect(origin: .zero, size: newSize))
-                let resized = UIGraphicsGetImageFromCurrentImageContext()
-                UIGraphicsEndImageContext()
-                if let resized, let jpegData = resized.jpegData(compressionQuality: 0.85) {
-                    return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
-                }
+            let maxSide = max(size.width, size.height)
+            let targetSize: CGSize
+            if maxSide > maxDim {
+                let scale = maxDim / maxSide
+                targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+            } else {
+                targetSize = size
             }
+            let renderer = UIGraphicsImageRenderer(size: targetSize)
+            let jpegData = renderer.jpegData(withCompressionQuality: 0.7) { ctx in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+            return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
         }
         #endif
         return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"

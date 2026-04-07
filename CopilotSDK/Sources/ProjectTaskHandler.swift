@@ -26,8 +26,8 @@ public final class ProjectTaskHandler {
     public init(
         proxyBaseURL: URL,
         workspaceURL: URL,
-        githubOrg: String = "neos-apps",
-        expoOwner: String = "neos-apps",
+        githubOrg: String = "neox-apps",
+        expoOwner: String = "neox-apps",
         sendNotification: @escaping (String, [String: JSONValue]) async -> Void
     ) {
         self.proxyBaseURL = proxyBaseURL

@@ -8,7 +8,7 @@ import CopilotSDK
 // All coding agent notifications have:
 //   type: "coding_agent"
 //   action: "send_response" | "report_progress" | "report_usage"
-//   repo: "neos-apps/project-name"
+//   repo: "neox-apps/project-name"
 //
 // Action-specific fields:
 //   send_response: (none — message is in APNs alert body)

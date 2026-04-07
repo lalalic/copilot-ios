@@ -226,7 +226,7 @@ public final class AttachmentStore: @unchecked Sendable {
     /// - Videos: metadata returned (duration, resolution)
     /// - Text files: returned as-is
     /// - Other: raw base64
-    public func loadSmart(name: String, maxImageDimension: Int = 1024) async throws -> SmartAttachmentResult {
+    public func loadSmart(name: String, maxImageDimension: Int = 768) async throws -> SmartAttachmentResult {
         guard let entry = entries.first(where: { $0.displayName == name }) else {
             throw AttachmentError.notFound(name)
         }
@@ -276,21 +276,21 @@ public final class AttachmentStore: @unchecked Sendable {
         let size = image.size
         let maxSide = max(size.width, size.height)
         
-        // If already small enough, return original
-        if maxSide <= CGFloat(maxDimension) {
-            return .image(data, mimeType: entry.mimeType, width: Int(size.width), height: Int(size.height))
+        // Always compress to JPEG; resize if larger than maxDimension
+        let targetSize: CGSize
+        if maxSide > CGFloat(maxDimension) {
+            let scale = CGFloat(maxDimension) / maxSide
+            targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        } else {
+            targetSize = size
         }
         
-        // Resize
-        let scale = CGFloat(maxDimension) / maxSide
-        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-        
-        let renderer = UIGraphicsImageRenderer(size: newSize)
-        let resized = renderer.jpegData(withCompressionQuality: 0.85) { context in
-            image.draw(in: CGRect(origin: .zero, size: newSize))
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resized = renderer.jpegData(withCompressionQuality: 0.7) { context in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
         
-        return .image(resized, mimeType: "image/jpeg", width: Int(newSize.width), height: Int(newSize.height))
+        return .image(resized, mimeType: "image/jpeg", width: Int(targetSize.width), height: Int(targetSize.height))
         #else
         let data = try Data(contentsOf: entry.fileURL)
         return .binary(data, mimeType: entry.mimeType)

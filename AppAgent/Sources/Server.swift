@@ -54,6 +54,10 @@ public final class MCPServer {
         self.port = port
     }
 
+    deinit {
+        listener?.cancel()
+    }
+
     // MARK: - Tool Registration
 
     /// Register tools from CopilotSDK `ToolDefinition` array.
@@ -152,10 +156,19 @@ public final class MCPServer {
 
     /// Set up a new connection — called from httpQueue via newConnectionHandler.
     nonisolated private func setupConnection(_ connection: NWConnection, queue: DispatchQueue) {
-        connection.stateUpdateHandler = { [weak self] state in
-            if case .ready = state {
-                self?.receiveHTTPData(connection: connection, accumulated: Data())
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                self.receiveHTTPData(connection: connection, accumulated: Data())
+            case .failed, .cancelled:
+                connection.cancel()
+            default:
+                break
             }
+        }
+        // Auto-cancel after 30s to prevent CLOSE_WAIT buildup
+        queue.asyncAfter(deadline: .now() + 30) { [weak connection] in
+            connection?.cancel()
         }
         connection.start(queue: queue)
     }
