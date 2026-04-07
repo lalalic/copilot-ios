@@ -21,6 +21,8 @@ public class PlanExecutor: @unchecked Sendable {
     private var planStore: PlanStore?
     private var relayHost: String = "10.0.0.111"
     private var relayPort: UInt16 = 8765
+    private var userId: String?
+    private var toolsBuilder: (@Sendable () -> [ToolDefinition])?
     
     private init() {}
     
@@ -30,11 +32,15 @@ public class PlanExecutor: @unchecked Sendable {
     public func configure(
         planStore: PlanStore,
         relayHost: String,
-        relayPort: UInt16
+        relayPort: UInt16,
+        userId: String? = nil,
+        toolsBuilder: (@Sendable () -> [ToolDefinition])? = nil
     ) {
         self.planStore = planStore
         self.relayHost = relayHost
         self.relayPort = relayPort
+        self.userId = userId
+        self.toolsBuilder = toolsBuilder
     }
     
     // MARK: - BGTask Registration
@@ -127,10 +133,22 @@ public class PlanExecutor: @unchecked Sendable {
             let client = CopilotClient(transport: transport)
             try await client.start()
             
-            // 2. Create session
-            let session = try await client.createSession(
-                model: plan.model.isEmpty ? "gpt-4.1" : plan.model
+            // 2. Create session with tools if plan specifies them
+            let planTools: [ToolDefinition]
+            if !plan.tools.isEmpty, let builder = self.toolsBuilder {
+                let allTools = builder()
+                let allowed = Set(plan.tools)
+                planTools = allTools.filter { allowed.contains($0.name) }
+            } else {
+                planTools = []
+            }
+
+            let config = SessionConfig(
+                model: plan.model.isEmpty ? "gpt-4.1" : plan.model,
+                tools: planTools.isEmpty ? nil : planTools,
+                userId: self.userId
             )
+            let session = try await client.createSession(config: config)
             
             // 3. Send plan prompt and wait for response
             let resultText = try await session.sendAndWait(
