@@ -913,6 +913,10 @@ public final class ChatViewModel: ObservableObject {
             ])
         }
 
+        // Add Q&A summary to chat history
+        let summary = formatQASummary(questions: activeQuestions, answers: answers)
+        messages.append(ChatMessage(role: .user, content: [.text(summary)], project: projectScope))
+
         if let continuation = askQuestionsContinuation {
             // Normal path: continuation exists, resume it
             continuation.resume(returning: .object(result))
@@ -930,6 +934,21 @@ public final class ChatViewModel: ObservableObject {
         activeQuestions = []
         chatState = .working
         clearPendingQuestions()
+    }
+
+    private func formatQASummary(questions: [AskQuestionItem], answers: [String: AskQuestionAnswer]) -> String {
+        var lines: [String] = []
+        for q in questions {
+            guard let answer = answers[q.header] else { continue }
+            if answer.skipped { continue }
+            if !answer.selected.isEmpty {
+                lines.append(answer.selected.joined(separator: ", "))
+            }
+            if let text = answer.freeText, !text.isEmpty {
+                lines.append(text)
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     public func skipAskQuestions() {
