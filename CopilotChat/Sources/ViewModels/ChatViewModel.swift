@@ -875,12 +875,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func handleAgentAskQuestions(_ payload: JSONValue) async -> JSONValue {
-        // Extract optional message field (response to show before questions)
-        if case .object(let root) = payload,
-           case .string(let message) = root["message"], !message.isEmpty {
-            let blocks = parseContentBlocks(message)
-            messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
-        }
+        // Note: the 'message' field is already displayed by onResponse callback in Client.buildTools()
+        // — no need to add it again here.
 
         let questions = parseAskQuestions(payload)
         guard !questions.isEmpty else {
