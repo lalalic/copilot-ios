@@ -949,6 +949,7 @@ public final class ChatViewModel: ObservableObject {
         for q in questions {
             guard let answer = answers[q.header] else { continue }
             if answer.skipped { continue }
+            lines.append("**\(q.question)**")
             if !answer.selected.isEmpty {
                 lines.append(answer.selected.joined(separator: ", "))
             }
