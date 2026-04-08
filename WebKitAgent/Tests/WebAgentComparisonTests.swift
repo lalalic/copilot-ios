@@ -146,21 +146,14 @@ final class WebAgentComparisonTests: XCTestCase {
 
     func testToolProviderWorkflow() async throws {
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
 
-        let nav = try await tool.handler(.object([
-            "command": .string("navigate"),
-            "url": .string("https://example.com")
-        ]))
+        let nav = try await provider.handleCLI("web-agent navigate https://example.com")
         XCTAssertTrue(nav.contains("Page loaded"))
 
-        let snap = try await tool.handler(.object(["command": .string("snapshot")]))
+        let snap = try await provider.handleCLI("web-agent snapshot")
         XCTAssertTrue(snap.contains("r0"))
 
-        let click = try await tool.handler(.object([
-            "command": .string("click"),
-            "ref": .string("r0")
-        ]))
+        let click = try await provider.handleCLI("web-agent click r0")
         XCTAssertTrue(click.contains("Clicked"))
     }
 }

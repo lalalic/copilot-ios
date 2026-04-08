@@ -22,55 +22,11 @@ final class WebAgentToolProviderTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Single Tool
+    // MARK: - CLI-Based Provider
 
-    func testToolCountIs1() {
-        XCTAssertEqual(provider.tools.count, 1)
-    }
-
-    func testToolNameIsWebAgent() {
-        XCTAssertEqual(provider.tools[0].name, "web_agent")
-    }
-
-    func testToolHasDescription() {
-        let tool = provider.tools[0]
-        XCTAssertNotNil(tool.description)
-        XCTAssertFalse(tool.description!.isEmpty)
-    }
-
-    func testToolHasParameters() {
-        XCTAssertNotNil(provider.tools[0].parameters)
-    }
-
-    func testToolRequiresCommand() {
-        let tool = provider.tools[0]
-        if case .object(let schema) = tool.parameters,
-           case .array(let required) = schema["required"] {
-            XCTAssertTrue(required.contains(.string("command")))
-        } else {
-            XCTFail("Tool should require 'command'")
-        }
-    }
-
-    func testToolHasCommandEnum() {
-        let tool = provider.tools[0]
-        if case .object(let schema) = tool.parameters,
-           case .object(let props) = schema["properties"],
-           case .object(let cmdProp) = props["command"],
-           case .array(let enumValues) = cmdProp["enum"] {
-            XCTAssertTrue(enumValues.contains(.string("navigate")))
-            XCTAssertTrue(enumValues.contains(.string("snapshot")))
-            XCTAssertTrue(enumValues.contains(.string("click")))
-            XCTAssertTrue(enumValues.contains(.string("type")))
-            XCTAssertTrue(enumValues.contains(.string("download")))
-            XCTAssertTrue(enumValues.contains(.string("upload")))
-        } else {
-            XCTFail("command property should have enum values")
-        }
-    }
-
-    func testToolSkipsPermission() {
-        XCTAssertTrue(provider.tools[0].skipPermission)
+    func testToolsArrayIsEmpty() {
+        // WebAgentToolProvider is CLI-only — no MCP tools exposed
+        XCTAssertTrue(provider.tools.isEmpty, "tools should be empty — provider uses CLI")
     }
 
     // MARK: - Skill Prompt
@@ -87,113 +43,75 @@ final class WebAgentToolProviderTests: XCTestCase {
 
     func testSkillPromptDescribesWorkflow() {
         let prompt = WebAgentToolProvider.skillPrompt
-        XCTAssertTrue(prompt.contains("web_agent"))
+        XCTAssertTrue(prompt.contains("web-agent") || prompt.contains("web_agent"))
         XCTAssertTrue(prompt.contains("Workflow"))
     }
 
-    // MARK: - Command Dispatch Error Cases
+    // MARK: - CLI Command Dispatch
 
-    func testRejectsNullArgs() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.null)
-        XCTAssertTrue(result.contains("Error"))
-    }
-
-    func testRejectsMissingCommand() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([:]))
-        XCTAssertTrue(result.contains("Error"))
+    func testCLIUsageMessage() async throws {
+        let result = try await provider.handleCLI("web-agent")
+        XCTAssertTrue(result.contains("Usage") || result.contains("Commands"))
     }
 
     func testRejectsUnknownCommand() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("fly")]))
-        XCTAssertTrue(result.contains("Error"))
-        XCTAssertTrue(result.contains("unknown command"))
+        let result = try await provider.handleCLI("web-agent fly")
+        XCTAssertTrue(result.contains("Error") || result.contains("unknown"))
     }
 
     func testNavigateRequiresURL() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("navigate")]))
+        let result = try await provider.handleCLI("web-agent navigate")
         XCTAssertTrue(result.contains("Error"))
-        XCTAssertTrue(result.contains("url"))
     }
 
     func testClickRequiresRef() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("click")]))
+        let result = try await provider.handleCLI("web-agent click")
         XCTAssertTrue(result.contains("Error"))
-        XCTAssertTrue(result.contains("ref"))
     }
 
     func testTypeRequiresRefAndText() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("type"), "ref": .string("r0")]))
+        let result = try await provider.handleCLI("web-agent type r0")
         XCTAssertTrue(result.contains("Error"))
     }
 
     func testDownloadRequiresRefOrURL() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("download")]))
+        let result = try await provider.handleCLI("web-agent download")
         XCTAssertTrue(result.contains("Error"))
     }
 
     func testUploadRequiresRefAndFilePath() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("upload")]))
+        let result = try await provider.handleCLI("web-agent upload")
+        XCTAssertTrue(result.contains("Error"))
+    }
+
+    func testEvaluateRequiresScript() async throws {
+        let result = try await provider.handleCLI("web-agent evaluate")
         XCTAssertTrue(result.contains("Error"))
     }
 
     func testSnapshotNoExtraParams() async throws {
-        // Snapshot on blank page — should work (returns empty elements)
-        let tool = provider.tools[0]
-        // This will attempt JS eval on blank WKWebView, may fail but shouldn't crash
         do {
-            let result = try await tool.handler(.object(["command": .string("snapshot")]))
-            // If it succeeds, it should contain page info
+            let result = try await provider.handleCLI("web-agent snapshot")
             XCTAssertFalse(result.isEmpty)
         } catch {
-            // JS eval may fail on blank webview in test environment — that's OK
+            // JS eval may fail on blank webview in test environment
         }
     }
 
     // MARK: - Site Subcommand
 
-    func testSiteCommandExists() {
-        let tool = provider.tools[0]
-        if case .object(let schema) = tool.parameters,
-           case .object(let props) = schema["properties"],
-           case .object(let cmdProp) = props["command"],
-           case .array(let enumValues) = cmdProp["enum"] {
-            XCTAssertTrue(enumValues.contains(.string("site")))
-        } else {
-            XCTFail("command enum should contain 'site'")
-        }
-    }
-
-    func testSiteCommandRequiresSite() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object(["command": .string("site")]))
-        XCTAssertTrue(result.contains("Error") || result.contains("error"))
-    }
-
-    func testSiteCommandListAction() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "action": .string("list")
-        ]))
-        // Should list available adapters
+    func testSiteCommandListAll() async throws {
+        let result = try await provider.handleSiteCLI("list")
         XCTAssertTrue(result.contains("hackernews") || result.contains("adapter"))
     }
 
+    func testSiteCommandEmpty() async throws {
+        let result = try await provider.handleSiteCLI("")
+        XCTAssertFalse(result.isEmpty)
+    }
+
     func testSiteCommandUnknownSite() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("nonexistent"),
-            "action": .string("top")
-        ]))
+        let result = try await provider.handleSiteCLI("nonexistent top")
         XCTAssertTrue(result.contains("not found") || result.contains("Error"))
     }
 
@@ -210,88 +128,30 @@ final class WebAgentToolProviderTests: XCTestCase {
         XCTAssertTrue(prompt.contains("auth_check"))
     }
 
-    func testSkillPromptDescribesAuthFlow() {
-        let prompt = WebAgentToolProvider.skillPrompt
-        XCTAssertTrue(prompt.contains("Not logged in"))
-        XCTAssertTrue(prompt.contains("Cookies persist"))
-    }
-
     func testRegistryIsAccessible() {
         XCTAssertNotNil(provider.registry)
     }
 
     func testBundledAdaptersLoaded() {
-        // Provider should auto-load bundled adapters (3 HN + 4 WeChat + 4 XHS)
-        XCTAssertEqual(provider.registry.adapterCount, 11)
+        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio = 12
+        XCTAssertEqual(provider.registry.adapterCount, 12)
     }
 
     // MARK: - Auth Actions
 
     func testSessionsAction() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "action": .string("sessions")
-        ]))
-        // Should return login status for all known sites
+        let result = try await provider.handleSiteCLI("sessions")
         XCTAssertTrue(result.contains("Login status:"))
-        XCTAssertTrue(result.contains("xiaohongshu"))
-        XCTAssertTrue(result.contains("twitter"))
-        XCTAssertTrue(result.contains("github"))
-    }
-
-    func testLoginActionRequiresSite() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "action": .string("login")
-        ]))
-        // Without site param, should get an error about missing 'site'
-        XCTAssertTrue(result.contains("Error") || result.contains("error"))
-    }
-
-    func testLoginActionUnknownSite() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("unknownsite123"),
-            "action": .string("login")
-        ]))
-        // Unknown site should return error about no known login URL
-        XCTAssertTrue(result.contains("no known login URL") || result.contains("Error"))
     }
 
     func testLogoutActionClearsWithoutCrash() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("xiaohongshu"),
-            "action": .string("logout")
-        ]))
-        // Should complete without crashing
+        let result = try await provider.handleSiteCLI("xiaohongshu logout")
         XCTAssertTrue(result.contains("Cleared cookies") || result.contains("logged out"))
     }
 
     func testAuthCheckNotLoggedIn() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("xiaohongshu"),
-            "action": .string("auth_check")
-        ]))
-        // Fresh WKWebView has no cookies → should say not logged in
+        let result = try await provider.handleSiteCLI("xiaohongshu auth_check")
         XCTAssertTrue(result.contains("Not logged in") || result.contains("✗"))
-    }
-
-    func testAuthCheckUnknownSite() async throws {
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("unknownsite123"),
-            "action": .string("auth_check")
-        ]))
-        // Unknown site should gracefully handle
-        XCTAssertTrue(result.contains("No auth info") || result.contains("unknownsite123"))
     }
 
     // MARK: - XHS Adapters

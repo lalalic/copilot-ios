@@ -136,27 +136,18 @@ final class WebAgentE2ETests: XCTestCase {
 
     func testToolProviderNavigateAndSnapshot() async throws {
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
 
         // Navigate
-        let navResult = try await tool.handler(.object([
-            "command": .string("navigate"),
-            "url": .string("https://example.com")
-        ]))
+        let navResult = try await provider.handleCLI("web-agent navigate https://example.com")
         XCTAssertTrue(navResult.contains("Page loaded"))
 
         // Snapshot
-        let snapResult = try await tool.handler(.object([
-            "command": .string("snapshot")
-        ]))
+        let snapResult = try await provider.handleCLI("web-agent snapshot")
         XCTAssertTrue(snapResult.contains("r0"))
         XCTAssertTrue(snapResult.contains("interactive elements"))
 
         // Click
-        let clickResult = try await tool.handler(.object([
-            "command": .string("click"),
-            "ref": .string("r0")
-        ]))
+        let clickResult = try await provider.handleCLI("web-agent click r0")
         XCTAssertTrue(clickResult.contains("Clicked"))
     }
 

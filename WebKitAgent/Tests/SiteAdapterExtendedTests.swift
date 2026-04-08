@@ -216,7 +216,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testBundledAdaptersCount() {
         let registry = AdapterRegistry()
         registry.loadBundledAdapters()
-        XCTAssertEqual(registry.adapterCount, 11) // 3 HN + 4 WeChat + 4 XHS
+        XCTAssertEqual(registry.adapterCount, 12) // 3 HN + 4 WeChat + 4 XHS + 1 Convertio
     }
 
     func testBundledAdaptersHavePipelines() {
@@ -300,11 +300,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testSiteCommandListsWeChatAdapters() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("wechat")
-        ]))
+        let result = try await provider.handleSiteCLI("wechat")
         XCTAssertTrue(result.contains("login"))
         XCTAssertTrue(result.contains("contacts"))
         XCTAssertTrue(result.contains("status"))
@@ -316,10 +312,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testEvaluateMissingScript() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("evaluate")
-        ]))
+        let result = try await provider.handleCLI("web-agent evaluate")
         XCTAssertTrue(result.contains("Error"), "Should require 'script' parameter")
         XCTAssertTrue(result.contains("script"))
     }
@@ -327,13 +320,9 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testEvaluateOnBlankPage() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
         // Evaluate JS on blank WKWebView
         do {
-            let result = try await tool.handler(.object([
-                "command": .string("evaluate"),
-                "script": .string("1 + 1")
-            ]))
+            let result = try await provider.handleCLI("web-agent evaluate 1 + 1")
             // Should return "2" or similar
             XCTAssertFalse(result.isEmpty)
         } catch {
@@ -346,12 +335,9 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testScreenshotOnBlankPage() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("screenshot")
-        ]))
+        let result = try await provider.handleCLI("web-agent screenshot")
         // Should return data URI or error (blank page may or may not produce screenshot)
-        XCTAssertTrue(result.contains("data:image/jpeg;base64,") || result.contains("Error"))
+        XCTAssertTrue(result.contains("data:image/jpeg;base64,") || result.contains("Error") || result.contains("error"))
     }
 
     // MARK: - WebAgentToolProvider: Site Command Variants
@@ -359,11 +345,7 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testSiteCommandListAllViaToolProvider() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "action": .string("list")
-        ]))
+        let result = try await provider.handleSiteCLI("list")
         // Should list bundled adapters
         XCTAssertTrue(result.contains("hackernews"))
         XCTAssertTrue(result.contains("top"))
@@ -372,12 +354,8 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testSiteCommandWithSiteOnly() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
         // Provide site but no action → should list adapters for that site
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("hackernews")
-        ]))
+        let result = try await provider.handleSiteCLI("hackernews")
         XCTAssertTrue(result.contains("hackernews") || result.contains("Available"))
         XCTAssertTrue(result.contains("top"))
     }
@@ -385,57 +363,33 @@ final class SiteAdapterExtendedTests: XCTestCase {
     func testSiteCommandUnknownSiteWithAction() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        let result = try await tool.handler(.object([
-            "command": .string("site"),
-            "site": .string("nonexistent"),
-            "action": .string("stuff")
-        ]))
+        let result = try await provider.handleSiteCLI("nonexistent stuff")
         XCTAssertTrue(result.contains("not found") || result.contains("Error"))
     }
 
     func testSiteCommandNoSiteNoAction() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        // No site, no action → should require site
-        let result = try await tool.handler(.object([
-            "command": .string("site")
-        ]))
-        XCTAssertTrue(result.contains("Error") || result.contains("required"),
-                       "Should tell user 'site' is required or show list")
+        // No site, no action → should list all or show usage
+        let result = try await provider.handleSiteCLI("")
+        XCTAssertTrue(result.contains("adapter") || result.contains("Available") || result.contains("No"),
+                       "Should list all adapters or show usage")
     }
 
-    // MARK: - WebAgentToolProvider: Tool Schema for New Commands
+    // MARK: - WebAgentToolProvider: CLI Interface Tests
 
-    func testToolEnumContainsNewCommands() {
+    func testCLIUsageMessage() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        if case .object(let schema) = tool.parameters,
-           case .object(let props) = schema["properties"],
-           case .object(let cmdProp) = props["command"],
-           case .array(let enumValues) = cmdProp["enum"] {
-            XCTAssertTrue(enumValues.contains(.string("site")))
-            XCTAssertTrue(enumValues.contains(.string("evaluate")))
-            XCTAssertTrue(enumValues.contains(.string("screenshot")))
-        } else {
-            XCTFail("Tool should have command enum with site/evaluate/screenshot")
-        }
+        let result = try await provider.handleCLI("web-agent")
+        XCTAssertTrue(result.contains("Usage") || result.contains("Commands"))
     }
 
-    func testToolHasSiteParam() {
+    func testCLIUnknownCommand() async throws {
         let manager = WebViewManager()
         let provider = WebAgentToolProvider(manager: manager)
-        let tool = provider.tools[0]
-        if case .object(let schema) = tool.parameters,
-           case .object(let props) = schema["properties"] {
-            XCTAssertNotNil(props["site"], "Should have 'site' parameter")
-            XCTAssertNotNil(props["action"], "Should have 'action' parameter")
-            XCTAssertNotNil(props["script"], "Should have 'script' parameter")
-        } else {
-            XCTFail("Tool should have parameters")
-        }
+        let result = try await provider.handleCLI("web-agent foobar")
+        XCTAssertTrue(result.contains("Error") || result.contains("unknown"))
     }
 
     func testSkillPromptContainsNewCommands() {

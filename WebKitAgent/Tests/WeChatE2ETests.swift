@@ -72,32 +72,21 @@ final class WeChatE2ETests: XCTestCase {
     // MARK: - Full Workflow via ToolProvider (single navigation)
 
     func testFullWorkflowViaToolProvider() async throws {
-        let tool = provider.tools[0]
 
         // Step 1: Navigate
-        let navResult = try await tool.handler(.object([
-            "command": .string("navigate"),
-            "url": .string("https://wx.qq.com")
-        ]))
+        let navResult = try await provider.handleCLI("web-agent navigate https://wx.qq.com")
         XCTAssertTrue(navResult.contains("Page loaded"))
 
         // Step 2: Snapshot
-        let snapResult = try await tool.handler(.object([
-            "command": .string("snapshot")
-        ]))
+        let snapResult = try await provider.handleCLI("web-agent snapshot")
         XCTAssertTrue(snapResult.contains("Page:") || snapResult.contains("URL:"))
 
         // Step 3: Evaluate JS
-        let evalResult = try await tool.handler(.object([
-            "command": .string("evaluate"),
-            "script": .string("document.readyState")
-        ]))
+        let evalResult = try await provider.handleCLI("web-agent evaluate document.readyState")
         XCTAssertFalse(evalResult.isEmpty)
 
         // Step 4: Screenshot
-        let ssResult = try await tool.handler(.object([
-            "command": .string("screenshot")
-        ]))
+        let ssResult = try await provider.handleCLI("web-agent screenshot")
         XCTAssertTrue(ssResult.contains("data:image/jpeg;base64,") || ssResult.contains("Error"))
     }
 }

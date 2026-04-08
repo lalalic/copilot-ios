@@ -224,11 +224,13 @@ final class WeChatBridgeTests: XCTestCase {
     }
 
     func testInjectionScriptContainsHeartbeat() {
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("heartbeat"))
+        // Script uses polling bridge instead of heartbeat
+        XCTAssertTrue(WeChatBridge.injectionScript.contains("__wechatBridge"))
     }
 
     func testInjectionScriptContainsCheckScan() {
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("checkScan"))
+        // Script uses WechatyBro instead of checkScan
+        XCTAssertTrue(WeChatBridge.injectionScript.contains("WechatyBro"))
     }
 }
 

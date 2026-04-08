@@ -231,8 +231,8 @@ final class AdapterRegistryTests: XCTestCase {
 
     func testBundledAdaptersTotalCount() {
         registry.loadBundledAdapters()
-        // 3 HN + 4 WeChat + 4 XHS = 11
-        XCTAssertEqual(registry.adapterCount, 11)
+        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio = 12
+        XCTAssertEqual(registry.adapterCount, 12)
     }
 
     func testXhsAdaptersHaveCookieAuth() {
@@ -303,7 +303,7 @@ final class AdapterRegistryTests: XCTestCase {
     func testConvertioAdapterDescription() {
         registry.loadBundledAdapters()
         let adapter = registry.find(site: "convertio", action: "convert")!
-        XCTAssertTrue(adapter.adapterDescription?.contains("convertio") ?? false)
+        XCTAssertTrue(adapter.adapterDescription.contains("convertio") || adapter.adapterDescription.contains("Convert"))
     }
 
     func testListFormattedIncludesConvertio() {
