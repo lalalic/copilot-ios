@@ -1118,6 +1118,11 @@ public final class CopilotSession: @unchecked Sendable {
         guard case .string(let toolName) = data["toolName"],
               case .string(let requestId) = data["requestId"] else { return }
 
+        // Store requestId so views can persist it for recovery after app restart
+        if toolName == "ask_questions" || toolName == "ask_user" {
+            self.pendingRequestId = requestId
+        }
+
         // Arguments may be a JSON-encoded string or an already-parsed object
         let args: JSONValue
         if case .string(let argsStr) = data["arguments"],
@@ -1144,6 +1149,7 @@ public final class CopilotSession: @unchecked Sendable {
 
         do {
             let result = try await handler(args)
+            self.pendingRequestId = nil
             NSLog("[CopilotSDK] Tool '%@' completed (%d chars)", toolName, result.count)
             sdkLog.info("✅ Tool '\(toolName)' completed (\(result.count) chars)")
             _ = try await connection.send(method: "session.tools.handlePendingToolCall", params: [
@@ -1247,6 +1253,12 @@ public final class CopilotSession: @unchecked Sendable {
             params["attachments"] = .array(attachments)
         }
         return try await connection.send(method: "session.send", params: params)
+    }
+
+    /// Send a raw JSON-RPC request to the relay (low-level).
+    @discardableResult
+    public func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        return try await connection.send(method: method, params: params)
     }
 
     /// Send a text prompt and wait for the AI's response (waits for session.idle event).
@@ -1746,6 +1758,23 @@ public final class CopilotAgent: @unchecked Sendable {
     init(session: CopilotSession, config: AgentConfig) {
         self.session = session
         self.config = config
+    }
+
+    /// Send a pending tool call result directly to the relay.
+    /// Used to answer ask_questions after app restart (when the async continuation is gone).
+    public func sendPendingToolResult(requestId: String, result: String) async {
+        let sessionId = session.sessionId
+        do {
+            _ = try await session.sendRPC(method: "session.tools.handlePendingToolCall", params: [
+                "sessionId": .string(sessionId),
+                "requestId": .string(requestId),
+                "result": .string(result),
+            ])
+            self.session.pendingRequestId = nil
+            NSLog("[CopilotAgent] Pending tool result sent (requestId: %@)", String(requestId.prefix(8)))
+        } catch {
+            NSLog("[CopilotAgent] sendPendingToolResult error: %@", error.localizedDescription)
+        }
     }
 
     /// Start the agent with an initial prompt. Blocks until the agent stops.

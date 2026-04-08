@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AskQuestionOption: Identifiable, Sendable, Equatable {
+public struct AskQuestionOption: Identifiable, Sendable, Equatable, Codable {
     public let id: UUID
     public let label: String
     public let description: String?
@@ -19,7 +19,7 @@ public struct AskQuestionOption: Identifiable, Sendable, Equatable {
     }
 }
 
-public struct AskQuestionItem: Identifiable, Sendable, Equatable {
+public struct AskQuestionItem: Identifiable, Sendable, Equatable, Codable {
     public let id: UUID
     public let header: String
     public let question: String

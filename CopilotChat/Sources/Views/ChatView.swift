@@ -55,18 +55,6 @@ public struct ChatView: View {
             // Todo panel (above input bar, like VS Code chat)
             TodoPanelView(items: viewModel.todoItems)
 
-            if case .waitingForQuestions(let questions) = viewModel.chatState {
-                AskQuestionsView(
-                    questions: questions,
-                    onSubmit: { answers in
-                        viewModel.submitAskQuestions(answers)
-                    },
-                    onSkip: {
-                        viewModel.skipAskQuestions()
-                    }
-                )
-            }
-
             Rectangle()
                 .fill(platformGray5)
                 .frame(height: 1)
@@ -129,6 +117,21 @@ public struct ChatView: View {
                         MessageBubble(message: message)
                             .id(message.id)
                     }
+
+                    // Questions appear as an inline bubble that scrolls with chat
+                    if case .waitingForQuestions(let questions) = viewModel.chatState {
+                        AskQuestionsView(
+                            questions: questions,
+                            onSubmit: { answers in
+                                viewModel.submitAskQuestions(answers)
+                            },
+                            onSkip: {
+                                viewModel.skipAskQuestions()
+                            }
+                        )
+                        .id("ask-questions")
+                        .padding(.top, 4)
+                    }
                 }
                 .padding(.vertical, 8)
             }
@@ -136,6 +139,11 @@ public struct ChatView: View {
             .onChange(of: viewModel.filteredMessages.count) { _, _ in
                 if let lastId = viewModel.filteredMessages.last?.id {
                     proxy.scrollTo(lastId, anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.chatState.isWaitingForQuestions) { _, isWaiting in
+                if isWaiting {
+                    proxy.scrollTo("ask-questions", anchor: .bottom)
                 }
             }
         }

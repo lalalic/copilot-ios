@@ -34,6 +34,12 @@ public enum ChatState: Sendable, Equatable {
     case waitingForQuestions([AskQuestionItem])
     /// An error occurred.
     case error(String)
+
+    /// Whether the state is `waitingForQuestions`.
+    var isWaitingForQuestions: Bool {
+        if case .waitingForQuestions = self { return true }
+        return false
+    }
 }
 
 // MARK: - Chat View Model
@@ -336,6 +342,9 @@ public final class ChatViewModel: ObservableObject {
 
         loadChatHistory()
         chatState = .idle
+
+        // Restore pending questions from previous session (if app restarted while waiting)
+        restorePendingQuestions()
     }
 
     // MARK: - Relay Notification Handling
@@ -886,6 +895,9 @@ public final class ChatViewModel: ObservableObject {
         chatState = .waitingForQuestions(questions)
         activeQuestions = questions
 
+        // Persist questions + requestId for recovery after app restart
+        persistPendingQuestions(questions)
+
         return await withCheckedContinuation { continuation in
             self.askQuestionsContinuation = continuation
         }
@@ -901,10 +913,23 @@ public final class ChatViewModel: ObservableObject {
             ])
         }
 
-        askQuestionsContinuation?.resume(returning: .object(result))
-        askQuestionsContinuation = nil
+        if let continuation = askQuestionsContinuation {
+            // Normal path: continuation exists, resume it
+            continuation.resume(returning: .object(result))
+            askQuestionsContinuation = nil
+        } else if let requestId = UserDefaults.standard.string(forKey: "pendingAskQuestionsRequestId") {
+            // Recovery path: app restarted, send result directly to relay
+            let jsonResult = JSONValue.object(result)
+            if let data = try? JSONEncoder().encode(jsonResult), let text = String(data: data, encoding: .utf8) {
+                Task {
+                    await agent?.sendPendingToolResult(requestId: requestId, result: "User answered: \(text)")
+                }
+            }
+        }
+
         activeQuestions = []
         chatState = .working
+        clearPendingQuestions()
     }
 
     public func skipAskQuestions() {
@@ -913,6 +938,34 @@ public final class ChatViewModel: ObservableObject {
             skipped[question.header] = AskQuestionAnswer(selected: [], freeText: nil, skipped: true)
         }
         submitAskQuestions(skipped)
+    }
+
+    // MARK: - Pending Questions Persistence
+
+    private func persistPendingQuestions(_ questions: [AskQuestionItem]) {
+        if let data = try? JSONEncoder().encode(questions) {
+            UserDefaults.standard.set(data, forKey: "pendingAskQuestions")
+        }
+        if let requestId = agent?.session.pendingRequestId {
+            UserDefaults.standard.set(requestId, forKey: "pendingAskQuestionsRequestId")
+        }
+    }
+
+    private func clearPendingQuestions() {
+        UserDefaults.standard.removeObject(forKey: "pendingAskQuestions")
+        UserDefaults.standard.removeObject(forKey: "pendingAskQuestionsRequestId")
+    }
+
+    /// Restore pending questions from previous session (after app restart).
+    /// Call after agent connects but before user interaction.
+    func restorePendingQuestions() {
+        guard let data = UserDefaults.standard.data(forKey: "pendingAskQuestions"),
+              let questions = try? JSONDecoder().decode([AskQuestionItem].self, from: data),
+              !questions.isEmpty else { return }
+
+        NSLog("[ChatVM] Restoring %d pending questions from previous session", questions.count)
+        activeQuestions = questions
+        chatState = .waitingForQuestions(questions)
     }
 
     private func parseAskQuestions(_ payload: JSONValue) -> [AskQuestionItem] {
