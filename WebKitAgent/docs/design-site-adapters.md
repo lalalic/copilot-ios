@@ -156,9 +156,9 @@ struct TwitterTrendingAdapter: SiteAdapter {
 New `web_agent` subcommand: `site`
 
 ```
-web-agent site site=hackernews action=top limit=5
-web-agent site site=twitter action=trending limit=10
-web-agent site site=github action=trending language=swift
+site hackernews top limit=5
+site twitter trending limit=10
+site github trending language=swift
 ```
 
 ### Implementation Plan
@@ -298,7 +298,7 @@ App Launch → Check local cache age → If stale:
   → Store in App Group container (~/Documents/Adapters/)
   → Register in AdapterRegistry
 
-Agent asks: "web-agent site site=hackernews action=top"
+Agent asks: "site hackernews top"
   → AdapterRegistry.find("hackernews", "top")
   → PipelineEngine.execute(adapter.pipeline, args)
   → Return structured result
@@ -347,7 +347,7 @@ User copies `.yaml` files to the Neox app folder via Files app or AirDrop.
 
 - **Ship once, extend forever** — New site adapters added without App Store update
 - **Community contributions** — Users can submit YAML adapters via PR to the adapter repo
-- **Agent discovers adapters** — `web-agent site action=list` returns all available adapters
+- **Agent discovers adapters** — `site list` returns all available adapters
 - **Hot reload** — Update adapters by editing YAML, no restart needed
 - **Same approach as opencli** — Their `clis/` folder pattern, just mobile-native
 
@@ -388,7 +388,7 @@ User → Opens browser tab → Types twitter.com → Logs in
   → WKWebView stores session cookies (ct0, auth_token, etc.)
   → Cookies persist in WKWebsiteDataStore.default()
 
-Later → Agent runs: web-agent site site=twitter action=trending
+Later → Agent runs: site twitter trending
   → Adapter checks auth: reads cookies for "x.com" domain
   → Finds ct0 cookie → Authenticated ✓
   → Navigates to trending page → Content loads with user's session
@@ -458,10 +458,10 @@ Agent → web-agent navigate url=https://x.com/login
         
 User → Types username/password in the browser tab
 
-Agent → web-agent site site=twitter action=auth_check
+Agent → site twitter auth_check
         → Returns: "Logged in as @username"
         
-Agent → web-agent site site=twitter action=trending limit=5
+Agent → site twitter trending limit=5
         → Returns trending topics
 ```
 
@@ -482,7 +482,7 @@ authCheck:
 
 **List all sessions:**
 ```
-web-agent site action=sessions
+site sessions
 → twitter: logged in (@username)
 → reddit: not logged in
 → github: logged in (user@example.com)
@@ -491,7 +491,7 @@ web-agent site action=sessions
 
 **Clear session:**
 ```
-web-agent site site=twitter action=logout
+site twitter logout
 → Clears all cookies for x.com domain
 ```
 
@@ -672,7 +672,7 @@ User: "Get my WeChat articles"
 Agent: "You're not logged into WeChat web. I'll help you log in.
         I'll extract the QR code and open WeChat for you to confirm."
 
-Agent → web-agent site site=wechat action=login
+Agent → site wechat login
   → Navigates to login page
   → Extracts QR code
   → Opens WeChat via URL scheme
@@ -682,7 +682,7 @@ User → [Taps confirm in WeChat app]
 
 Agent → [Polls... detects login success]
   → "You're now logged into WeChat web! Getting your articles..."
-  → web-agent site site=wechat action=articles
+  → site wechat articles
 ```
 
 ### Key Consideration: Same-Device QR

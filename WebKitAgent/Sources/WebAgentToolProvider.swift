@@ -31,14 +31,21 @@ public final class WebAgentToolProvider {
     - `web-agent type <ref> <text>` — Type text into an input (e.g. `web-agent type r3 hello world`).
     - `web-agent download <ref|url> [filename]` — Download a file by element ref or URL.
     - `web-agent upload <ref> <filePath>` — Upload a file to a file input element.
-    - `web-agent site <site> <action>` — Run a site-specific adapter (e.g. `web-agent site hackernews top`).
     - `web-agent evaluate <script>` — Run JavaScript on the current page.
     - `web-agent screenshot` — Take a screenshot. Returns base64 JPEG.
 
     Workflow: navigate → snapshot → read refs → click/type/download → snapshot again after changes.
-    For known sites, prefer `web-agent site` — it's faster and deterministic.
 
-    Auth flow: `web-agent site <name> login` → user logs in manually → `web-agent site <name> auth_check`
+    You also have a `site` CLI for site-specific adapters (faster, deterministic):
+    - `site list` — List all available site adapters.
+    - `site sessions` — Check login status for all known sites.
+    - `site <name> <action> [key=val ...]` — Run a site adapter (e.g. `site hackernews top limit=5`).
+    - `site <name> login` — Navigate to login page. User logs in manually.
+    - `site <name> auth_check` — Verify login status.
+    - `site <name> logout` — Clear cookies.
+
+    For known sites, prefer `site` — it's faster and deterministic.
+    Auth flow: `site <name> login` → user logs in manually → `site <name> auth_check`
     """
 
     // MARK: - No MCP Tools (CLI only)
@@ -119,7 +126,8 @@ public final class WebAgentToolProvider {
     }
 
     /// Parse and handle "site <site> <action> [key=val ...]"
-    private func handleSiteCLI(_ args: String) async throws -> String {
+    /// Called from web-agent site subcommand or directly via `site` CLI command.
+    public func handleSiteCLI(_ args: String) async throws -> String {
         let parts = args.split(separator: " ")
 
         // "web-agent site" with no args → list all
@@ -255,7 +263,7 @@ public final class WebAgentToolProvider {
                 Not logged in to \(adapter.site) (\(domain)). \(reason)
                 
                 To log in:
-                1. Run: web-agent site \(adapter.site) login
+                1. Run: site \(adapter.site) login
                 2. Log in manually in the browser tab
                 3. Run this command again
                 
@@ -332,7 +340,7 @@ public final class WebAgentToolProvider {
         \(result)
         
         The user can now log in manually in the browser tab.
-        After login, verify with: web-agent site \(site) auth_check
+        After login, verify with: site \(site) auth_check
         """
     }
 
@@ -361,7 +369,7 @@ public final class WebAgentToolProvider {
                 return "✗ Not logged in to \(site) (\(entry.domain)) — \(reason)"
             }
         }
-        return "No auth info configured for '\(site)'. Try: web-agent site \(site) login"
+        return "No auth info configured for '\(site)'. Try: site \(site) login"
     }
 
     /// Check login status for all known sites.
@@ -381,8 +389,8 @@ public final class WebAgentToolProvider {
             }
         }
         lines.append("")
-        lines.append("To log in: web-agent site <name> login")
-        lines.append("To verify: web-agent site <name> auth_check")
+        lines.append("To log in: site <name> login")
+        lines.append("To verify: site <name> auth_check")
         return lines.joined(separator: "\n")
     }
 

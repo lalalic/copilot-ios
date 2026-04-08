@@ -123,7 +123,8 @@ public final class TerminalToolProvider: @unchecked Sendable {
                 Execute a shell command on the device. Supports standard Unix commands: \
                 ls, cat, grep, find, mkdir, cp, mv, rm, sed, awk, curl, tar, echo, wc, \
                 sort, head, tail, touch, chmod, pwd, date, env, du, df. \
-                Also supports: web-agent navigate|snapshot|click|type|download|upload|screenshot. \
+                Also supports: web-agent navigate|snapshot|click|type|download|upload|screenshot; \
+                site <name> <action> [key=val] for site adapters. \
                 Commands run sandboxed in the workspace directory. \
                 Use | for pipes.
                 """,
