@@ -7,6 +7,7 @@ public struct AskQuestionsView: View {
 
     @State private var selectedByHeader: [String: Set<String>] = [:]
     @State private var freeTextByHeader: [String: String] = [:]
+    @State private var expandedHeaders: Set<String> = []
 
     public init(
         questions: [AskQuestionItem],
@@ -49,18 +50,47 @@ public struct AskQuestionsView: View {
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 8)
+        .onAppear {
+            // Auto-expand first question
+            if let first = questions.first {
+                expandedHeaders.insert(first.header)
+            }
+        }
     }
 
     @ViewBuilder
     private func questionCard(_ item: AskQuestionItem) -> some View {
+        let isExpanded = expandedHeaders.contains(item.header)
         VStack(alignment: .leading, spacing: 8) {
-            Text(item.header)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(item.question)
-                .font(.subheadline)
+            // Tappable header — toggles expand/collapse
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if expandedHeaders.contains(item.header) {
+                        expandedHeaders.remove(item.header)
+                    } else {
+                        expandedHeaders.insert(item.header)
+                    }
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.header)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(item.question)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
 
-            if !item.options.isEmpty {
+            if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(item.options) { option in
                         Button {
@@ -100,12 +130,12 @@ public struct AskQuestionsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
 
-            if item.allowFreeformInput {
-                TextField("Additional input", text: bindingForFreeText(header: item.header), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...3)
+                if item.allowFreeformInput {
+                    TextField("Additional input", text: bindingForFreeText(header: item.header), axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...3)
+                }
             }
         }
         .padding(10)
