@@ -134,11 +134,8 @@ public struct ChatView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onChange(of: viewModel.filteredMessages.count) { _, _ in
-                // Auto-scroll to bottom on new messages
                 if let lastId = viewModel.filteredMessages.last?.id {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
+                    proxy.scrollTo(lastId, anchor: .bottom)
                 }
             }
         }
