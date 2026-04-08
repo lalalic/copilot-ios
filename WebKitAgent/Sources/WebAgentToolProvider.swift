@@ -9,12 +9,15 @@ public final class WebAgentToolProvider {
     public let manager: WebViewManager
     public let registry: AdapterRegistry
     private let pipelineEngine: PipelineEngine
+    public let cookieRefresh: CookieRefreshManager
 
     public init(manager: WebViewManager) {
         self.manager = manager
         self.registry = AdapterRegistry()
         self.pipelineEngine = PipelineEngine()
+        self.cookieRefresh = CookieRefreshManager()
         registry.loadBundledAdapters()
+        cookieRefresh.start()
     }
 
     // MARK: - Skill prompt describing web-agent CLI
@@ -303,6 +306,18 @@ public final class WebAgentToolProvider {
 
     // MARK: - Auth Helpers
 
+    /// URLs used to refresh cookies by visiting the site's main page.
+    private static let knownRefreshURLs: [String: String] = [
+        "xiaohongshu": "https://www.xiaohongshu.com",
+        "wechat": "https://wx.qq.com",
+        "twitter": "https://x.com/home",
+        "bilibili": "https://www.bilibili.com",
+        "zhihu": "https://www.zhihu.com",
+        "weibo": "https://weibo.com",
+        "github": "https://github.com",
+        "reddit": "https://www.reddit.com",
+    ]
+
     /// Known login URLs for popular sites.
     private static let knownLoginURLs: [String: String] = [
         "xiaohongshu": "https://www.xiaohongshu.com/login",
@@ -347,6 +362,7 @@ public final class WebAgentToolProvider {
     /// Clear cookies for a site (logout).
     private func handleLogout(site: String) async -> String {
         // Find domain for the site
+        cookieRefresh.untrack(site: site)
         if let entry = Self.knownAuthDomains.first(where: { $0.site == site }) {
             await manager.clearCookies(for: entry.domain)
             return "Cleared cookies for \(site) (\(entry.domain)). You are now logged out."
@@ -363,9 +379,14 @@ public final class WebAgentToolProvider {
             let loggedIn = status["loggedIn"] as? Bool ?? false
             if loggedIn {
                 let count = status["cookieCount"] as? Int ?? 0
+                // Track for cookie refresh
+                if let refreshURL = Self.knownRefreshURLs[site] {
+                    cookieRefresh.track(.init(site: site, domain: entry.domain, refreshURL: refreshURL, requiredCookies: entry.requiredCookies))
+                }
                 return "✓ Logged in to \(site) (\(entry.domain)) — \(count) cookies"
             } else {
                 let reason = status["reason"] as? String ?? "unknown"
+                cookieRefresh.untrack(site: site)
                 return "✗ Not logged in to \(site) (\(entry.domain)) — \(reason)"
             }
         }
@@ -383,9 +404,15 @@ public final class WebAgentToolProvider {
             if loggedIn {
                 let count = result["cookieCount"] as? Int ?? 0
                 lines.append("  ✓ \(site) (\(domain)) — \(count) cookies")
+                // Auto-track for cookie refresh
+                if let refreshURL = Self.knownRefreshURLs[site] {
+                    let entry = Self.knownAuthDomains.first(where: { $0.site == site })
+                    cookieRefresh.track(.init(site: site, domain: domain, refreshURL: refreshURL, requiredCookies: entry?.requiredCookies))
+                }
             } else {
                 let reason = result["reason"] as? String ?? ""
                 lines.append("  ✗ \(site) (\(domain)) — \(reason)")
+                cookieRefresh.untrack(site: site)
             }
         }
         lines.append("")
