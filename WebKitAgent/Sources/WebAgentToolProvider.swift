@@ -1,8 +1,8 @@
 import Foundation
 import CopilotSDK
 
-/// Provides a single CopilotSDK tool (`web_agent`) with sub-commands for browser automation.
-/// The skill system prompt should describe available sub-commands.
+/// Provides browser automation tools as separate CopilotSDK tools:
+/// web_navigate, web_snapshot, web_click, web_type, web_download, web_upload, web_evaluate, web_screenshot, web_site
 @MainActor
 public final class WebAgentToolProvider {
 
@@ -17,174 +17,280 @@ public final class WebAgentToolProvider {
         registry.loadBundledAdapters()
     }
 
-    // MARK: - Skill prompt describing sub-commands
+    // MARK: - Skill prompt describing web tools
 
-    /// System prompt snippet describing all web_agent sub-commands.
-    /// Append this to the agent's system prompt so the LLM knows how to use the tool.
+    /// System prompt snippet describing all web tools.
+    /// Append this to the agent's system prompt so the LLM knows how to use the tools.
     public static let skillPrompt = """
-    You have a `web_agent` tool for browser automation. Use the `command` parameter to specify the action.
+    You have browser automation tools:
 
-    Sub-commands:
-    - `navigate` — Go to a URL. Params: `url` (required). Waits for page load.
-    - `snapshot` — Scan page for interactive elements. Returns refs like r0, r1, r2... Always snapshot after navigating or clicking to get fresh refs.
-    - `click` — Click an element. Params: `ref` (required, e.g. "r5").
-    - `type` — Type into an input/textarea. Params: `ref` (required), `text` (required), `clear` (optional, default true).
-    - `download` — Download a file. Params: `ref` (element with href) OR `url` (direct URL), `filename` (optional override).
-    - `upload` — Upload file to <input type="file">. Params: `ref` (required), `filePath` (required).
-    - `site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter name).
+    - `web_navigate` — Go to a URL. Params: `url` (required). Waits for page load.
+    - `web_snapshot` — Scan page for interactive elements. Returns refs like r0, r1, r2... Always snapshot after navigating or clicking to get fresh refs.
+    - `web_click` — Click an element. Params: `ref` (required, e.g. "r5").
+    - `web_type` — Type into an input/textarea. Params: `ref` (required), `text` (required), `clear` (optional, default true).
+    - `web_download` — Download a file. Params: `ref` (element with href) OR `url` (direct URL), `filename` (optional override).
+    - `web_upload` — Upload file to <input type="file">. Params: `ref` (required), `filePath` (required).
+    - `web_site` — Run a site-specific adapter. Params: `site` (site name), `action` (adapter action).
       Special actions available for all sites:
         - `action=list` — List all available adapters
         - `action=sessions` — Check login status for all known sites
         - `action=login` — Navigate to the site's login page (user logs in manually in browser tab)
         - `action=logout` — Clear cookies / log out from a site
         - `action=auth_check` — Check if user is currently logged in to a site
-    - `evaluate` — Run JavaScript on the current page. Params: `script` (required). Returns the result.
-    - `screenshot` — Take a screenshot of the current page. Returns base64 JPEG.
+    - `web_evaluate` — Run JavaScript on the current page. Params: `script` (required). Returns the result.
+    - `web_screenshot` — Take a screenshot of the current page. Returns base64 JPEG.
 
-    Workflow: navigate → snapshot → read refs → click/type/download as needed → snapshot again after page changes.
-    For known sites, prefer `site` command over manual navigation — it's faster and deterministic.
+    Workflow: web_navigate → web_snapshot → read refs → web_click/web_type/web_download as needed → web_snapshot again after page changes.
+    For known sites, prefer `web_site` over manual navigation — it's faster and deterministic.
 
-    Auth flow: If a site adapter says "Not logged in", run `site action=login site=<name>` to open the login page.
-    The user logs in manually in the browser tab. Then run `site action=auth_check site=<name>` to verify.
+    Auth flow: If a site adapter says "Not logged in", run `web_site site=<name> action=login` to open the login page.
+    The user logs in manually in the browser tab. Then run `web_site site=<name> action=auth_check` to verify.
     Cookies persist across app launches, so the user only needs to log in once per site.
     """
 
-    // MARK: - Single Tool
+    // MARK: - Tools
 
     public var tools: [ToolDefinition] {
-        [webAgentTool]
+        [navigateTool, snapshotTool, clickTool, typeTool, downloadTool, uploadTool,
+         siteTool, evaluateTool, screenshotTool]
     }
 
-    private var webAgentTool: ToolDefinition {
+    private var navigateTool: ToolDefinition {
         ToolDefinition(
-            name: "web_agent",
-            description: "Browser automation tool. Use 'command' to specify action: navigate, snapshot, click, type, download, upload. See skill prompt for details.",
+            name: "web_navigate",
+            description: "Navigate to a URL in the browser. Waits for page load.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "command": .object([
-                        "type": .string("string"),
-                        "enum": .array([
-                            .string("navigate"), .string("snapshot"), .string("click"),
-                            .string("type"), .string("download"), .string("upload"),
-                            .string("site"), .string("evaluate"), .string("screenshot")
-                        ]),
-                        "description": .string("The sub-command to execute")
-                    ]),
                     "url": .object([
                         "type": .string("string"),
-                        "description": .string("URL for navigate or download")
-                    ]),
+                        "description": .string("The URL to navigate to")
+                    ])
+                ]),
+                "required": .array([.string("url")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
+            guard case .object(let dict) = args,
+                  case .string(let url) = dict["url"] else {
+                return "Error: 'url' required"
+            }
+            return try await self.manager.navigate(to: url)
+        }
+    }
+
+    private var snapshotTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_snapshot",
+            description: "Scan the current page for interactive elements. Returns labeled refs (r0, r1, ...) for click/type/download.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ]),
+            skipPermission: true
+        ) { [weak self] _ in
+            guard let self else { return "Error: WebAgent not available" }
+            return try await self.manager.snapshot()
+        }
+    }
+
+    private var clickTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_click",
+            description: "Click an element on the page by its ref from web_snapshot.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "ref": .object([
+                        "type": .string("string"),
+                        "description": .string("Element ref from snapshot, e.g. 'r5'")
+                    ])
+                ]),
+                "required": .array([.string("ref")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
+            guard case .object(let dict) = args,
+                  case .string(let ref) = dict["ref"] else {
+                return "Error: 'ref' required"
+            }
+            return try await self.manager.click(ref: ref)
+        }
+    }
+
+    private var typeTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_type",
+            description: "Type text into an input/textarea element by its ref from web_snapshot.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
                     "ref": .object([
                         "type": .string("string"),
                         "description": .string("Element ref from snapshot, e.g. 'r5'")
                     ]),
                     "text": .object([
                         "type": .string("string"),
-                        "description": .string("Text to type (for type command)")
+                        "description": .string("Text to type")
                     ]),
                     "clear": .object([
                         "type": .string("boolean"),
                         "description": .string("Clear existing text before typing. Default true.")
-                    ]),
-                    "filename": .object([
-                        "type": .string("string"),
-                        "description": .string("Override filename for download")
-                    ]),
-                    "filePath": .object([
-                        "type": .string("string"),
-                        "description": .string("File path for upload")
-                    ]),
-                    "site": .object([
-                        "type": .string("string"),
-                        "description": .string("Site name for site command (e.g. hackernews)")
-                    ]),
-                    "action": .object([
-                        "type": .string("string"),
-                        "description": .string("Action name for site command (e.g. top, list)")
-                    ]),
-                    "script": .object([
-                        "type": .string("string"),
-                        "description": .string("JavaScript code to evaluate (for evaluate command)")
                     ])
                 ]),
-                "required": .array([.string("command")])
+                "required": .array([.string("ref"), .string("text")])
             ]),
             skipPermission: true
         ) { [weak self] args in
             guard let self else { return "Error: WebAgent not available" }
             guard case .object(let dict) = args,
-                  case .string(let command) = dict["command"] else {
-                return "Error: 'command' parameter required"
+                  case .string(let ref) = dict["ref"],
+                  case .string(let text) = dict["text"] else {
+                return "Error: 'ref' and 'text' required"
             }
-            return try await self.dispatch(command: command, args: dict)
+            var clear = true
+            if case .bool(let c) = dict["clear"] { clear = c }
+            return try await self.manager.type(ref: ref, text: text, clear: clear)
         }
     }
 
-    // MARK: - Dispatch
-
-    private func dispatch(command: String, args: [String: JSONValue]) async throws -> String {
-        switch command {
-        case "navigate":
-            guard case .string(let url) = args["url"] else {
-                return "Error: 'url' required for navigate"
-            }
-            return try await manager.navigate(to: url)
-
-        case "snapshot":
-            return try await manager.snapshot()
-
-        case "click":
-            guard case .string(let ref) = args["ref"] else {
-                return "Error: 'ref' required for click"
-            }
-            return try await manager.click(ref: ref)
-
-        case "type":
-            guard case .string(let ref) = args["ref"],
-                  case .string(let text) = args["text"] else {
-                return "Error: 'ref' and 'text' required for type"
-            }
-            var clear = true
-            if case .bool(let c) = args["clear"] { clear = c }
-            return try await manager.type(ref: ref, text: text, clear: clear)
-
-        case "download":
+    private var downloadTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_download",
+            description: "Download a file from a page element (by ref) or direct URL.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "ref": .object([
+                        "type": .string("string"),
+                        "description": .string("Element ref with href/src to download from")
+                    ]),
+                    "url": .object([
+                        "type": .string("string"),
+                        "description": .string("Direct URL to download")
+                    ]),
+                    "filename": .object([
+                        "type": .string("string"),
+                        "description": .string("Override output filename")
+                    ])
+                ])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
             var ref: String?
             var url: String?
             var filename: String?
-            if case .string(let r) = args["ref"] { ref = r }
-            if case .string(let u) = args["url"] { url = u }
-            if case .string(let f) = args["filename"] { filename = f }
+            if case .object(let dict) = args {
+                if case .string(let r) = dict["ref"] { ref = r }
+                if case .string(let u) = dict["url"] { url = u }
+                if case .string(let f) = dict["filename"] { filename = f }
+            }
             if ref == nil && url == nil {
-                return "Error: 'ref' or 'url' required for download"
+                return "Error: 'ref' or 'url' required"
             }
-            return try await manager.download(ref: ref, url: url, filename: filename)
+            return try await self.manager.download(ref: ref, url: url, filename: filename)
+        }
+    }
 
-        case "upload":
-            guard case .string(let ref) = args["ref"],
-                  case .string(let filePath) = args["filePath"] else {
-                return "Error: 'ref' and 'filePath' required for upload"
+    private var uploadTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_upload",
+            description: "Upload a file to a <input type='file'> element by its ref.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "ref": .object([
+                        "type": .string("string"),
+                        "description": .string("Element ref for the file input")
+                    ]),
+                    "filePath": .object([
+                        "type": .string("string"),
+                        "description": .string("Path to the file to upload")
+                    ])
+                ]),
+                "required": .array([.string("ref"), .string("filePath")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
+            guard case .object(let dict) = args,
+                  case .string(let ref) = dict["ref"],
+                  case .string(let filePath) = dict["filePath"] else {
+                return "Error: 'ref' and 'filePath' required"
             }
-            return try await manager.upload(ref: ref, filePath: filePath)
+            return try await self.manager.upload(ref: ref, filePath: filePath)
+        }
+    }
 
-        case "site":
-            return try await dispatchSite(args: args)
+    private var siteTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_site",
+            description: "Run a site-specific adapter action. Use action=list to see available adapters, action=sessions to check login status.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "site": .object([
+                        "type": .string("string"),
+                        "description": .string("Site name (e.g. xiaohongshu, twitter)")
+                    ]),
+                    "action": .object([
+                        "type": .string("string"),
+                        "description": .string("Action name (e.g. list, sessions, login, logout, auth_check, or adapter name)")
+                    ])
+                ])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
+            var dict: [String: JSONValue] = [:]
+            if case .object(let d) = args { dict = d }
+            return try await self.dispatchSite(args: dict)
+        }
+    }
 
-        case "evaluate":
-            guard case .string(let script) = args["script"] else {
-                return "Error: 'script' parameter required for evaluate"
+    private var evaluateTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_evaluate",
+            description: "Run JavaScript on the current page and return the result.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "script": .object([
+                        "type": .string("string"),
+                        "description": .string("JavaScript code to evaluate")
+                    ])
+                ]),
+                "required": .array([.string("script")])
+            ]),
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: WebAgent not available" }
+            guard case .object(let dict) = args,
+                  case .string(let script) = dict["script"] else {
+                return "Error: 'script' required"
             }
-            return try await manager.evaluateJSPublic(script)
+            return try await self.manager.evaluateJSPublic(script)
+        }
+    }
 
-        case "screenshot":
-            if let base64 = await manager.screenshot() {
+    private var screenshotTool: ToolDefinition {
+        ToolDefinition(
+            name: "web_screenshot",
+            description: "Take a screenshot of the current page. Returns base64 JPEG.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ]),
+            skipPermission: true
+        ) { [weak self] _ in
+            guard let self else { return "Error: WebAgent not available" }
+            if let base64 = await self.manager.screenshot() {
                 return "data:image/jpeg;base64,\(base64)"
             }
             return "Error: screenshot failed"
-
-        default:
-            return "Error: unknown command '\(command)'. Use: navigate, snapshot, click, type, download, upload, site"
         }
     }
 
@@ -277,7 +383,7 @@ public final class WebAgentToolProvider {
                 Not logged in to \(adapter.site) (\(domain)). \(reason)
                 
                 To log in:
-                1. Run: web_agent command=site site=\(adapter.site) action=login
+                1. Run: web_site site=\(adapter.site) action=login
                 2. Log in manually in the browser tab
                 3. Run this command again
                 
@@ -346,7 +452,7 @@ public final class WebAgentToolProvider {
     /// Navigate to a site's login page.
     private func handleLogin(site: String) async throws -> String {
         guard let loginURL = Self.knownLoginURLs[site] else {
-            return "Error: no known login URL for '\(site)'. Navigate manually using: web_agent command=navigate url=<login_url>"
+            return "Error: no known login URL for '\(site)'. Navigate manually using: web_navigate url=<login_url>"
         }
         let result = try await manager.navigate(to: loginURL)
         return """
@@ -354,7 +460,7 @@ public final class WebAgentToolProvider {
         \(result)
         
         The user can now log in manually in the browser tab.
-        After login, verify with: web_agent command=site site=\(site) action=auth_check
+        After login, verify with: web_site site=\(site) action=auth_check
         """
     }
 
@@ -383,7 +489,7 @@ public final class WebAgentToolProvider {
                 return "✗ Not logged in to \(site) (\(entry.domain)) — \(reason)"
             }
         }
-        return "No auth info configured for '\(site)'. Try: web_agent command=site site=\(site) action=login"
+        return "No auth info configured for '\(site)'. Try: web_site site=\(site) action=login"
     }
 
     /// Check login status for all known sites.
@@ -403,8 +509,8 @@ public final class WebAgentToolProvider {
             }
         }
         lines.append("")
-        lines.append("To log in: web_agent command=site site=<name> action=login")
-        lines.append("To verify: web_agent command=site site=<name> action=auth_check")
+        lines.append("To log in: web_site site=<name> action=login")
+        lines.append("To verify: web_site site=<name> action=auth_check")
         return lines.joined(separator: "\n")
     }
 
