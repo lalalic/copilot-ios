@@ -52,10 +52,11 @@ public struct MessageBubble: View {
                     .frame(width: 28, height: 28)
                     .background(Circle().fill(Color.purple.opacity(0.15)))
             case .system:
-                Image(systemName: "info.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.orange)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
+                    .background(Circle().fill(platformGray6))
             default:
                 EmptyView()
             }
@@ -109,7 +110,10 @@ public struct MessageBubble: View {
     // MARK: - Bubble Styles
 
     private func textBubble(_ text: String) -> some View {
-        Text(text)
+        let textColor: Color = message.role == .system ? .secondary : (message.role == .user ? .white : .primary)
+        return Text(text)
+            .font(message.role == .system ? .caption : .body)
+            .foregroundStyle(textColor)
             .textSelection(.enabled)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -118,7 +122,10 @@ public struct MessageBubble: View {
     }
 
     private func markdownBubble(_ text: String) -> some View {
-        MarkdownView(text)
+        let textColor: Color = message.role == .system ? .secondary : .primary
+        return MarkdownView(text)
+            .font(message.role == .system ? .caption : .body)
+            .foregroundStyle(textColor)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(bubbleBackground)
@@ -146,7 +153,7 @@ public struct MessageBubble: View {
         case .assistant:
             return platformGray6
         case .system:
-            return Color.orange.opacity(0.15)
+            return platformGray6.opacity(0.7)
         case .tool:
             return platformGray6
         }
