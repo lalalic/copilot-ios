@@ -629,6 +629,7 @@ public final class ChatViewModel: ObservableObject {
                 try await session?.steer(prompt: promptText)
             } catch {
                 appendSystemMessage("Steer failed: \(error.localizedDescription)")
+                chatState = .idle
             }
 
         case .idle:
@@ -771,6 +772,12 @@ public final class ChatViewModel: ObservableObject {
         }
         stateObserver?.cancel()
 
+        // Safety: if still stuck in .working after timeout, force reset
+        if case .working = chatState {
+            appendSystemMessage("Response timed out after 180s. Try again or start a new chat.")
+            chatState = .idle
+        }
+
         // Collect new assistant messages
         let newMessages = messages.suffix(from: beforeCount + 1)
             .filter { $0.role == .assistant }
@@ -841,6 +848,7 @@ public final class ChatViewModel: ObservableObject {
                     try await session?.steer(prompt: effectiveText)
                 } catch {
                     appendSystemMessage("Steer failed: \(error.localizedDescription)")
+                    chatState = .idle
                 }
             }
         }
