@@ -159,6 +159,86 @@ public final class AdapterRegistry {
 
         // Convertio adapter (file conversion)
         registerConvertioAdapters()
+
+        // GitHub adapters (browser-based)
+        registerGitHubAdapters()
+    }
+
+    // MARK: - GitHub Adapters
+
+    private func registerGitHubAdapters() {
+        // github/trending — get trending repos
+        let ghTrending = """
+        site: github
+        name: trending
+        description: Get trending GitHub repositories
+        auth: none
+        requiresBrowser: true
+        preNavigate: https://github.com/trending
+        waitSeconds: 3
+        args:
+          language:
+            type: string
+            default:
+            description: Filter by language (e.g. swift, python, javascript)
+          since:
+            type: string
+            default: daily
+            description: Time range (daily, weekly, monthly)
+        script: |
+          (() => {
+            const rows = document.querySelectorAll('article.Box-row');
+            const results = [];
+            rows.forEach((row, i) => {
+              const nameEl = row.querySelector('h2 a');
+              const descEl = row.querySelector('p');
+              const langEl = row.querySelector('[itemprop="programmingLanguage"]');
+              const starsEl = row.querySelector('a[href$="/stargazers"]');
+              const forksEl = row.querySelector('a[href$="/forks"]');
+              const todayEl = row.querySelector('.float-sm-right, span.d-inline-block.float-sm-right');
+              results.push({
+                rank: i + 1,
+                name: nameEl ? nameEl.textContent.trim().replace(/\\s+/g, '') : '',
+                description: descEl ? descEl.textContent.trim() : '',
+                language: langEl ? langEl.textContent.trim() : '',
+                stars: starsEl ? starsEl.textContent.trim() : '',
+                forks: forksEl ? forksEl.textContent.trim() : '',
+                todayStars: todayEl ? todayEl.textContent.trim() : '',
+                url: nameEl ? 'https://github.com' + nameEl.getAttribute('href') : ''
+              });
+            });
+            return JSON.stringify(results);
+          })()
+        """
+
+        // github/search — search repos
+        let ghSearch = """
+        site: github
+        name: search
+        description: Search GitHub repositories
+        auth: none
+        requiresBrowser: true
+        args:
+          query:
+            type: string
+            description: Search query
+          sort:
+            type: string
+            default: stars
+            description: Sort by (stars, forks, updated)
+        script: |
+          (() => {
+            const query = __adapterArgs.query;
+            const sort = __adapterArgs.sort || 'stars';
+            if (!query) return JSON.stringify([{error: "query parameter is required"}]);
+            window.location.href = 'https://github.com/search?q=' + encodeURIComponent(query) + '&type=repositories&s=' + sort + '&o=desc';
+            return JSON.stringify([{status: "navigating", message: "Searching GitHub for: " + query}]);
+          })()
+        """
+
+        for yaml in [ghTrending, ghSearch] {
+            try? register(yaml: yaml)
+        }
     }
 
     // MARK: - Convertio Adapters

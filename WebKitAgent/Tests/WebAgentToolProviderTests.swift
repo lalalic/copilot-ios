@@ -133,8 +133,8 @@ final class WebAgentToolProviderTests: XCTestCase {
     }
 
     func testBundledAdaptersLoaded() {
-        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio = 12
-        XCTAssertEqual(provider.registry.adapterCount, 12)
+        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio + 2 GitHub = 14
+        XCTAssertEqual(provider.registry.adapterCount, 14)
     }
 
     // MARK: - Auth Actions
