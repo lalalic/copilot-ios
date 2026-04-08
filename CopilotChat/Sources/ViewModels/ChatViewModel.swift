@@ -1619,9 +1619,11 @@ public final class ChatViewModel: ObservableObject {
         }
         let model: String
         if case .string(let m) = dict["model"] { model = m } else { model = "" }
+        let userId: String
+        if case .agent(let config) = mode { userId = config.userId ?? "default" } else { userId = "default" }
 
         nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
-        return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model)
+        return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model, userId: userId)
     }
 }
 

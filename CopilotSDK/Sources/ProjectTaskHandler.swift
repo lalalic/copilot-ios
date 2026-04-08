@@ -60,11 +60,10 @@ public final class ProjectTaskHandler {
     /// Create a project: repo + template files + issue.
     /// Called as a tool handler when the agent calls start_coding_task.
     /// Returns a JSON string with {repo, issueNumber} for the relay to parse and run activation.
-    public func createProject(appName: String, taskDescription: String, model: String = "") async -> String {
+    public func createProject(appName: String, taskDescription: String, model: String = "", userId: String = "default") async -> String {
         let slug = Self.slugify(appName)
-        let id = Self.shortId()
-        let repoName = "\(slug)-\(id)"
-        let bundleId = "com.neos.\(slug.replacingOccurrences(of: "-", with: ""))\(id)"
+        let repoName = "\(slug)-\(userId)"
+        let bundleId = "com.neos.\(slug.replacingOccurrences(of: "-", with: ""))\(userId)"
 
         NSLog("[ProjectTaskHandler] createProject: %@ → %@", appName, repoName)
 
@@ -85,6 +84,9 @@ public final class ProjectTaskHandler {
                 ] as [String: Any]
             )
             guard createRes.status == 201 else {
+                if createRes.status == 422 {
+                    return "Error: A project named '\(appName)' already exists for this device (repo: \(repoName)). Please choose a different name."
+                }
                 return "Error: Repo creation failed (HTTP \(createRes.status)): \(createRes.text.prefix(200))"
             }
 
