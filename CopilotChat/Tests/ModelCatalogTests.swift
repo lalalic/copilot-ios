@@ -15,8 +15,7 @@ struct ModelInfoTests {
             name: "Test Model",
             family: "TestFamily",
             tier: .balanced,
-            inputMultiplier: 0.20,
-            outputMultiplier: 0.80,
+            multiplier: 1,
             description: "Test description"
         )
         
@@ -24,38 +23,37 @@ struct ModelInfoTests {
         #expect(model.name == "Test Model")
         #expect(model.family == "TestFamily")
         #expect(model.tier == .balanced)
-        #expect(model.inputMultiplier == 0.20)
-        #expect(model.outputMultiplier == 0.80)
+        #expect(model.multiplier == 1)
         #expect(model.description == "Test description")
     }
     
-    @Test("ModelInfo costPer100K calculation")
-    func costPer100KCalculation() {
-        // Using known multipliers from GPT-4.1: input=0.20, output=0.80
-        // costPer100K = (50_000 * 0.20 + 50_000 * 0.80) * baseUnitCost
-        // = 50_000 * (0.20 + 0.80) * baseUnitCost = 50_000 * 1.0 * 0.00001 = 0.50
-        let model = ModelInfo(
-            id: "test",
-            name: "Test",
-            family: "Test",
-            tier: .balanced,
-            inputMultiplier: 0.20,
-            outputMultiplier: 0.80,
-            description: "Test"
-        )
+    @Test("ModelInfo multiplierLabel formatting")
+    func multiplierLabelFormatting() {
+        let free = ModelInfo(id: "t1", name: "T", family: "F", tier: .fast,
+                             multiplier: 0, description: "D")
+        #expect(free.multiplierLabel == "Free")
         
-        let expected = (50_000 * 0.20 + 50_000 * 0.80) * CostCalculator.baseUnitCost
-        #expect(abs(model.costPer100K - expected) < 0.0001)
+        let fractional = ModelInfo(id: "t2", name: "T", family: "F", tier: .fast,
+                                   multiplier: 0.33, description: "D")
+        #expect(fractional.multiplierLabel == "0.33x")
+        
+        let standard = ModelInfo(id: "t3", name: "T", family: "F", tier: .powerful,
+                                 multiplier: 1, description: "D")
+        #expect(standard.multiplierLabel == "1x")
+        
+        let premium = ModelInfo(id: "t4", name: "T", family: "F", tier: .powerful,
+                                multiplier: 3, description: "D")
+        #expect(premium.multiplierLabel == "3x")
     }
     
     @Test("ModelInfo is Hashable")
     func modelInfoHashable() {
         let model1 = ModelInfo(id: "m1", name: "M1", family: "F", tier: .fast,
-                               inputMultiplier: 0.1, outputMultiplier: 0.1, description: "D")
+                               multiplier: 0, description: "D")
         let model2 = ModelInfo(id: "m1", name: "M1", family: "F", tier: .fast,
-                               inputMultiplier: 0.1, outputMultiplier: 0.1, description: "D")
+                               multiplier: 0, description: "D")
         let model3 = ModelInfo(id: "m2", name: "M2", family: "F", tier: .fast,
-                               inputMultiplier: 0.1, outputMultiplier: 0.1, description: "D")
+                               multiplier: 0, description: "D")
         
         #expect(model1 == model2)
         #expect(model1 != model3)
@@ -155,22 +153,21 @@ struct ModelCatalogTests {
             #expect(!model.name.isEmpty)
             #expect(!model.family.isEmpty)
             #expect(!model.description.isEmpty)
-            #expect(model.inputMultiplier > 0)
-            #expect(model.outputMultiplier > 0)
+            #expect(model.multiplier >= 0)
         }
     }
     
-    @Test("Fast tier models are cheapest")
+    @Test("Fast tier models have lowest multipliers")
     func fastTierCheapest() {
         let fastModels = ModelCatalog.allModels.filter { $0.tier == .fast }
         let powerfulModels = ModelCatalog.allModels.filter { $0.tier == .powerful }
         
-        guard let cheapestFast = fastModels.min(by: { $0.costPer100K < $1.costPer100K }),
-              let cheapestPowerful = powerfulModels.min(by: { $0.costPer100K < $1.costPer100K }) else {
+        guard let maxFast = fastModels.max(by: { $0.multiplier < $1.multiplier }),
+              let minPowerful = powerfulModels.min(by: { $0.multiplier < $1.multiplier }) else {
             Issue.record("Missing models in tiers")
             return
         }
         
-        #expect(cheapestFast.costPer100K < cheapestPowerful.costPer100K)
+        #expect(maxFast.multiplier <= minPowerful.multiplier)
     }
 }

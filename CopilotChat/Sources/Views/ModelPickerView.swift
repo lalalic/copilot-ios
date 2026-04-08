@@ -4,37 +4,33 @@ import CopilotSDK
 // MARK: - Model Info
 
 /// A selectable LLM model with pricing information.
+/// Multiplier values match `relay/lib/models.json` (billing.multiplier from GitHub Copilot API).
 public struct ModelInfo: Identifiable, Hashable, Sendable {
     public let id: String          // e.g., "gpt-4.1"
     public let name: String        // Display name
     public let family: String      // "OpenAI", "Anthropic", "xAI", "DeepSeek"
     public let tier: ModelTier
-    public let inputMultiplier: Double
-    public let outputMultiplier: Double
+    public let multiplier: Double  // Premium request multiplier (0 = free/included)
     public let description: String
     
     public init(id: String, name: String, family: String, tier: ModelTier,
-                inputMultiplier: Double, outputMultiplier: Double, description: String) {
+                multiplier: Double, description: String) {
         self.id = id
         self.name = name
         self.family = family
         self.tier = tier
-        self.inputMultiplier = inputMultiplier
-        self.outputMultiplier = outputMultiplier
+        self.multiplier = multiplier
         self.description = description
     }
     
-    /// Combined multiplier (weighted average: 30% input, 70% output).
-    public var multiplier: Double {
-        inputMultiplier * 0.3 + outputMultiplier * 0.7
-    }
-    
-    /// Display string for the multiplier, e.g. "0.6x" or "1x".
+    /// Display string for the multiplier, e.g. "1x", "3x", or "Free".
     public var multiplierLabel: String {
-        if multiplier >= 1.0 {
-            return String(format: "%.1fx", multiplier)
-        } else {
+        if multiplier <= 0 {
+            return "Free"
+        } else if multiplier < 1.0 {
             return String(format: "%.2fx", multiplier)
+        } else {
+            return String(format: "%.0fx", multiplier)
         }
     }
 }
@@ -49,52 +45,40 @@ public enum ModelTier: String, CaseIterable, Hashable, Sendable {
 
 // MARK: - Model Catalog (Static)
 
-/// Hardcoded model catalog. Can be extended with dynamic fetch later.
+/// Hardcoded model catalog. Multipliers from relay/lib/models.json (GitHub Copilot billing).
 public enum ModelCatalog {
     public static let allModels: [ModelInfo] = [
-        // Fast & Cheap
+        // Fast & Cheap (multiplier 0 = free/included)
         ModelInfo(id: "gpt-4.1-nano", name: "GPT-4.1 Nano", family: "OpenAI", tier: .fast,
-                  inputMultiplier: 0.01, outputMultiplier: 0.04,
-                  description: "Fastest, cheapest. Good for simple tasks."),
+                  multiplier: 0, description: "Fastest, cheapest. Good for simple tasks."),
         ModelInfo(id: "gpt-4o-mini", name: "GPT-4o Mini", family: "OpenAI", tier: .fast,
-                  inputMultiplier: 0.015, outputMultiplier: 0.06,
-                  description: "Fast multimodal model, great for quick tasks."),
+                  multiplier: 0, description: "Fast multimodal model, great for quick tasks."),
         ModelInfo(id: "gpt-4.1-mini", name: "GPT-4.1 Mini", family: "OpenAI", tier: .fast,
-                  inputMultiplier: 0.04, outputMultiplier: 0.16,
-                  description: "Cost-effective for coding and analysis."),
+                  multiplier: 0, description: "Cost-effective for coding and analysis."),
         
         // Balanced
         ModelInfo(id: "gpt-4.1", name: "GPT-4.1", family: "OpenAI", tier: .balanced,
-                  inputMultiplier: 0.20, outputMultiplier: 0.80,
-                  description: "Best all-around model. Great for coding."),
+                  multiplier: 0, description: "Best all-around model. Great for coding."),
         ModelInfo(id: "gpt-4o", name: "GPT-4o", family: "OpenAI", tier: .balanced,
-                  inputMultiplier: 0.25, outputMultiplier: 1.00,
-                  description: "Strong multimodal with vision capabilities."),
+                  multiplier: 0, description: "Strong multimodal with vision capabilities."),
         ModelInfo(id: "DeepSeek-R1", name: "DeepSeek R1", family: "DeepSeek", tier: .balanced,
-                  inputMultiplier: 0.135, outputMultiplier: 0.54,
-                  description: "Open-source reasoning model."),
+                  multiplier: 0.33, description: "Open-source reasoning model."),
         
         // Powerful
         ModelInfo(id: "Claude-Sonnet-4", name: "Claude Sonnet 4", family: "Anthropic", tier: .powerful,
-                  inputMultiplier: 0.30, outputMultiplier: 1.50,
-                  description: "Excellent writing and analysis."),
+                  multiplier: 1, description: "Excellent writing and analysis."),
         ModelInfo(id: "Grok-3", name: "Grok 3", family: "xAI", tier: .powerful,
-                  inputMultiplier: 0.30, outputMultiplier: 1.50,
-                  description: "xAI's flagship model."),
+                  multiplier: 1, description: "xAI's flagship model."),
         ModelInfo(id: "Claude-Opus-4", name: "Claude Opus 4", family: "Anthropic", tier: .powerful,
-                  inputMultiplier: 1.50, outputMultiplier: 7.50,
-                  description: "Most capable Claude. Premium quality."),
+                  multiplier: 3, description: "Most capable Claude. Premium quality."),
         
         // Reasoning
         ModelInfo(id: "o4-mini", name: "o4-mini", family: "OpenAI", tier: .reasoning,
-                  inputMultiplier: 0.11, outputMultiplier: 0.44,
-                  description: "Fast reasoning with chain-of-thought."),
+                  multiplier: 0.33, description: "Fast reasoning with chain-of-thought."),
         ModelInfo(id: "o3-mini", name: "o3-mini", family: "OpenAI", tier: .reasoning,
-                  inputMultiplier: 0.11, outputMultiplier: 0.44,
-                  description: "Compact reasoning model."),
+                  multiplier: 0.33, description: "Compact reasoning model."),
         ModelInfo(id: "o3", name: "o3", family: "OpenAI", tier: .reasoning,
-                  inputMultiplier: 1.00, outputMultiplier: 4.00,
-                  description: "Most powerful reasoning. Deep analysis."),
+                  multiplier: 1, description: "Most powerful reasoning. Deep analysis."),
     ]
     
     /// Find a model by ID.
