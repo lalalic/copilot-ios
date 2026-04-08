@@ -166,8 +166,9 @@ public final class MCPServer {
                 break
             }
         }
-        // Auto-cancel after 30s to prevent CLOSE_WAIT buildup
-        queue.asyncAfter(deadline: .now() + 30) { [weak connection] in
+        // Auto-cancel after 180s to prevent CLOSE_WAIT buildup
+        // Must be long enough for sub-agent operations (which can take 30-60s)
+        queue.asyncAfter(deadline: .now() + 180) { [weak connection] in
             connection?.cancel()
         }
         connection.start(queue: queue)
