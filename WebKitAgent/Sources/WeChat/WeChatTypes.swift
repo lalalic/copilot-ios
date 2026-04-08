@@ -113,6 +113,7 @@ public enum WeChatBridgeEvent: Sendable {
     case message(WeChatMessage)
     case heartbeat
     case contacts(count: Int)
+    case contactsReady
     case error(String)
 
     /// Parse from a raw bridge event dictionary.
@@ -162,6 +163,9 @@ public enum WeChatBridgeEvent: Sendable {
         case "contacts":
             let count = data as? Int ?? 0
             return .contacts(count: count)
+
+        case "contacts-ready":
+            return .contactsReady
 
         default:
             return nil

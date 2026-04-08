@@ -110,12 +110,13 @@ public final class WeChatChannel: NSObject, ObservableObject {
     /// Send a message to a contact.
     /// - Parameters:
     ///   - to: Contact UserName, PYQuanPin, or "filehelper"
-    ///   - content: Message text
+    ///   - content: Message text (markdown is auto-converted to Unicode styling)
+    ///   - watermark: If true, adds invisible AI watermark to the message
     /// - Returns: Whether the message was sent successfully.
-    public func sendMessage(to: String, content: String) async -> Bool {
+    public func sendMessage(to: String, content: String, watermark: Bool = false) async -> Bool {
         guard state == .ready else { return false }
 
-        let script = WeChatBridge.sendScript(to: to, content: content)
+        let script = WeChatBridge.sendScript(to: to, content: content, watermark: watermark)
         do {
             let result = try await webView.evaluateJavaScript(script)
             if let str = result as? String,
@@ -501,6 +502,12 @@ public final class WeChatChannel: NSObject, ObservableObject {
 
         case .contacts(let count):
             _ = count // Contacts loaded, we'll fetch them separately
+
+        case .contactsReady:
+            // wechat-bro.js has built stable ID maps — contacts are fully ready
+            Task {
+                _ = await getContacts()
+            }
 
         case .error(let msg):
             _ = msg // TODO: Log or surface errors
