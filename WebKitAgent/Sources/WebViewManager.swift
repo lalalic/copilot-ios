@@ -40,14 +40,7 @@ public final class WebViewManager: NSObject, ObservableObject {
     // MARK: - Init
 
     public override init() {
-        let config = WKWebViewConfiguration()
-        #if os(iOS)
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        #endif
-
-        // Enable downloads
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        let config = SharedWebKitEnvironment.shared.createConfiguration()
 
         self.webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         self.downloadsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

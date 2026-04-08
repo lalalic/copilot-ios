@@ -55,11 +55,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
     // MARK: - Init
 
     public override init() {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()  // Persistent cookies
-        #if os(iOS)
-        config.allowsInlineMediaPlayback = true
-        #endif
+        let config = SharedWebKitEnvironment.shared.createConfiguration()
 
         self.webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 1280, height: 900),
