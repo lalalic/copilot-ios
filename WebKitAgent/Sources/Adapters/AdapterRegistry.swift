@@ -162,6 +162,12 @@ public final class AdapterRegistry {
 
         // GitHub adapters (browser-based)
         registerGitHubAdapters()
+
+        // Reddit adapters (JSON API)
+        registerRedditAdapters()
+
+        // ProductHunt adapters (browser-based)
+        registerProductHuntAdapters()
     }
 
     // MARK: - GitHub Adapters
@@ -239,6 +245,135 @@ public final class AdapterRegistry {
         for yaml in [ghTrending, ghSearch] {
             try? register(yaml: yaml)
         }
+    }
+
+    // MARK: - Reddit Adapters
+
+    private func registerRedditAdapters() {
+        let redditHot = """
+        site: reddit
+        name: hot
+        description: Get hot posts from a subreddit or front page
+        auth: none
+        requiresBrowser: false
+        args:
+          subreddit:
+            type: string
+            default:
+            description: Subreddit name (without r/). Leave empty for front page
+          limit:
+            type: int
+            default: 20
+            description: Number of posts to return
+        pipeline:
+          - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}hot.json?limit=25&raw_json=1"
+          - map: { data: "${{ item.data.children }}" }
+          - slice: { key: "data", to: 25 }
+        """
+
+        let redditTop = """
+        site: reddit
+        name: top
+        description: Get top posts from a subreddit or front page
+        auth: none
+        requiresBrowser: false
+        args:
+          subreddit:
+            type: string
+            default:
+            description: Subreddit name (without r/)
+          time:
+            type: string
+            default: day
+            description: Time period (hour, day, week, month, year, all)
+          limit:
+            type: int
+            default: 20
+            description: Number of posts
+        pipeline:
+          - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}top.json?t=${{ args.time }}&limit=25&raw_json=1"
+          - map: { data: "${{ item.data.children }}" }
+          - slice: { key: "data", to: 25 }
+        """
+
+        let redditSearch = """
+        site: reddit
+        name: search
+        description: Search Reddit posts
+        auth: none
+        requiresBrowser: false
+        args:
+          query:
+            type: string
+            description: Search query
+          subreddit:
+            type: string
+            default:
+            description: Limit search to a subreddit
+          sort:
+            type: string
+            default: relevance
+            description: Sort by (relevance, hot, top, new, comments)
+          limit:
+            type: int
+            default: 20
+            description: Number of results
+        pipeline:
+          - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}search.json?q=${{ args.query }}&sort=${{ args.sort }}&limit=25&raw_json=1"
+          - map: { data: "${{ item.data.children }}" }
+          - slice: { key: "data", to: 25 }
+        """
+
+        for yaml in [redditHot, redditTop, redditSearch] {
+            try? register(yaml: yaml)
+        }
+    }
+
+    // MARK: - ProductHunt Adapters
+
+    private func registerProductHuntAdapters() {
+        let phToday = """
+        site: producthunt
+        name: today
+        description: Get today's top products from Product Hunt
+        auth: none
+        requiresBrowser: true
+        preNavigate: https://www.producthunt.com
+        waitSeconds: 5
+        args:
+          limit:
+            type: int
+            default: 20
+            description: Number of products to return
+        script: |
+          (() => {
+            const limit = parseInt(__adapterArgs.limit) || 20;
+            const items = document.querySelectorAll('[data-test="post-item"], [class*="styles_item"], div[class*="post"]');
+            const results = [];
+            items.forEach((item, i) => {
+              if (i >= limit) return;
+              const nameEl = item.querySelector('a[href*="/posts/"] strong, [data-test="post-name"], h3');
+              const taglineEl = item.querySelector('[data-test="post-tagline"], [class*="tagline"], p');
+              const votesEl = item.querySelector('[data-test="vote-button"] span, button[class*="vote"] span, [class*="voteCount"]');
+              const linkEl = item.querySelector('a[href*="/posts/"]');
+              const imgEl = item.querySelector('img');
+              results.push({
+                rank: i + 1,
+                name: nameEl ? nameEl.textContent.trim() : '',
+                tagline: taglineEl ? taglineEl.textContent.trim() : '',
+                votes: votesEl ? votesEl.textContent.trim() : '',
+                url: linkEl ? linkEl.href : '',
+                thumbnail: imgEl ? imgEl.src : ''
+              });
+            });
+            if (results.length === 0) {
+              return JSON.stringify([{info: "No products found. Page structure may have changed.", url: window.location.href}]);
+            }
+            return JSON.stringify(results);
+          })()
+        """
+
+        try? register(yaml: phToday)
     }
 
     // MARK: - Convertio Adapters

@@ -231,8 +231,8 @@ final class AdapterRegistryTests: XCTestCase {
 
     func testBundledAdaptersTotalCount() {
         registry.loadBundledAdapters()
-        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio + 2 GitHub = 14
-        XCTAssertEqual(registry.adapterCount, 14)
+        // 3 HN + 4 WeChat + 4 XHS + 1 Convertio + 2 GitHub + 3 Reddit + 1 ProductHunt = 18
+        XCTAssertEqual(registry.adapterCount, 18)
     }
 
     func testXhsAdaptersHaveCookieAuth() {
