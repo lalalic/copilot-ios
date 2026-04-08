@@ -42,6 +42,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
     private var qrCheckTimer: Timer?
     private var directQRTimer: Timer?
     private var qrRefreshTimer: Timer?
+    private var loginTimeoutTimer: Timer?
 
     private static let wechatURL = "https://wx.qq.com/"
     private static let pollInterval: TimeInterval = 0.5
@@ -49,6 +50,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
     private static let qrCheckInterval: TimeInterval = 1.0
     private static let directQRInterval: TimeInterval = 2.0
     private static let qrRefreshTimeout: TimeInterval = 4 * 60  // QR expires ~5min, refresh at 4
+    private static let loginTimeout: TimeInterval = 30  // Fallback if login hangs after scan
 
     // MARK: - Init
 
@@ -98,6 +100,8 @@ public final class WeChatChannel: NSObject, ObservableObject {
         stopDirectQR()
         qrRefreshTimer?.invalidate()
         qrRefreshTimer = nil
+        loginTimeoutTimer?.invalidate()
+        loginTimeoutTimer = nil
         webView.stopLoading()
         bridgeInjected = false
         qrCodeURL = nil
@@ -175,6 +179,19 @@ public final class WeChatChannel: NSObject, ObservableObject {
         print("[WeChatChannel] state: \(state.rawValue) → \(newState.rawValue)")
         state = newState
         onStateChange?(newState)
+
+        // Start login timeout when entering loggingIn state
+        loginTimeoutTimer?.invalidate()
+        loginTimeoutTimer = nil
+        if newState == .loggingIn {
+            loginTimeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.loginTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.state == .loggingIn else { return }
+                    print("[WeChatChannel] Login timed out after \(Self.loginTimeout)s — refreshing QR")
+                    await self.refreshQRCode()
+                }
+            }
+        }
     }
 
     private var bridgeRetryTimer: Timer?
@@ -397,7 +414,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
     }
 
     private func refreshQRCode() async {
-        guard state == .qrReady || state == .extractingQR else { return }
+        guard state == .qrReady || state == .extractingQR || state == .loggingIn else { return }
 
         // Try clicking the expired overlay first
         do {
