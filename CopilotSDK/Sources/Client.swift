@@ -209,7 +209,7 @@ public enum SystemMessageConfig: Sendable {
     case customize(sections: [String: SystemMessageSectionAction], content: String? = nil)
     /// Loop mode: instructs the agent to run in an infinite loop, never closing the turn.
     /// Uses the content as loop behavior instructions. The agent should use
-    /// `send_response` tool to communicate results and `vscode_askQuestions` to get next input.
+    /// `ask_questions` tool with `message` field to communicate results and questions to get next input.
     case loop(String)
 
     /// Wire format for session.create params
@@ -1129,8 +1129,13 @@ public final class CopilotSession: @unchecked Sendable {
         }
 
         guard let handler = toolHandlers[toolName] else {
-            NSLog("[CopilotSDK] No handler for tool '%@' — skipping", toolName)
-            sdkLog.warning("⚠️ No handler for tool '\(toolName)' — skipping (requestId: \(requestId))")
+            NSLog("[CopilotSDK] No handler for tool '%@' — responding with error", toolName)
+            sdkLog.warning("⚠️ No handler for tool '\(toolName)' — responding with error (requestId: \(requestId))")
+            _ = try? await connection.send(method: "session.tools.handlePendingToolCall", params: [
+                "sessionId": .string(sessionId),
+                "requestId": .string(requestId),
+                "result": .string("Tool '\(toolName)' not available."),
+            ])
             return
         }
 
@@ -1532,8 +1537,8 @@ public final class CopilotSession: @unchecked Sendable {
     /// the `onTurnEnd` callback is called. Return a resume prompt to continue
     /// the loop, or `nil` to stop.
     ///
-    /// The client controls the loop by providing `send_response` and `ask_questions`
-    /// tools via the session config. The SDK manages auto-resume on turn end.
+    /// The client controls the loop by providing `ask_questions` tool
+    /// via the session config. The SDK manages auto-resume on turn end.
     ///
     /// - Parameters:
     ///   - initialPrompt: The first prompt to start the loop
@@ -1676,9 +1681,9 @@ public struct AgentConfig: Sendable {
     /// When set, the agent loop instructions are auto-injected into `last_instructions`.
     /// Example: `["identity": .replace(content: "You are Piggy, a toy pig companion")]`
     public var sections: [String: SystemMessageSectionAction]?
-    /// Additional tools the agent can use (send_response and ask_questions are auto-injected).
+    /// Additional tools the agent can use (ask_questions is auto-injected).
     public var tools: [ToolDefinition]
-    /// Called when the agent uses send_response to deliver a result.
+    /// Called when the agent uses ask_questions with a message to deliver a result.
     public var onResponse: @Sendable (String) async -> Void
     /// Called when the agent uses ask_user to request input. Return the user's answer.
     public var onAskUser: @Sendable (String) async -> String
@@ -1730,7 +1735,7 @@ public struct AgentConfig: Sendable {
 }
 
 /// An autonomous agent that runs in an infinite loop, delivering responses
-/// via `send_response` tool and asking for user input via `ask_user` tool.
+/// via `ask_questions` tool's `message` field and asking for user input via questions.
 public final class CopilotAgent: @unchecked Sendable {
     public let session: CopilotSession
     private let config: AgentConfig
@@ -1780,42 +1785,18 @@ public final class CopilotAgent: @unchecked Sendable {
         var tools = config.tools
 
         let onResponse = config.onResponse
+        let onAskUser = config.onAskUser
+        let onAskQuestions = config.onAskQuestions
         tools.append(ToolDefinition(
-            name: "send_response",
-            description: "Send a response message to the user. Use this to deliver results instead of ending your turn.",
+            name: "ask_questions",
+            description: "Respond to the user and ask follow-up questions. Put your response in the message field and follow-up questions in the questions array.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "message": .object([
                         "type": .string("string"),
-                        "description": .string("The response message to send to the user"),
+                        "description": .string("Response message to show the user before the questions"),
                     ]),
-                ]),
-                "required": .array([.string("message")]),
-            ]),
-            skipPermission: true,
-            handler: { args in
-                let message: String
-                if case .object(let dict) = args, case .string(let msg) = dict["message"] {
-                    message = msg
-                } else if case .string(let msg) = args {
-                    message = msg
-                } else {
-                    message = String(describing: args)
-                }
-                await onResponse(message)
-                return "Response delivered to user. Now call ask_questions to wait for the user's next message. Do NOT call any other tools or send_response again."
-            }
-        ))
-
-        let onAskUser = config.onAskUser
-        let onAskQuestions = config.onAskQuestions
-        tools.append(ToolDefinition(
-            name: "ask_questions",
-            description: "Ask one or more structured questions with options and optional free-form input, then wait for the user's answers.",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
                     "questions": .object([
                         "type": .string("array"),
                         "items": .object([
@@ -1864,6 +1845,11 @@ public final class CopilotAgent: @unchecked Sendable {
             ]),
             skipPermission: true,
             handler: { args in
+                // Extract and deliver message to user if present
+                if case .object(let dict) = args, case .string(let message) = dict["message"], !message.isEmpty {
+                    await onResponse(message)
+                }
+
                 if let onAskQuestions {
                     let result = await onAskQuestions(args)
                     if let data = try? JSONEncoder().encode(result), let text = String(data: data, encoding: .utf8) {
@@ -1893,9 +1879,10 @@ public final class CopilotAgent: @unchecked Sendable {
     static func buildSessionConfig(config: AgentConfig) -> SessionConfig {
         let agentLoopSuffix = """
         IMPORTANT: You are an autonomous agent running in an infinite loop.
-        - Use the `send_response` tool to deliver your responses to the user. Do NOT just end your turn.
-        - Use the `ask_questions` tool when you need more information or when all tasks are done.
-        - Always use one of these tools before your turn ends.
+        - Use the `ask_questions` tool to respond and ask for next steps.
+        - Put your response in the `message` parameter.
+        - Put follow-up questions in the `questions` array.
+        - Always call `ask_questions` before your turn ends. Do NOT end your turn without calling it.
         """
 
         let systemMessage: SystemMessageConfig?
@@ -2074,8 +2061,8 @@ public final class CopilotClient: @unchecked Sendable {
 
     /// Create an autonomous agent that runs in an infinite loop.
     ///
-    /// The agent auto-injects `send_response` and `ask_user` tools and instructs
-    /// the model to use them. Call `agent.start(prompt:)` to begin execution.
+    /// The agent auto-injects `ask_questions` tool and instructs
+    /// the model to use it. Call `agent.start(prompt:)` to begin execution.
     ///
     /// ```swift
     /// let agent = try await client.createAgent(config: AgentConfig(

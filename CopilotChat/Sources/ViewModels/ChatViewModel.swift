@@ -12,7 +12,7 @@ import PDFKit
 public enum ChatMode: Sendable {
     /// Interactive back-and-forth session.
     case session(SessionConfig)
-    /// Autonomous agent with `send_response` and `ask_user` tools.
+    /// Autonomous agent with `ask_questions` tool (message + questions).
     case agent(AgentConfig)
 }
 
@@ -269,7 +269,7 @@ public final class ChatViewModel: ObservableObject {
 
         // Inject manage_todo_list and view tools
         var config = config
-        config.tools = (config.tools ?? []) + [makeSendResponseTool(), makeTodoTool(), makeViewTool(), makeConvertToMarkdownTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
+        config.tools = (config.tools ?? []) + [makeTodoTool(), makeViewTool(), makeConvertToMarkdownTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
 
         let session = try await client.createSession(config: config)
         self.session = session
@@ -293,7 +293,6 @@ public final class ChatViewModel: ObservableObject {
         guard let client else { return }
 
         // Inject manage_todo_list and view tools
-        config.tools.append(makeSendResponseTool())
         config.tools.append(makeTodoTool())
         config.tools.append(makeViewTool())
         config.tools.append(makeConvertToMarkdownTool())
@@ -855,7 +854,7 @@ public final class ChatViewModel: ObservableObject {
             }
         }
 
-        // send_response delivers a final response — add as assistant message
+        // ask_questions message delivers a response — add as assistant message
         let blocks = parseContentBlocks(trimmed)
         let msg = ChatMessage(role: .assistant, content: blocks, project: projectScope)
         messages.append(msg)
@@ -876,6 +875,13 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func handleAgentAskQuestions(_ payload: JSONValue) async -> JSONValue {
+        // Extract optional message field (response to show before questions)
+        if case .object(let root) = payload,
+           case .string(let message) = root["message"], !message.isEmpty {
+            let blocks = parseContentBlocks(message)
+            messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
+        }
+
         let questions = parseAskQuestions(payload)
         guard !questions.isEmpty else {
             return .object([:])
@@ -883,7 +889,6 @@ public final class ChatViewModel: ObservableObject {
 
         chatState = .waitingForQuestions(questions)
         activeQuestions = questions
-        messages.append(ChatMessage(role: .assistant, content: [.text("Please answer the questions below.")], project: projectScope))
 
         return await withCheckedContinuation { continuation in
             self.askQuestionsContinuation = continuation
@@ -1504,36 +1509,6 @@ public final class ChatViewModel: ObservableObject {
         case .binary(_, let mimeType):
             return "Error: unsupported format '\(mimeType)' for markdown conversion"
         }
-    }
-
-    // MARK: - Send Response Tool
-
-    private func makeSendResponseTool() -> ToolDefinition {
-        ToolDefinition(
-            name: "send_response",
-            description: "Send a response message to the user. Use this to deliver results instead of ending your turn.",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "message": .object([
-                        "type": .string("string"),
-                        "description": .string("The response message to send to the user")
-                    ])
-                ]),
-                "required": .array([.string("message")])
-            ]),
-            skipPermission: true,
-            handler: { [weak self] args in
-                guard let self else { return "response received" }
-                if case .object(let dict) = args, case .string(let message) = dict["message"] {
-                    await MainActor.run {
-                        let blocks = parseContentBlocks(message)
-                        self.messages.append(ChatMessage(role: .assistant, content: blocks, project: self.projectScope))
-                    }
-                }
-                return "response received"
-            }
-        )
     }
 
     // MARK: - Start Coding Task Tool

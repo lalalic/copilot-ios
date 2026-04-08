@@ -3,15 +3,6 @@ import os.log
 
 private let logger = Logger(subsystem: "com.copilot-ios.sdk", category: "SubAgent")
 
-/// Actor to capture content from `send_response` tool calls in loop-mode sessions.
-private actor SubAgentResultCapture {
-    var content: String?
-
-    func setContent(_ text: String) {
-        content = text
-    }
-}
-
 /// Parsed frontmatter from an agent.md file.
 private struct AgentFrontmatter {
     var name: String?
@@ -273,9 +264,9 @@ public final class SubAgentToolProvider: @unchecked Sendable {
     }
 
     /// Run sub-agent synchronously — blocks until complete.
+    /// Sub-agents always use direct sessions (no loop tools).
     private func runSync(agentName: String, task: String, model: String, frontmatter: AgentFrontmatter, body: String) async -> String {
         logger.info("Starting sub-agent '\(agentName)' sync (model: \(model)) with task: \(task.prefix(100))")
-        logger.info("[SubAgent] runSync start: agent=\(agentName) model=\(model) tools=\(frontmatter.tools?.count ?? -1)")
 
         do {
             let transport = WebSocketTransport(host: relayHost, port: relayPort)
@@ -283,43 +274,8 @@ public final class SubAgentToolProvider: @unchecked Sendable {
             try await client.start()
             logger.info("[SubAgent] client started, creating session...")
 
-            // Capture for loop-mode sessions where the relay injects send_response/ask_questions
-            let capture = SubAgentResultCapture()
-
             var subAgentTools = filterTools(toolsBuilder(), allowedNames: frontmatter.tools)
             subAgentTools.append(buildReportProgressTool(agentName: agentName, taskId: nil))
-
-            // Register send_response handler to capture loop-mode output.
-            // The relay may inject loop instructions + send_response tool for non-direct models.
-            // When the model calls send_response, we capture the message here.
-            subAgentTools.append(ToolDefinition(
-                name: "send_response",
-                description: "Submit the final response",
-                parameters: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "message": .object(["type": .string("string"), "description": .string("The response message")]),
-                    ]),
-                    "required": .array([.string("message")]),
-                ]),
-                skipPermission: true,
-                handler: { args in
-                    if case .object(let dict) = args, case .string(let msg) = dict["message"] {
-                        await capture.setContent(msg)
-                        logger.info("[SubAgent] send_response captured: \(msg.prefix(200))")
-                    }
-                    return "Response received."
-                }
-            ))
-
-            // Register ask_questions handler (sub-agents can't interact with user)
-            subAgentTools.append(ToolDefinition(
-                name: "ask_questions",
-                description: "Ask the user questions",
-                parameters: .object(["type": .string("object"), "properties": .object([:])]),
-                skipPermission: true,
-                handler: { _ in "User not available." }
-            ))
 
             logger.info("[SubAgent] session tools: \(subAgentTools.map { $0.name }.joined(separator: ", "))")
 
@@ -334,19 +290,12 @@ public final class SubAgentToolProvider: @unchecked Sendable {
             let session = try await client.createSession(config: config)
             logger.info("[SubAgent] session created (id=\(session.sessionId.prefix(8))), sending prompt...")
 
-            // sendAndWait captures assistant.message for direct models.
-            // For loop models, send_response tool handler captures the content above.
-            let directResult = try await session.sendAndWait(
-                prompt: task,
-                timeout: 60
-            )
+            // Direct session: sendAndWait captures the assistant.message response directly
+            let result = try await session.sendAndWait(prompt: task, timeout: 60)
+                ?? "Sub-agent completed with no output"
 
-            // Use direct result (assistant.message) or captured send_response, whichever is available
-            let capturedContent = await capture.content
-            let result = directResult ?? capturedContent ?? "Sub-agent completed with no output"
-
-            logger.info("[SubAgent] result (direct=\(directResult != nil), captured=\(capturedContent != nil)): \(result.prefix(200))")
-            try? await session.destroy()  // Destroy, don't disconnect (prevents stale resume)
+            logger.info("[SubAgent] result: \(result.prefix(200))")
+            try? await session.destroy()
 
             logger.info("Sub-agent '\(agentName)' completed: \(result.prefix(200))")
             return result
