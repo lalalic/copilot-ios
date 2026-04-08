@@ -142,13 +142,12 @@ public final class WorkspaceBootstrapper: Sendable {
         let workspaceExists = FileManager.default.fileExists(atPath: workspaceURL.path)
 
         if !workspaceExists {
+            // Zip contents are relative (no workspace/ prefix), extract directly into workspaceURL
+            try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
             if let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip") {
-                try FileManager.default.unzipItem(at: zipURL, to: appSupport)
+                try FileManager.default.unzipItem(at: zipURL, to: workspaceURL)
             } else if let packageZipURL = Bundle.module.url(forResource: bundledZipName, withExtension: "zip") {
-                try FileManager.default.unzipItem(at: packageZipURL, to: appSupport)
-            }
-            if !FileManager.default.fileExists(atPath: workspaceURL.path) {
-                try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+                try FileManager.default.unzipItem(at: packageZipURL, to: workspaceURL)
             }
         }
 
@@ -157,6 +156,9 @@ public final class WorkspaceBootstrapper: Sendable {
 
         // Always sync .github/agents/ from bundle (new agents may be added between versions)
         syncAgentsFromBundle(bundle: bundle, workspaceURL: workspaceURL)
+
+        // Always sync .github/skills/ from bundle (new skills may be added between versions)
+        syncSkillsFromBundle(bundle: bundle, workspaceURL: workspaceURL)
 
         return workspaceURL
     }
@@ -174,7 +176,6 @@ public final class WorkspaceBootstrapper: Sendable {
         do {
             try manager.unzipItem(at: zipURL, to: tempDir)
             let extractedTemplates = tempDir
-                .appendingPathComponent(workspaceFolderName)
                 .appendingPathComponent(".templates")
             guard manager.fileExists(atPath: extractedTemplates.path) else { return }
 
@@ -207,7 +208,6 @@ public final class WorkspaceBootstrapper: Sendable {
         do {
             try manager.unzipItem(at: zipURL, to: tempDir)
             let extractedAgents = tempDir
-                .appendingPathComponent(workspaceFolderName)
                 .appendingPathComponent(".github")
                 .appendingPathComponent("agents")
             guard manager.fileExists(atPath: extractedAgents.path) else {
@@ -233,6 +233,45 @@ public final class WorkspaceBootstrapper: Sendable {
             NSLog("[Workspace] syncAgents: %d agents in zip, %d newly added to %@", files.count, added, destAgents.path)
         } catch {
             NSLog("[Workspace] syncAgents error: %@", error.localizedDescription)
+        }
+    }
+
+    /// Sync .github/skills/ from bundled zip — adds new skill folders without overwriting user-modified ones.
+    private func syncSkillsFromBundle(bundle: Bundle, workspaceURL: URL) {
+        let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
+            ?? Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
+        guard let zipURL else { return }
+
+        let manager = FileManager.default
+        let tempDir = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: tempDir) }
+
+        do {
+            try manager.unzipItem(at: zipURL, to: tempDir)
+            let extractedSkills = tempDir
+                .appendingPathComponent(".github")
+                .appendingPathComponent("skills")
+            guard manager.fileExists(atPath: extractedSkills.path) else { return }
+
+            let destSkills = workspaceURL
+                .appendingPathComponent(".github")
+                .appendingPathComponent("skills")
+            try manager.createDirectory(at: destSkills, withIntermediateDirectories: true)
+
+            // Add new skill folders; don't overwrite existing ones (user may have modified)
+            let dirs = try manager.contentsOfDirectory(at: extractedSkills, includingPropertiesForKeys: [.isDirectoryKey])
+            var added = 0
+            for dir in dirs {
+                guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                let dest = destSkills.appendingPathComponent(dir.lastPathComponent)
+                if !manager.fileExists(atPath: dest.path) {
+                    try manager.copyItem(at: dir, to: dest)
+                    added += 1
+                }
+            }
+            NSLog("[Workspace] syncSkills: %d skills in zip, %d newly added to %@", dirs.count, added, destSkills.path)
+        } catch {
+            NSLog("[Workspace] syncSkills error: %@", error.localizedDescription)
         }
     }
 }
