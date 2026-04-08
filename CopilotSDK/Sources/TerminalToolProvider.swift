@@ -9,14 +9,24 @@ private let logger = Logger(subsystem: "com.copilot-ios.sdk", category: "Termina
 
 /// Provides a `run_in_terminal` tool backed by ios_system.
 /// Executes Unix commands (ls, cat, grep, curl, etc.) sandboxed to the workspace.
+/// Custom commands can be registered via `registerCommand(name:handler:)`.
 public final class TerminalToolProvider: @unchecked Sendable {
+
+    public typealias CommandHandler = @Sendable (String) async throws -> String
 
     private let workspaceURL: URL
     private let queue = DispatchQueue(label: "com.copilot.terminal", qos: .userInitiated)
     private var initialized = false
+    private var commandHandlers: [String: CommandHandler] = [:]
 
     public init(workspaceURL: URL) {
         self.workspaceURL = workspaceURL
+    }
+
+    /// Register a custom command handler. When `run_in_terminal` receives a command
+    /// starting with `name`, the handler is called instead of ios_system.
+    public func registerCommand(name: String, handler: @escaping CommandHandler) {
+        commandHandlers[name] = handler
     }
 
     public var tools: [ToolDefinition] {
@@ -113,8 +123,9 @@ public final class TerminalToolProvider: @unchecked Sendable {
                 Execute a shell command on the device. Supports standard Unix commands: \
                 ls, cat, grep, find, mkdir, cp, mv, rm, sed, awk, curl, tar, echo, wc, \
                 sort, head, tail, touch, chmod, pwd, date, env, du, df. \
+                Also supports: web-agent navigate|snapshot|click|type|download|upload|screenshot. \
                 Commands run sandboxed in the workspace directory. \
-                Use && to chain commands. Use | for pipes.
+                Use | for pipes.
                 """,
             parameters: .object([
                 "type": .string("object"),
@@ -137,6 +148,17 @@ public final class TerminalToolProvider: @unchecked Sendable {
             guard case .object(let dict) = args,
                   case .string(let command) = dict["command"] else {
                 return "Error: 'command' (string) required"
+            }
+
+            // Check custom command handlers first
+            let firstWord = command.split(separator: " ", maxSplits: 1).first.map(String.init) ?? command
+            if let handler = self.commandHandlers[firstWord] {
+                do {
+                    let output = try await handler(command)
+                    return output.isEmpty ? "(no output)" : output
+                } catch {
+                    return "Error: \(error.localizedDescription)"
+                }
             }
 
             let result = self.queue.sync {
