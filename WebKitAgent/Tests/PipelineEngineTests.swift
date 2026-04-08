@@ -166,4 +166,42 @@ final class PipelineEngineTests: XCTestCase {
         let output = PipelineEngine.formatOutput([])
         XCTAssertTrue(output.contains("No results"))
     }
+
+    // MARK: - Extract
+
+    func testExtractNestedPath() {
+        let engine = PipelineEngine()
+        let data: [Any] = [
+            ["data": ["children": [
+                ["data": ["title": "Post 1", "score": 42]],
+                ["data": ["title": "Post 2", "score": 99]]
+            ]]] as [String: Any]
+        ]
+        // Extract data.children
+        let step1 = engine.executeExtract(data: data, path: "data.children")
+        XCTAssertEqual(step1.count, 2)
+        // Extract data from each child
+        let step2 = engine.executeExtract(data: step1, path: "data")
+        XCTAssertEqual(step2.count, 2)
+        if let first = step2[0] as? [String: Any] {
+            XCTAssertEqual(first["title"] as? String, "Post 1")
+            XCTAssertEqual(first["score"] as? Int, 42)
+        } else {
+            XCTFail("Expected dictionary")
+        }
+    }
+
+    func testExtractMissingPath() {
+        let engine = PipelineEngine()
+        let data: [Any] = [["name": "test"] as [String: Any]]
+        let result = engine.executeExtract(data: data, path: "data.missing")
+        XCTAssertEqual(result.count, 0)
+    }
+
+    func testNestedTemplateEvaluation() {
+        let engine = PipelineEngine()
+        let item: [String: Any] = ["data": ["title": "Nested", "author": "bob"]]
+        let result = engine.evaluateTemplate("${{ item.data.title }}", item: item, index: 0, args: [:])
+        XCTAssertEqual(result as? String, "Nested")
+    }
 }

@@ -46,6 +46,8 @@ public enum PipelineStep: Sendable {
     case filter(String)
     /// Map items to a new shape.
     case map([String: String])
+    /// Extract a nested path from each item. If the result is an array, flatten it.
+    case extract(String)
 }
 
 // MARK: - Parse Error
@@ -271,6 +273,13 @@ public struct YAMLAdapter: Sendable {
         if trimmed.hasPrefix("map:") {
             let body = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
             return .map(parseMapBody(body))
+        }
+
+        // extract: path.to.nested.field
+        if trimmed.hasPrefix("extract:") {
+            let path = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            return .extract(path)
         }
 
         return nil

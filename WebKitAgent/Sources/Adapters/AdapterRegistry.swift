@@ -267,8 +267,11 @@ public final class AdapterRegistry {
             description: Number of posts to return
         pipeline:
           - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}hot.json?limit=25&raw_json=1"
-          - map: { data: "${{ item.data.children }}" }
-          - slice: { key: "data", to: 25 }
+          - extract: "data.children"
+          - extract: "data"
+          - filter: "item.title != nil"
+          - map: { rank: "${{ index + 1 }}", title: "${{ item.title }}", score: "${{ item.score }}", author: "${{ item.author }}", subreddit: "${{ item.subreddit_name_prefixed }}", comments: "${{ item.num_comments }}", url: "${{ item.url }}" }
+          - slice: { to: 20 }
         """
 
         let redditTop = """
@@ -292,8 +295,11 @@ public final class AdapterRegistry {
             description: Number of posts
         pipeline:
           - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}top.json?t=${{ args.time }}&limit=25&raw_json=1"
-          - map: { data: "${{ item.data.children }}" }
-          - slice: { key: "data", to: 25 }
+          - extract: "data.children"
+          - extract: "data"
+          - filter: "item.title != nil"
+          - map: { rank: "${{ index + 1 }}", title: "${{ item.title }}", score: "${{ item.score }}", author: "${{ item.author }}", subreddit: "${{ item.subreddit_name_prefixed }}", comments: "${{ item.num_comments }}", url: "${{ item.url }}" }
+          - slice: { to: 20 }
         """
 
         let redditSearch = """
@@ -320,8 +326,11 @@ public final class AdapterRegistry {
             description: Number of results
         pipeline:
           - fetch: "https://www.reddit.com/${{ args.subreddit ? 'r/' + args.subreddit + '/' : '' }}search.json?q=${{ args.query }}&sort=${{ args.sort }}&limit=25&raw_json=1"
-          - map: { data: "${{ item.data.children }}" }
-          - slice: { key: "data", to: 25 }
+          - extract: "data.children"
+          - extract: "data"
+          - filter: "item.title != nil"
+          - map: { rank: "${{ index + 1 }}", title: "${{ item.title }}", score: "${{ item.score }}", author: "${{ item.author }}", subreddit: "${{ item.subreddit_name_prefixed }}", comments: "${{ item.num_comments }}", url: "${{ item.url }}" }
+          - slice: { to: 20 }
         """
 
         for yaml in [redditHot, redditTop, redditSearch] {

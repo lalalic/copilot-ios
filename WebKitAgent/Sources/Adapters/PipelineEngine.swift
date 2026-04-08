@@ -32,10 +32,43 @@ public final class PipelineEngine {
 
             case .map(let mapping):
                 data = executeMap(data: data, mapping: mapping)
+
+            case .extract(let path):
+                data = executeExtract(data: data, path: path)
             }
         }
 
         return data
+    }
+
+    // MARK: - Extract
+
+    public func executeExtract(data: [Any], path: String) -> [Any] {
+        let keys = path.components(separatedBy: ".")
+        var results: [Any] = []
+        for item in data {
+            let value = navigatePath(item, keys: keys)
+            if let array = value as? [Any] {
+                results.append(contentsOf: array)
+            } else if let value = value {
+                results.append(value)
+            }
+        }
+        return results
+    }
+
+    private func navigatePath(_ value: Any, keys: [String]) -> Any? {
+        var current: Any = value
+        for key in keys {
+            if let dict = current as? [String: Any], let next = dict[key] {
+                current = next
+            } else if let array = current as? [Any], let index = Int(key), index < array.count {
+                current = array[index]
+            } else {
+                return nil
+            }
+        }
+        return current
     }
 
     // MARK: - Fetch
@@ -179,10 +212,19 @@ public final class PipelineEngine {
             return args[key] as Any
         }
 
-        // item.key
+        // item.key or item.key.nested
         if expr.hasPrefix("item.") {
-            let key = String(expr.dropFirst(5))
-            return item[key] as Any
+            let keyPath = String(expr.dropFirst(5))
+            let keys = keyPath.components(separatedBy: ".")
+            var current: Any = item
+            for key in keys {
+                if let dict = current as? [String: Any], let next = dict[key] {
+                    current = next
+                } else {
+                    return template as Any
+                }
+            }
+            return current
         }
 
         // item (the whole item)
