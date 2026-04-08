@@ -12,7 +12,7 @@ public struct ToolActivityView: View {
     }
 
     public var body: some View {
-        if let current = toolCalls.last(where: { $0.status == .running }) {
+        if let current = toolCalls.last(where: { $0.status == .running && $0.name != "ask_questions" }) {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.mini)
