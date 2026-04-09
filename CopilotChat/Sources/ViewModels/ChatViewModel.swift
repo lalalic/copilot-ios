@@ -657,6 +657,7 @@ public final class ChatViewModel: ObservableObject {
         switch command {
         case "/clear":
             messages.removeAll()
+            sessionLogger?.log(role: "clear", text: "Messages cleared.", project: projectScope)
             appendSystemMessage("Messages cleared.")
         default:
             appendSystemMessage("Unknown command: \(command)\nAvailable: /clear")

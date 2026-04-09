@@ -83,6 +83,9 @@ public final class ChatSessionLogger: Sendable {
                       let text = obj["text"] as? String,
                       let tsStr = obj["ts"] as? String else { continue }
 
+                // Stop at the last clear marker — don't show messages before it
+                if role == "clear" { return results.reversed() }
+
                 // Skip tool call entries — only restore user/assistant/system messages
                 if role != "user" && role != "assistant" && role != "system" { continue }
 
