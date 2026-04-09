@@ -16,6 +16,8 @@ public struct FileExplorerView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var pathStack: [URL] = []
+    @State private var entryToDelete: FileEntry?
+    @State private var showDeleteConfirm = false
 
     /// Create a file explorer rooted at the given directory.
     /// - Parameters:
@@ -123,9 +125,27 @@ public struct FileExplorerView: View {
                 List {
                     ForEach(entries) { entry in
                         fileRow(entry)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    entryToDelete = entry
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                     }
                 }
                 .listStyle(.plain)
+                .alert("Delete \(entryToDelete?.isDirectory == true ? "Folder" : "File")",
+                       isPresented: $showDeleteConfirm,
+                       presenting: entryToDelete) { entry in
+                    Button("Delete", role: .destructive) {
+                        deleteEntry(entry)
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: { entry in
+                    Text("Delete \"\(entry.name)\"?\(entry.isDirectory ? " This will remove all contents." : "")")
+                }
             }
         }
     }
@@ -259,6 +279,15 @@ public struct FileExplorerView: View {
         }
 
         isLoading = false
+    }
+
+    private func deleteEntry(_ entry: FileEntry) {
+        do {
+            try FileManager.default.removeItem(at: entry.url)
+            entries.removeAll { $0.id == entry.id }
+        } catch {
+            errorMessage = "Delete failed: \(error.localizedDescription)"
+        }
     }
 
     private func openFile(_ entry: FileEntry) {
