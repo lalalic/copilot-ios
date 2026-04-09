@@ -115,7 +115,7 @@ public final class AppAgentToolProvider {
 
     // MARK: - Dispatch
 
-    private func dispatch(command: String, args: [String: JSONValue]) -> String {
+    public func dispatch(command: String, args: [String: JSONValue]) -> String {
         switch command {
         case "snapshot":
             return scanner.scan()
