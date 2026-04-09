@@ -900,6 +900,23 @@ public final class ChatViewModel: ObservableObject {
             return .object([:])
         }
 
+        // Single freeform question with no options: merge question into assistant bubble
+        if questions.count == 1, questions[0].options.isEmpty {
+            let questionText = questions[0].question
+            if let lastIndex = messages.lastIndex(where: { $0.role == .assistant }),
+               case .text(let existingText) = messages[lastIndex].content.last {
+                // Append question to existing assistant message
+                var content = messages[lastIndex].content
+                content[content.count - 1] = .text(existingText + "\n\n" + questionText)
+                messages[lastIndex] = ChatMessage(
+                    id: messages[lastIndex].id,
+                    role: .assistant,
+                    content: content,
+                    project: messages[lastIndex].project
+                )
+            }
+        }
+
         chatState = .waitingForQuestions(questions)
         activeQuestions = questions
 
@@ -921,9 +938,12 @@ public final class ChatViewModel: ObservableObject {
             ])
         }
 
-        // Add Q&A summary to chat history
-        let summary = formatQASummary(questions: activeQuestions, answers: answers)
-        messages.append(ChatMessage(role: .user, content: [.text(summary)], project: projectScope))
+        // Add Q&A summary to chat history (skip for single freeform — already shown as user message)
+        let isSingleFreeform = activeQuestions.count == 1 && activeQuestions[0].options.isEmpty
+        if !isSingleFreeform {
+            let summary = formatQASummary(questions: activeQuestions, answers: answers)
+            messages.append(ChatMessage(role: .user, content: [.text(summary)], project: projectScope))
+        }
 
         if let continuation = askQuestionsContinuation {
             // Normal path: continuation exists, resume it

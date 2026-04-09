@@ -119,7 +119,9 @@ public struct ChatView: View {
                     }
 
                     // Questions appear as an inline bubble that scrolls with chat
-                    if case .waitingForQuestions(let questions) = viewModel.chatState {
+                    // Skip the card when it's a single freeform question (merged into assistant bubble)
+                    if case .waitingForQuestions(let questions) = viewModel.chatState,
+                       !(questions.count == 1 && questions[0].options.isEmpty) {
                         AskQuestionsView(
                             questions: questions,
                             onSubmit: { answers in
