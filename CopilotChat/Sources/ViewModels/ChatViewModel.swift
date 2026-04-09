@@ -587,6 +587,12 @@ public final class ChatViewModel: ObservableObject {
         guard !text.isEmpty else { return }
         inputText = ""
 
+        // Handle slash commands
+        if text.hasPrefix("/") {
+            handleSlashCommand(text)
+            return
+        }
+
         // Prepend attachment context if files are attached
         let attachmentDesc = attachmentStore.promptDescription()
         let promptText: String
@@ -639,6 +645,21 @@ public final class ChatViewModel: ObservableObject {
 
         default:
             break
+        }
+    }
+
+    // MARK: - Slash Commands
+
+    private func handleSlashCommand(_ text: String) {
+        let parts = text.split(separator: " ", maxSplits: 1)
+        let command = String(parts[0]).lowercased()
+
+        switch command {
+        case "/clear":
+            messages.removeAll()
+            appendSystemMessage("Messages cleared.")
+        default:
+            appendSystemMessage("Unknown command: \(command)\nAvailable: /clear")
         }
     }
 
