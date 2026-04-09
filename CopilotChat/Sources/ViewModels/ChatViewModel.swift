@@ -495,8 +495,11 @@ public final class ChatViewModel: ObservableObject {
                         self.toolCalls[idx].result = result
                         let name = self.toolCalls[idx].name
                         let args = self.toolCalls[idx].arguments ?? ""
-                        let truncated = (result ?? "").prefix(500)
-                        self.sessionLogger?.log(role: "tool_result", text: "[\(name)] \(args)\n\(truncated)", project: self.projectScope)
+                        let truncated = String((result ?? "").prefix(500))
+                        var parts = "[\(name)]"
+                        if !args.isEmpty { parts += " \(args)" }
+                        if !truncated.isEmpty { parts += "\n\(truncated)" }
+                        self.sessionLogger?.log(role: "tool_result", text: parts, project: self.projectScope)
                     }
                 }
             }

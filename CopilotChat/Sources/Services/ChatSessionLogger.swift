@@ -22,12 +22,14 @@ public final class ChatSessionLogger: Sendable {
 
     /// Append a message entry to today's JSONL file.
     public func log(role: String, text: String, project: String? = nil) {
-        let entry: [String: Any] = [
+        var entry: [String: Any] = [
             "ts": ISO8601DateFormatter().string(from: Date()),
             "role": role,
-            "text": text,
-            "project": project ?? ""
+            "text": text
         ]
+        if let project, !project.isEmpty {
+            entry["project"] = project
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: entry),
               let line = String(data: data, encoding: .utf8) else { return }
 
