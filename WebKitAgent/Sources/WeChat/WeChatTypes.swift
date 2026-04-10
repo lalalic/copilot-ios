@@ -5,8 +5,7 @@ import Foundation
 /// State machine for the WeChat channel lifecycle.
 public enum WeChatChannelState: String, Sendable {
     case disconnected    // Channel not started
-    case loading         // wx.qq.com loading
-    case extractingQR    // Looking for QR code UUID
+    case loading         // wx.qq.com loading, waiting for Angular
     case qrReady         // QR code available for scanning
     case loggingIn       // QR scanned, waiting for confirmation
     case ready           // Fully logged in, bridge active

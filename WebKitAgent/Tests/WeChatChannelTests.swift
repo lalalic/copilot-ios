@@ -10,7 +10,6 @@ final class WeChatTypesTests: XCTestCase {
     func testChannelStateRawValues() {
         XCTAssertEqual(WeChatChannelState.disconnected.rawValue, "disconnected")
         XCTAssertEqual(WeChatChannelState.loading.rawValue, "loading")
-        XCTAssertEqual(WeChatChannelState.extractingQR.rawValue, "extractingQR")
         XCTAssertEqual(WeChatChannelState.qrReady.rawValue, "qrReady")
         XCTAssertEqual(WeChatChannelState.loggingIn.rawValue, "loggingIn")
         XCTAssertEqual(WeChatChannelState.ready.rawValue, "ready")
@@ -205,7 +204,7 @@ final class WeChatBridgeTests: XCTestCase {
     }
 
     func testQRCodeScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.qrCodeScript.isEmpty)
+        XCTAssertFalse(WeChatBridge.qrRefreshScript.isEmpty)
     }
 
     func testContactsScriptNotEmpty() {
@@ -223,8 +222,8 @@ final class WeChatBridgeTests: XCTestCase {
         XCTAssertTrue(script.contains("line1\\nline2"))
     }
 
-    func testBridgeUserScriptContainsSendToPuppeteer() {
-        XCTAssertTrue(WeChatBridge.bridgeUserScript.source.contains("sendToPuppeteer"))
+    func testBridgeSourceContainsSendToPuppeteer() {
+        XCTAssertTrue(WeChatBridge.bridgeSource.contains("sendToPuppeteer"))
     }
 
     func testInjectionScriptContainsCheckScan() {
@@ -232,73 +231,71 @@ final class WeChatBridgeTests: XCTestCase {
     }
 }
 
-// MARK: - WeChatChannel Tests
+// MARK: - WeChatBridge Tests
 
 @MainActor
-final class WeChatChannelTests: XCTestCase {
+final class WeChatBridgeTests: XCTestCase {
 
     func testInitialState() {
-        let channel = WeChatChannel()
-        XCTAssertEqual(channel.state, .disconnected)
-        XCTAssertNil(channel.qrCodeURL)
-        XCTAssertNil(channel.loggedInUser)
-        XCTAssertTrue(channel.contacts.isEmpty)
-        XCTAssertEqual(channel.messageCount, 0)
+        let bridge = WeChatBridge()
+        XCTAssertEqual(bridge.state, .disconnected)
+        XCTAssertNil(bridge.qrCodeURL)
+        XCTAssertNil(bridge.loggedInUser)
+        XCTAssertTrue(bridge.contacts.isEmpty)
+        XCTAssertEqual(bridge.messageCount, 0)
     }
 
     func testStartChangesStateToLoading() {
-        let channel = WeChatChannel()
-        channel.start()
-        XCTAssertEqual(channel.state, .loading)
+        let bridge = WeChatBridge()
+        bridge.start()
+        XCTAssertEqual(bridge.state, .loading)
     }
 
     func testStartFromDeadState() {
-        let channel = WeChatChannel()
-        // Manually set to dead by starting and destroying
-        channel.start()
-        channel.destroy()
-        XCTAssertEqual(channel.state, .disconnected)
-        channel.start()
-        XCTAssertEqual(channel.state, .loading)
+        let bridge = WeChatBridge()
+        bridge.start()
+        bridge.destroy()
+        XCTAssertEqual(bridge.state, .disconnected)
+        bridge.start()
+        XCTAssertEqual(bridge.state, .loading)
     }
 
     func testDestroyResetsState() {
-        let channel = WeChatChannel()
-        channel.start()
-        channel.destroy()
-        XCTAssertEqual(channel.state, .disconnected)
-        XCTAssertNil(channel.qrCodeURL)
-        XCTAssertNil(channel.loggedInUser)
-        XCTAssertTrue(channel.contacts.isEmpty)
-        XCTAssertEqual(channel.messageCount, 0)
+        let bridge = WeChatBridge()
+        bridge.start()
+        bridge.destroy()
+        XCTAssertEqual(bridge.state, .disconnected)
+        XCTAssertNil(bridge.qrCodeURL)
+        XCTAssertNil(bridge.loggedInUser)
+        XCTAssertTrue(bridge.contacts.isEmpty)
+        XCTAssertEqual(bridge.messageCount, 0)
     }
 
     func testSendMessageRejectsWhenNotReady() async {
-        let channel = WeChatChannel()
-        let result = await channel.sendMessage(to: "@test", content: "hi")
+        let bridge = WeChatBridge()
+        let result = await bridge.sendMessage(to: "@test", content: "hi")
         XCTAssertFalse(result)
     }
 
     func testGetContactsReturnsEmptyWhenNotReady() async {
-        let channel = WeChatChannel()
-        let contacts = await channel.getContacts()
+        let bridge = WeChatBridge()
+        let contacts = await bridge.getContacts()
         XCTAssertTrue(contacts.isEmpty)
     }
 
     func testRestartGoesToLoading() {
-        let channel = WeChatChannel()
-        channel.start()
-        channel.restart()
-        XCTAssertEqual(channel.state, .loading)
+        let bridge = WeChatBridge()
+        bridge.start()
+        bridge.restart()
+        XCTAssertEqual(bridge.state, .loading)
     }
 
     func testDoubleStartIgnored() {
-        let channel = WeChatChannel()
-        channel.start()
-        XCTAssertEqual(channel.state, .loading)
-        // Second start should be ignored (state is loading, not disconnected/dead)
-        channel.start()
-        XCTAssertEqual(channel.state, .loading)
+        let bridge = WeChatBridge()
+        bridge.start()
+        XCTAssertEqual(bridge.state, .loading)
+        bridge.start()
+        XCTAssertEqual(bridge.state, .loading)
     }
 }
 
