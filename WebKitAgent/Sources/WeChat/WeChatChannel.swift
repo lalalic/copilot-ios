@@ -37,7 +37,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
     /// to a window hierarchy (required on-device for page loads).
     public private(set) var webView: WKWebView
     private var bridgeInjected = false
-    private var pollingTimer: Timer?
+    private var heartbeatTimer: Timer?
     private var heartbeatDeadline: Date?
     private var qrCheckTimer: Timer?
     private var directQRTimer: Timer?
@@ -45,7 +45,6 @@ public final class WeChatChannel: NSObject, ObservableObject {
     private var loginTimeoutTimer: Timer?
 
     private static let wechatURL = "https://wx.qq.com/"
-    private static let pollInterval: TimeInterval = 0.5
     private static let heartbeatTimeout: TimeInterval = 45  // 3 missed 15s heartbeats
     private static let qrCheckInterval: TimeInterval = 1.0
     private static let directQRInterval: TimeInterval = 2.0
@@ -75,6 +74,11 @@ public final class WeChatChannel: NSObject, ObservableObject {
         )
         super.init()
 
+        // Register push-based event bridge (per wechat-bro README "Option 5")
+        let bridgeScript = WKUserScript(source: WeChatBridge.bridgeSource, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(bridgeScript)
+        config.userContentController.add(self, name: "wechatEvent")
+
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.navigationDelegate = self
     }
@@ -103,7 +107,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
 
     /// Stop the WeChat channel and clean up.
     public func destroy() {
-        stopPolling()
+        stopHeartbeatMonitor()
         stopQRCheck()
         stopBridgeRetry()
         stopDirectQR()
@@ -112,6 +116,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
         loginTimeoutTimer?.invalidate()
         loginTimeoutTimer = nil
         webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "wechatEvent")
         bridgeInjected = false
         qrCodeURL = nil
         loggedInUser = nil
@@ -304,7 +309,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
                let code = json["code"] as? Int {
                 if code == 200 || code == 304 {
                     bridgeInjected = true
-                    startPolling()
+                    startHeartbeatMonitor()
 
                     // Check if already logged in
                     let loggedIn = try? await webView.evaluateJavaScript(WeChatBridge.loginCheckScript) as? Bool
@@ -495,46 +500,26 @@ public final class WeChatChannel: NSObject, ObservableObject {
         startDirectQRExtraction()
     }
 
-    // MARK: - Message Polling
+    // MARK: - Bridge Event Handling (via WKScriptMessageHandler)
 
-    private func startPolling() {
-        stopPolling()
+    private func startHeartbeatMonitor() {
+        stopHeartbeatMonitor()
         heartbeatDeadline = Date().addingTimeInterval(Self.heartbeatTimeout)
 
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.pollBridge()
-            }
-        }
-    }
-
-    private func stopPolling() {
-        pollingTimer?.invalidate()
-        pollingTimer = nil
-    }
-
-    private func pollBridge() async {
-        // Check heartbeat timeout
-        if let deadline = heartbeatDeadline, Date() > deadline {
-            setState(.dead)
-            stopPolling()
-            return
-        }
-
-        do {
-            let result = try await webView.evaluateJavaScript(WeChatBridge.pollScript)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let events = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                for eventDict in events {
-                    if let event = WeChatBridgeEvent.parse(eventDict) {
-                        handleEvent(event)
-                    }
+                guard let self else { return }
+                if let deadline = self.heartbeatDeadline, Date() > deadline {
+                    self.setState(.dead)
+                    self.stopHeartbeatMonitor()
                 }
             }
-        } catch {
-            // Polling failed — webView might have been reclaimed
         }
+    }
+
+    private func stopHeartbeatMonitor() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
     }
 
     private func handleEvent(_ event: WeChatBridgeEvent) {
@@ -561,7 +546,7 @@ public final class WeChatChannel: NSObject, ObservableObject {
             loggedInUser = nil
             contacts = []
             setState(.dead)
-            stopPolling()
+            stopHeartbeatMonitor()
 
         case .message(let msg):
             messageCount += 1
@@ -639,12 +624,35 @@ extension WeChatChannel: WKNavigationDelegate {
         Task { @MainActor in
             bridgeInjected = false
             setState(.dead)
-            stopPolling()
+            stopHeartbeatMonitor()
             stopQRCheck()
             stopBridgeRetry()
             stopDirectQR()
             qrRefreshTimer?.invalidate()
             qrRefreshTimer = nil
+        }
+    }
+}
+
+// MARK: - WKScriptMessageHandler
+
+extension WeChatChannel: WKScriptMessageHandler {
+    public nonisolated func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == "wechatEvent",
+              let body = message.body as? [String: Any],
+              let eventName = body["event"] as? String else { return }
+
+        // Remap to the format WeChatBridgeEvent.parse expects: {type, data}
+        let dict: [String: Any] = ["type": eventName, "data": body["data"] as Any]
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let event = WeChatBridgeEvent.parse(dict) {
+                self.handleEvent(event)
+            }
         }
     }
 }

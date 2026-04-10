@@ -1,9 +1,9 @@
 import Foundation
 
-/// Contains the WechatyBro bridge JavaScript for injection into WeChat Web.
+/// JavaScript bridge for WeChat Web automation via wechat-bro.js.
 ///
-/// Uses the standalone wechat-bro.js library loaded from bundle resources.
-/// Communication via `window.__wechatBridge` polling array (no WKScriptMessageHandler needed).
+/// Communication: WKScriptMessageHandler (push) for events, evaluateJavaScript for API calls.
+/// See wechat-bro/README.md "Option 5: In iOS WebKit" for architecture.
 public enum WeChatBridge {
 
     /// Load wechat-bro.js from the app bundle.
@@ -16,22 +16,22 @@ public enum WeChatBridge {
         return code
     }()
 
-    /// The JavaScript code to inject into the WeChat Web WKWebView.
-    /// Sets up the sendToPuppeteer → __wechatBridge polling bridge,
-    /// injects wechat-bro.js, and calls WechatyBro.init().
-    /// Must be called after angular is ready on the page.
+    /// JavaScript source for the bridge user script.
+    /// Defines sendToPuppeteer before page loads.
+    /// Add as WKUserScript(.atDocumentStart) to userContentController BEFORE loading wx.qq.com.
+    public static let bridgeSource: String = """
+    window.sendToPuppeteer = function(event, data) {
+        window.webkit.messageHandlers.wechatEvent.postMessage({
+            event: event,
+            data: data
+        });
+    };
+    """
+
+    /// Inject wechat-bro.js and call WechatyBro.init().
+    /// Call via evaluateJavaScript after Angular is ready.
     public static var injectionScript: String {
         """
-        ;(function() {
-          'use strict';
-
-          // Set up polling bridge (Swift polls __wechatBridge array)
-          window.sendToPuppeteer = function(type, data) {
-            window.__wechatBridge = window.__wechatBridge || [];
-            window.__wechatBridge.push({ type: type, data: data, ts: Date.now() });
-          };
-        })();
-
         \(wechatBroSource)
 
         ;(function() {
@@ -43,15 +43,6 @@ public enum WeChatBridge {
         })()
         """
     }
-    /// JavaScript to poll accumulated bridge events.
-    /// Returns JSON array of events and clears the buffer.
-    public static let pollScript: String = """
-    (function() {
-      var bridge = window.__wechatBridge || [];
-      window.__wechatBridge = [];
-      return JSON.stringify(bridge);
-    })()
-    """
 
     /// JavaScript to check if angular is ready on the page.
     public static let angularCheckScript: String = """

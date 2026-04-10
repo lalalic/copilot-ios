@@ -184,12 +184,16 @@ final class WeChatBridgeTests: XCTestCase {
         XCTAssertTrue(WeChatBridge.injectionScript.contains("WechatyBro"))
     }
 
-    func testPollScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.pollScript.isEmpty)
+    func testBridgeSourceContainsMessageHandler() {
+        XCTAssertTrue(WeChatBridge.bridgeSource.contains("messageHandlers.wechatEvent"))
     }
 
-    func testPollScriptReturnsJSON() {
-        XCTAssertTrue(WeChatBridge.pollScript.contains("JSON.stringify"))
+    func testBridgeSourceContainsPostMessage() {
+        XCTAssertTrue(WeChatBridge.bridgeSource.contains("postMessage"))
+    }
+
+    func testBridgeSourceContainsSendToPuppeteer() {
+        XCTAssertTrue(WeChatBridge.bridgeSource.contains("sendToPuppeteer"))
     }
 
     func testAngularCheckScriptNotEmpty() {
@@ -219,17 +223,11 @@ final class WeChatBridgeTests: XCTestCase {
         XCTAssertTrue(script.contains("line1\\nline2"))
     }
 
-    func testInjectionScriptContainsBridgeArray() {
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("__wechatBridge"))
-    }
-
-    func testInjectionScriptContainsHeartbeat() {
-        // Script uses polling bridge instead of heartbeat
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("__wechatBridge"))
+    func testBridgeUserScriptContainsSendToPuppeteer() {
+        XCTAssertTrue(WeChatBridge.bridgeUserScript.source.contains("sendToPuppeteer"))
     }
 
     func testInjectionScriptContainsCheckScan() {
-        // Script uses WechatyBro instead of checkScan
         XCTAssertTrue(WeChatBridge.injectionScript.contains("WechatyBro"))
     }
 }
