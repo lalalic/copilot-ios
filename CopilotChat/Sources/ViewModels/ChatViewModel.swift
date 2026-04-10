@@ -28,6 +28,8 @@ public enum ChatState: Sendable, Equatable {
     case idle
     /// Model is processing / tools are running.
     case working
+    /// Context is being compacted (conversation compressed).
+    case compacting
     /// Model called `ask_user` — waiting for user reply.
     case waitingForUser(question: String)
     /// Model called `ask_questions` — waiting for structured user replies.
@@ -464,6 +466,23 @@ public final class ChatViewModel: ObservableObject {
                 if case .waitingForUser = self.chatState { return }
                 if case .waitingForQuestions = self.chatState { return }
                 self.chatState = .idle
+            }
+        }
+
+        // Context compaction tracking
+        await session.on(.sessionCompactionStart) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.chatState = .compacting
+            }
+        }
+
+        await session.on(.sessionCompactionComplete) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                if case .compacting = self.chatState {
+                    self.chatState = .working
+                }
             }
         }
 

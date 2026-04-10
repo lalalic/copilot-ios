@@ -46,6 +46,19 @@ public struct ChatView: View {
                 .padding(.vertical, 6)
             }
 
+            if case .compacting = viewModel.chatState {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Compacting conversation…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+
             // Tool activity (if any tools are running)
             if !viewModel.toolCalls.isEmpty {
                 ToolActivityView(toolCalls: viewModel.toolCalls)
