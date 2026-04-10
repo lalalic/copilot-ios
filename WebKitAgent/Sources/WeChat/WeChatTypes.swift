@@ -57,6 +57,21 @@ public struct WeChatContact: Sendable, Equatable, Identifiable {
     }
 }
 
+// MARK: - Room Member
+
+/// A member of a WeChat group chat (room).
+public struct WeChatRoomMember: Sendable, Equatable, Identifiable {
+    public let id: String        // stable ID
+    public let name: String      // display name (RemarkName > DisplayName > NickName)
+    public let userName: String  // transient UserName (@ prefix)
+
+    public init(id: String, name: String, userName: String) {
+        self.id = id
+        self.name = name
+        self.userName = userName
+    }
+}
+
 // MARK: - Message
 
 /// A WeChat message event from the bridge.

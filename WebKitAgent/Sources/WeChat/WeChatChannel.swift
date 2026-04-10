@@ -58,9 +58,11 @@ public final class WeChatChannel: NSObject, ObservableObject {
         // Use a dedicated process pool (not the shared one) to avoid
         // stale page cache from the browser. Each channel instance gets
         // a completely fresh WebKit process.
+        // Use nonPersistent data store so QR codes are never stale after
+        // app restart — no disk cache, no leftover cookies.
         let config = WKWebViewConfiguration()
         config.processPool = WKProcessPool()
-        config.websiteDataStore = WKWebsiteDataStore.default()
+        config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         #if os(iOS)
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -188,6 +190,28 @@ public final class WeChatChannel: NSObject, ObservableObject {
                 }
                 contacts = parsed
                 return parsed
+            }
+        } catch {
+            // JS evaluation failed
+        }
+        return []
+    }
+
+    /// Get members of a group chat (room).
+    public func getRoomMembers(roomId: String) async -> [WeChatRoomMember] {
+        guard state == .ready else { return [] }
+
+        do {
+            let result = try await webView.evaluateJavaScript(WeChatBridge.roomMembersScript(roomId: roomId))
+            if let str = result as? String,
+               let data = str.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return json.compactMap { dict -> WeChatRoomMember? in
+                    guard let id = dict["id"] as? String,
+                          let name = dict["name"] as? String else { return nil }
+                    let userName = dict["UserName"] as? String ?? id
+                    return WeChatRoomMember(id: id, name: name, userName: userName)
+                }
             }
         } catch {
             // JS evaluation failed
