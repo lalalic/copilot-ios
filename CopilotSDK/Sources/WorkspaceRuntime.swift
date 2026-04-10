@@ -160,6 +160,9 @@ public final class WorkspaceBootstrapper: Sendable {
         // Always sync .github/skills/ from bundle (new skills may be added between versions)
         syncSkillsFromBundle(bundle: bundle, workspaceURL: workspaceURL)
 
+        // Sync project directories from bundle (those with package.json containing projectType)
+        syncProjectsFromBundle(bundle: bundle, workspaceURL: workspaceURL)
+
         return workspaceURL
     }
 
@@ -272,6 +275,49 @@ public final class WorkspaceBootstrapper: Sendable {
             NSLog("[Workspace] syncSkills: %d skills in zip, %d newly added to %@", dirs.count, added, destSkills.path)
         } catch {
             NSLog("[Workspace] syncSkills error: %@", error.localizedDescription)
+        }
+    }
+
+    /// Sync project directories from bundled zip — ensures package.json is present for projects bundled in the zip.
+    private func syncProjectsFromBundle(bundle: Bundle, workspaceURL: URL) {
+        let zipURL = bundle.url(forResource: bundledZipName, withExtension: "zip")
+            ?? Bundle.module.url(forResource: bundledZipName, withExtension: "zip")
+        guard let zipURL else { return }
+
+        let manager = FileManager.default
+        let tempDir = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: tempDir) }
+
+        do {
+            try manager.unzipItem(at: zipURL, to: tempDir)
+            // Scan top-level directories in the extracted zip for project dirs (those with package.json containing projectType)
+            let items = try manager.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: [.isDirectoryKey])
+            var synced = 0
+            for item in items {
+                guard (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                let name = item.lastPathComponent
+                // Skip system directories
+                guard !name.hasPrefix(".") else { continue }
+                let packageJSON = item.appendingPathComponent("package.json")
+                guard manager.fileExists(atPath: packageJSON.path) else { continue }
+                // Verify it has projectType
+                guard let data = try? Data(contentsOf: packageJSON),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["projectType"] is String else { continue }
+                // Ensure the project dir and package.json exist on device
+                let destDir = workspaceURL.appendingPathComponent(name, isDirectory: true)
+                try manager.createDirectory(at: destDir, withIntermediateDirectories: true)
+                let destPackage = destDir.appendingPathComponent("package.json")
+                if !manager.fileExists(atPath: destPackage.path) {
+                    try manager.copyItem(at: packageJSON, to: destPackage)
+                    synced += 1
+                }
+            }
+            if synced > 0 {
+                NSLog("[Workspace] syncProjects: %d project package.json files synced", synced)
+            }
+        } catch {
+            NSLog("[Workspace] syncProjects error: %@", error.localizedDescription)
         }
     }
 }
