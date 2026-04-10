@@ -150,7 +150,7 @@ public struct WeChatMessage: Sendable {
 
 // MARK: - Bridge Event
 
-/// Events emitted by the WechatyBro bridge (polled from JS).
+/// Events pushed from the WechatyBro bridge via WKScriptMessageHandler.
 public enum WeChatBridgeEvent: Sendable {
     case scan(code: Int, url: String)
     case login(user: WeChatUser)

@@ -175,12 +175,12 @@ final class WeChatTypesTests: XCTestCase {
 
 final class WeChatBridgeTests: XCTestCase {
 
-    func testInjectionScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.injectionScript.isEmpty)
+    func testInjectScriptNotEmpty() {
+        XCTAssertFalse(WeChatBridge.injectScript.isEmpty)
     }
 
-    func testInjectionScriptContainsWechatyBro() {
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("WechatyBro"))
+    func testInjectScriptContainsWechatyBro() {
+        XCTAssertTrue(WeChatBridge.injectScript.contains("WechatyBro"))
     }
 
     func testBridgeSourceContainsMessageHandler() {
@@ -195,39 +195,8 @@ final class WeChatBridgeTests: XCTestCase {
         XCTAssertTrue(WeChatBridge.bridgeSource.contains("sendToPuppeteer"))
     }
 
-    func testAngularCheckScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.angularCheckScript.isEmpty)
-    }
-
-    func testLoginCheckScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.loginCheckScript.isEmpty)
-    }
-
-    func testQRCodeScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.qrRefreshScript.isEmpty)
-    }
-
-    func testContactsScriptNotEmpty() {
-        XCTAssertFalse(WeChatBridge.contactsScript.isEmpty)
-    }
-
-    func testSendScriptEscapesQuotes() {
-        let script = WeChatBridge.sendScript(to: "it's", content: "hello 'world'")
-        XCTAssertTrue(script.contains("it\\'s"))
-        XCTAssertTrue(script.contains("hello \\'world\\'"))
-    }
-
-    func testSendScriptEscapesNewlines() {
-        let script = WeChatBridge.sendScript(to: "user", content: "line1\nline2")
-        XCTAssertTrue(script.contains("line1\\nline2"))
-    }
-
-    func testBridgeSourceContainsSendToPuppeteer() {
-        XCTAssertTrue(WeChatBridge.bridgeSource.contains("sendToPuppeteer"))
-    }
-
-    func testInjectionScriptContainsCheckScan() {
-        XCTAssertTrue(WeChatBridge.injectionScript.contains("WechatyBro"))
+    func testInjectScriptContainsWechatyBro2() {
+        XCTAssertTrue(WeChatBridge.injectScript.contains("WechatyBro"))
     }
 }
 

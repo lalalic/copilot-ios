@@ -38,17 +38,8 @@ public final class WeChatBridge: NSObject, ObservableObject {
     public private(set) var webView: WKWebView
 
     private var bridgeInjected = false
-    private var bridgeRetryTimer: Timer?
-    private var bridgeRetryCount = 0
-    private var heartbeatTimer: Timer?
-    private var heartbeatDeadline: Date?
-    private var qrRefreshTimer: Timer?
 
     private static let wechatURL = "https://wx.qq.com/"
-    private static let heartbeatTimeout: TimeInterval = 45
-    private static let bridgeRetryInterval: TimeInterval = 2.0
-    private static let bridgeMaxRetries: Int = 15
-    private static let qrRefreshTimeout: TimeInterval = 4 * 60
 
     // MARK: - JS Sources
 
@@ -71,161 +62,33 @@ public final class WeChatBridge: NSObject, ObservableObject {
     };
     """
 
-    /// Inject wechat-bro.js and call WechatyBro.init().
-    static var injectionScript: String {
-        """
-        \(wechatBroSource)
+    /// wechat-bro.js source, loaded from bundle.
+    static let injectScript: String = wechatBroSource
 
-        ;(function() {
-          if (window.WechatyBro && window.WechatyBro.init) {
-            var result = window.WechatyBro.init();
-            return JSON.stringify(result || {code: 200, message: 'ok'});
-          }
-          return JSON.stringify({code: 503, message: 'WechatyBro not found after injection'});
+    /// Evaluate a JS expression on wechat-bro, wrapping result in JSON.
+    private func eval(_ js: String) async -> [String: Any]? {
+        let wrapped = """
+        (function() {
+          try { return JSON.stringify(\(js)); }
+          catch(e) { return JSON.stringify({error: e.message}); }
         })()
         """
+        guard let str = try? await webView.evaluateJavaScript(wrapped) as? String,
+              let data = str.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    static let angularCheckScript: String = """
-    (function() {
-      return !!(typeof angular !== 'undefined' && angular.element && angular.element(document).injector());
-    })()
-    """
-
-    static let loginCheckScript: String = """
-    (function() {
-      return !!(window.MMCgi && window.MMCgi.isLogin);
-    })()
-    """
-
-    static let qrRefreshScript: String = """
-    (function() {
-      try {
-        var overlay = document.querySelector(
-          '.qrcode .expired, .qrcode_expired_mask, [ng-click*="getQRCode"], .QRCode .mask'
-        );
-        if (overlay) { overlay.click(); return JSON.stringify({refreshed: true, method: 'overlay'}); }
-        var mask = document.querySelector('.qrcode .mask, .login_box .mask');
-        if (mask) { mask.click(); return JSON.stringify({refreshed: true, method: 'mask'}); }
-        return JSON.stringify({refreshed: false});
-      } catch(e) {
-        return JSON.stringify({error: e.message});
-      }
-    })()
-    """
-
-    static let contactsScript: String = """
-    (function() {
-      try {
-        return JSON.stringify(WechatyBro.contactList());
-      } catch(e) {
-        return JSON.stringify({error: e.message});
-      }
-    })()
-    """
-
-    static func sendScript(to: String, content: String, watermark: Bool = false) -> String {
-        let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
-        let escapedContent = content.replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return """
+    /// Evaluate a JS expression returning an array.
+    private func evalArray(_ js: String) async -> [[String: Any]] {
+        let wrapped = """
         (function() {
-          try {
-            var result = WechatyBro.send('\(escapedTo)', '\(escapedContent)', \(watermark));
-            return JSON.stringify({ok: result});
-          } catch(e) {
-            return JSON.stringify({error: e.message});
-          }
+          try { return JSON.stringify(\(js)); }
+          catch(e) { return JSON.stringify([]); }
         })()
         """
-    }
-
-    static func atScript(userId: String, roomId: String? = nil) -> String {
-        let escapedUser = userId.replacingOccurrences(of: "'", with: "\\'")
-        let roomArg = roomId.map { "'\($0.replacingOccurrences(of: "'", with: "\\'"))'" } ?? "undefined"
-        return """
-        (function() {
-          try {
-            return WechatyBro.at('\(escapedUser)', \(roomArg));
-          } catch(e) {
-            return '@\(escapedUser)\\u2005';
-          }
-        })()
-        """
-    }
-
-    static let isFromAIScript: String = """
-    (function() {
-      return !!(window.WechatyBro && window.WechatyBro.isFromAI);
-    })()
-    """
-
-    static func sendUntrackedScript(to: String, content: String) -> String {
-        let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
-        let escapedContent = content.replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return """
-        (function() {
-          try {
-            var injector = angular.element(document).injector();
-            var chatFactory = injector.get('chatFactory');
-            var confFactory = injector.get('confFactory');
-            var userName = WechatyBro._resolveUserName('\(escapedTo)') || '\(escapedTo)';
-            var m = chatFactory.createMessage({
-              ToUserName: userName,
-              Content: '\(escapedContent)',
-              MsgType: confFactory.MSGTYPE_TEXT
-            });
-            chatFactory.appendMessage(m);
-            chatFactory.sendMessage(m);
-            return JSON.stringify({ok: true, msgId: m.MsgId, to: userName});
-          } catch(e) {
-            return JSON.stringify({ok: false, error: e.message});
-          }
-        })()
-        """
-    }
-
-    static func uploadParamsScript(to: String) -> String {
-        let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
-        return """
-        (function() {
-          try {
-            var params = WechatyBro.getUploadParams('\(escapedTo)');
-            return JSON.stringify(params);
-          } catch(e) {
-            return JSON.stringify({error: e.message});
-          }
-        })()
-        """
-    }
-
-    static func roomMembersScript(roomId: String) -> String {
-        let escapedRoom = roomId.replacingOccurrences(of: "'", with: "\\'")
-        return """
-        (function() {
-          try {
-            return JSON.stringify(WechatyBro.getRoomMembers('\(escapedRoom)'));
-          } catch(e) {
-            return JSON.stringify([]);
-          }
-        })()
-        """
-    }
-
-    static func sendImageScript(to: String, mediaId: String) -> String {
-        let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
-        let escapedId = mediaId.replacingOccurrences(of: "'", with: "\\'")
-        return """
-        (function() {
-          try {
-            var result = WechatyBro.sendImageWithMediaId('\(escapedTo)', '\(escapedId)');
-            return JSON.stringify({ok: result});
-          } catch(e) {
-            return JSON.stringify({error: e.message});
-          }
-        })()
-        """
+        guard let str = try? await webView.evaluateJavaScript(wrapped) as? String,
+              let data = str.data(using: .utf8) else { return [] }
+        return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
     }
 
     // MARK: - Init
@@ -272,14 +135,15 @@ public final class WeChatBridge: NSObject, ObservableObject {
         var request = URLRequest(url: URL(string: Self.wechatURL)!)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         webView.load(request)
-        startBridgeRetry()
+
+        // Also start Angular polling as fallback (didFinish may not fire for SPAs)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, !self.bridgeInjected else { return }
+            self.waitForAngularAndInject()
+        }
     }
 
     public func destroy() {
-        stopBridgeRetry()
-        stopHeartbeatMonitor()
-        qrRefreshTimer?.invalidate()
-        qrRefreshTimer = nil
         webView.stopLoading()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "wechatEvent")
         bridgeInjected = false
@@ -295,78 +159,79 @@ public final class WeChatBridge: NSObject, ObservableObject {
         start()
     }
 
+    private static func jsEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "'", with: "\\'")
+         .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
     public func sendMessage(to: String, content: String, watermark: Bool = false) async -> Bool {
         guard state == .ready else { return false }
-        let script = Self.sendScript(to: to, content: content, watermark: watermark)
-        do {
-            let result = try await webView.evaluateJavaScript(script)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let ok = json["ok"] as? Bool {
-                return ok
-            }
-        } catch {}
-        return false
+        let t = Self.jsEscape(to), c = Self.jsEscape(content)
+        let json = await eval("WechatyBro.send('\(t)', '\(c)', \(watermark))")
+        return json?["ok"] as? Bool ?? false
     }
 
     public func sendUntracked(to: String, content: String) async -> (ok: Bool, msgId: String?) {
         guard state == .ready else { return (false, nil) }
-        let script = Self.sendUntrackedScript(to: to, content: content)
-        do {
-            let result = try await webView.evaluateJavaScript(script)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                return (json["ok"] as? Bool ?? false, json["msgId"] as? String)
-            }
-        } catch {}
-        return (false, nil)
+        let t = Self.jsEscape(to), c = Self.jsEscape(content)
+        let js = """
+        (function() {
+          var injector = angular.element(document).injector();
+          var cf = injector.get('chatFactory'), conf = injector.get('confFactory');
+          var userName = WechatyBro._resolveUserName('\(t)') || '\(t)';
+          var m = cf.createMessage({ToUserName: userName, Content: '\(c)', MsgType: conf.MSGTYPE_TEXT});
+          cf.appendMessage(m); cf.sendMessage(m);
+          return {ok: true, msgId: m.MsgId, to: userName};
+        })()
+        """
+        let json = await eval(js)
+        return (json?["ok"] as? Bool ?? false, json?["msgId"] as? String)
     }
 
     public func getContacts() async -> [WeChatContact] {
         guard state == .ready else { return [] }
-        do {
-            let result = try await webView.evaluateJavaScript(Self.contactsScript)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                let parsed = json.compactMap { dict -> WeChatContact? in
-                    guard let id = dict["id"] as? String,
-                          let userName = dict["UserName"] as? String else { return nil }
-                    return WeChatContact(
-                        id: id,
-                        name: dict["name"] as? String ?? dict["NickName"] as? String ?? "",
-                        userName: userName,
-                        nickName: dict["NickName"] as? String,
-                        remarkName: dict["RemarkName"] as? String,
-                        headImgUrl: dict["HeadImgUrl"] as? String,
-                        isRoom: dict["isRoomContact"] as? Bool ?? false,
-                        sex: dict["Sex"] as? Int ?? 0
-                    )
-                }
-                contacts = parsed
-                return parsed
-            }
-        } catch {}
-        return []
+        let raw = await evalArray("WechatyBro.contactList()")
+        let parsed = raw.compactMap { dict -> WeChatContact? in
+            guard let id = dict["id"] as? String,
+                  let userName = dict["UserName"] as? String else { return nil }
+            return WeChatContact(
+                id: id,
+                name: dict["name"] as? String ?? dict["NickName"] as? String ?? "",
+                userName: userName,
+                nickName: dict["NickName"] as? String,
+                remarkName: dict["RemarkName"] as? String,
+                headImgUrl: dict["HeadImgUrl"] as? String,
+                isRoom: dict["isRoomContact"] as? Bool ?? false,
+                sex: dict["Sex"] as? Int ?? 0
+            )
+        }
+        contacts = parsed
+        return parsed
     }
 
     public func getRoomMembers(roomId: String) async -> [WeChatRoomMember] {
         guard state == .ready else { return [] }
-        do {
-            let result = try await webView.evaluateJavaScript(Self.roomMembersScript(roomId: roomId))
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                return json.compactMap { dict -> WeChatRoomMember? in
-                    guard let id = dict["id"] as? String,
-                          let name = dict["name"] as? String else { return nil }
-                    return WeChatRoomMember(id: id, name: name, userName: dict["UserName"] as? String ?? id)
-                }
-            }
-        } catch {}
-        return []
+        let r = Self.jsEscape(roomId)
+        let raw = await evalArray("WechatyBro.getRoomMembers('\(r)')")
+        return raw.compactMap { dict -> WeChatRoomMember? in
+            guard let id = dict["id"] as? String,
+                  let name = dict["name"] as? String else { return nil }
+            return WeChatRoomMember(id: id, name: name, userName: dict["UserName"] as? String ?? id)
+        }
+    }
+
+    public func sendImage(to: String, mediaId: String) async -> Bool {
+        guard state == .ready else { return false }
+        let t = Self.jsEscape(to), m = Self.jsEscape(mediaId)
+        let json = await eval("WechatyBro.sendImageWithMediaId('\(t)', '\(m)')")
+        return json?["ok"] as? Bool ?? false
+    }
+
+    public func getUploadParams(to: String) async -> [String: Any]? {
+        guard state == .ready else { return nil }
+        let t = Self.jsEscape(to)
+        return await eval("WechatyBro.getUploadParams('\(t)')")
     }
 
     // MARK: - QR Code Generation
@@ -397,112 +262,31 @@ public final class WeChatBridge: NSObject, ObservableObject {
 
     // MARK: - Bridge Injection
 
-    private func startBridgeRetry() {
-        stopBridgeRetry()
-        bridgeRetryCount = 0
-        bridgeRetryTimer = Timer.scheduledTimer(withTimeInterval: Self.bridgeRetryInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, !self.bridgeInjected else {
-                    self?.stopBridgeRetry()
-                    return
+    private func waitForAngularAndInject() {
+        webView.evaluateJavaScript("""
+            (typeof angular !== 'undefined' && angular.element && angular.element(document).injector()) ? true : false
+        """) { [weak self] result, _ in
+            guard let self else { return }
+            if result as? Bool == true {
+                Task { @MainActor in await self.injectBridge() }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.waitForAngularAndInject()
                 }
-                self.bridgeRetryCount += 1
-                if self.bridgeRetryCount > Self.bridgeMaxRetries {
-                    print("[WeChatBridge] Bridge injection failed after \(Self.bridgeMaxRetries) retries")
-                    self.stopBridgeRetry()
-                    return
-                }
-                await self.tryInjectBridge()
             }
         }
     }
 
-    private func stopBridgeRetry() {
-        bridgeRetryTimer?.invalidate()
-        bridgeRetryTimer = nil
-    }
-
-    private func tryInjectBridge() async {
+    private func injectBridge() async {
         guard !bridgeInjected else { return }
         do {
-            let result = try await webView.evaluateJavaScript(Self.angularCheckScript)
-            guard let ready = result as? Bool, ready else { return }
+            try await webView.evaluateJavaScript(Self.injectScript)
         } catch { return }
-
+        // WechatyBro.init() returns a JS object — stringify to avoid bridge error
         do {
-            let result = try await webView.evaluateJavaScript(Self.injectionScript)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let code = json["code"] as? Int,
-               code == 200 || code == 304 {
-                bridgeInjected = true
-                stopBridgeRetry()
-                startHeartbeatMonitor()
-
-                let loggedIn = try? await webView.evaluateJavaScript(Self.loginCheckScript) as? Bool
-                if loggedIn == true {
-                    setState(.ready)
-                    Task { _ = await getContacts() }
-                }
-            }
+            _ = try await webView.evaluateJavaScript("JSON.stringify(WechatyBro.init())")
+            bridgeInjected = true
         } catch {}
-    }
-
-    // MARK: - Heartbeat Monitor
-
-    private func startHeartbeatMonitor() {
-        stopHeartbeatMonitor()
-        heartbeatDeadline = Date().addingTimeInterval(Self.heartbeatTimeout)
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let deadline = self.heartbeatDeadline, Date() > deadline {
-                    self.setState(.dead)
-                    self.stopHeartbeatMonitor()
-                }
-            }
-        }
-    }
-
-    private func stopHeartbeatMonitor() {
-        heartbeatTimer?.invalidate()
-        heartbeatTimer = nil
-    }
-
-    // MARK: - QR Refresh
-
-    private func scheduleQRRefresh() {
-        qrRefreshTimer?.invalidate()
-        qrRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.qrRefreshTimeout, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.refreshQRCode()
-            }
-        }
-    }
-
-    private func refreshQRCode() async {
-        guard state == .qrReady || state == .loggingIn else { return }
-        do {
-            let result = try await webView.evaluateJavaScript(Self.qrRefreshScript)
-            if let str = result as? String,
-               let data = str.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let refreshed = json["refreshed"] as? Bool, refreshed {
-                qrCodeURL = nil
-                setState(.loading)
-                return
-            }
-        } catch {}
-
-        // Fallback: full page reload
-        qrCodeURL = nil
-        bridgeInjected = false
-        setState(.loading)
-        var request = URLRequest(url: URL(string: Self.wechatURL)!)
-        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        webView.load(request)
-        startBridgeRetry()
     }
 
     // MARK: - Event Handling
@@ -511,32 +295,28 @@ public final class WeChatBridge: NSObject, ObservableObject {
         switch event {
         case .scan(let code, let url):
             qrCodeURL = url
-            if code == 201 {
+            if code == 201 || code == 200 {
                 setState(.loggingIn)
             } else if state != .qrReady {
                 setState(.qrReady)
-                scheduleQRRefresh()
             }
 
         case .login(let user):
             loggedInUser = user
             setState(.ready)
-            qrRefreshTimer?.invalidate()
-            qrRefreshTimer = nil
             Task { _ = await getContacts() }
 
         case .logout:
             loggedInUser = nil
             contacts = []
             setState(.dead)
-            stopHeartbeatMonitor()
 
         case .message(let msg):
             messageCount += 1
             onMessage?(msg)
 
         case .heartbeat:
-            heartbeatDeadline = Date().addingTimeInterval(Self.heartbeatTimeout)
+            break // JS bridge manages its own heartbeat
 
         case .contacts(let count):
             _ = count
@@ -555,10 +335,7 @@ public final class WeChatBridge: NSObject, ObservableObject {
 extension WeChatBridge: WKNavigationDelegate {
     public nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
-            if !bridgeInjected {
-                await tryInjectBridge()
-                if !bridgeInjected { startBridgeRetry() }
-            }
+            if !bridgeInjected { waitForAngularAndInject() }
         }
     }
 
@@ -577,10 +354,6 @@ extension WeChatBridge: WKNavigationDelegate {
     public nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         Task { @MainActor in
             bridgeInjected = false
-            stopBridgeRetry()
-            stopHeartbeatMonitor()
-            qrRefreshTimer?.invalidate()
-            qrRefreshTimer = nil
             setState(.dead)
         }
     }
