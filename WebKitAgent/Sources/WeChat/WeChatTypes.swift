@@ -101,6 +101,37 @@ public struct WeChatMessage: Sendable {
 
     /// Whether this is an image message (MsgType 3).
     public var isImage: Bool { msgType == 3 }
+
+    /// For room messages, extract the actual sender's UserName from the content.
+    /// WeChat Web format: `senderUserName:\nactual content`
+    public var roomSenderUserName: String? {
+        guard isRoom else { return nil }
+        // Content format: "senderUserName:\ntext" or "senderUserName:<br/>text"
+        if let colonIdx = content.firstIndex(of: ":"),
+           colonIdx > content.startIndex {
+            return String(content[content.startIndex..<colonIdx])
+        }
+        return nil
+    }
+
+    /// For room messages, extract the actual message text (without sender prefix).
+    public var cleanContent: String {
+        guard isRoom, let colonIdx = content.firstIndex(of: ":") else {
+            return content
+        }
+        let afterColon = content.index(after: colonIdx)
+        guard afterColon < content.endIndex else { return "" }
+        var text = String(content[afterColon...])
+        // Strip leading newline or <br/>
+        if text.hasPrefix("\n") { text = String(text.dropFirst()) }
+        if text.hasPrefix("<br/>") { text = String(text.dropFirst(5)) }
+        return text
+    }
+
+    /// The contact ID to use for routing (room ID for rooms, sender for 1:1).
+    public var routingContactId: String {
+        isRoom ? fromUserName : fromUserName
+    }
 }
 
 // MARK: - Bridge Event
