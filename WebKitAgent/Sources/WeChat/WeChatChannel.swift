@@ -55,7 +55,17 @@ public final class WeChatChannel: NSObject, ObservableObject {
     // MARK: - Init
 
     public override init() {
-        let config = SharedWebKitEnvironment.shared.createConfiguration()
+        // Use a dedicated process pool (not the shared one) to avoid
+        // stale page cache from the browser. Each channel instance gets
+        // a completely fresh WebKit process.
+        let config = WKWebViewConfiguration()
+        config.processPool = WKProcessPool()
+        config.websiteDataStore = WKWebsiteDataStore.default()
+        #if os(iOS)
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        #endif
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
 
         self.webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 1280, height: 900),
@@ -78,7 +88,8 @@ public final class WeChatChannel: NSObject, ObservableObject {
         qrCodeURL = nil
         loggedInUser = nil
 
-        let request = URLRequest(url: URL(string: Self.wechatURL)!)
+        var request = URLRequest(url: URL(string: Self.wechatURL)!)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         webView.load(request)
 
         // wx.qq.com never finishes loading (perpetual long-polling), so
@@ -432,7 +443,8 @@ public final class WeChatChannel: NSObject, ObservableObject {
         qrCodeURL = nil
         setState(.loading)
         bridgeInjected = false
-        let request = URLRequest(url: URL(string: Self.wechatURL)!)
+        var request = URLRequest(url: URL(string: Self.wechatURL)!)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         webView.load(request)
         startBridgeRetry()
         startDirectQRExtraction()
