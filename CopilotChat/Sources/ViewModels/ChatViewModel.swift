@@ -91,6 +91,10 @@ public final class ChatViewModel: ObservableObject {
     /// to a specific workspace subdirectory.
     @Published public var projectScope: String?
 
+    /// Skip restoring pending questions from UserDefaults on connect.
+    /// Set to `true` for background project sessions that shouldn't inherit main session state.
+    public var skipPendingRestore: Bool = false
+
     /// Messages filtered by the current project scope.
     /// When a project is selected, shows only messages tagged with that project (or untagged system messages).
     /// When no project is selected, shows all messages.
@@ -257,6 +261,51 @@ public final class ChatViewModel: ObservableObject {
     private var isErrorState: Bool {
         if case .error = chatState { return true }
         return false
+    }
+
+    /// Wait until the view model is connected and ready (idle/waitingForQuestions/working),
+    /// or until timeout. Returns `true` if ready, `false` on timeout or error.
+    public func waitForReady(timeout: TimeInterval = 15) async -> Bool {
+        if isReady { return true }
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            var cancellable: AnyCancellable?
+            let timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                guard !resumed else { return }
+                resumed = true
+                cancellable?.cancel()
+                continuation.resume(returning: false)
+            }
+            cancellable = $chatState
+                .dropFirst() // skip current value
+                .sink { state in
+                    guard !resumed else { return }
+                    switch state {
+                    case .disconnected, .connecting, .compacting:
+                        return // keep waiting
+                    case .error:
+                        resumed = true
+                        timeoutTask.cancel()
+                        cancellable?.cancel()
+                        continuation.resume(returning: false)
+                    default:
+                        resumed = true
+                        timeoutTask.cancel()
+                        cancellable?.cancel()
+                        continuation.resume(returning: true)
+                    }
+                }
+        }
+    }
+
+    private var isReady: Bool {
+        switch chatState {
+        case .idle, .working, .waitingForQuestions, .waitingForUser:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Disconnect and clean up.
@@ -944,6 +993,14 @@ public final class ChatViewModel: ObservableObject {
             return .object([:])
         }
 
+        // Headless/background sessions: auto-answer so the agent loop completes.
+        // Return a clear "no user" signal so the model finishes instead of looping.
+        if skipPendingRestore {
+            return .object([
+                "answer": .string("USER_NOT_AVAILABLE — Do not call ask_questions again. End the conversation now.")
+            ])
+        }
+
         // Single freeform question with no options: merge question into assistant bubble
         if questions.count == 1, questions[0].options.isEmpty {
             let questionText = questions[0].question
@@ -1051,6 +1108,7 @@ public final class ChatViewModel: ObservableObject {
     /// Restore pending questions from previous session (after app restart).
     /// Call after agent connects but before user interaction.
     func restorePendingQuestions() {
+        guard !skipPendingRestore else { return }
         guard let data = UserDefaults.standard.data(forKey: "pendingAskQuestions"),
               let questions = try? JSONDecoder().decode([AskQuestionItem].self, from: data),
               !questions.isEmpty else { return }

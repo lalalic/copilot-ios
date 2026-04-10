@@ -142,6 +142,27 @@ public final class WeChatChannel: NSObject, ObservableObject {
         return false
     }
 
+    /// Send a message WITHOUT tracking it as sent-by-us.
+    /// The bridge will treat this as an incoming message for E2E testing.
+    public func sendUntracked(to: String, content: String) async -> (ok: Bool, msgId: String?) {
+        guard state == .ready else { return (false, nil) }
+
+        let script = WeChatBridge.sendUntrackedScript(to: to, content: content)
+        do {
+            let result = try await webView.evaluateJavaScript(script)
+            if let str = result as? String,
+               let data = str.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let ok = json["ok"] as? Bool ?? false
+                let msgId = json["msgId"] as? String
+                return (ok, msgId)
+            }
+        } catch {
+            // JS evaluation failed
+        }
+        return (false, nil)
+    }
+
     /// Get the current contact list from WeChat.
     public func getContacts() async -> [WeChatContact] {
         guard state == .ready else { return [] }

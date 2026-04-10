@@ -190,6 +190,36 @@ public enum WeChatBridge {
     })()
     """
 
+    /// JavaScript to send a message WITHOUT tracking it as sent-by-us.
+    /// The message goes through chatFactory normally but _trackSentMsg is skipped,
+    /// so the bridge's message:add:success handler will treat it as an incoming message.
+    /// Used for E2E self-testing of the routing pipeline.
+    public static func sendUntrackedScript(to: String, content: String) -> String {
+        let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
+        let escapedContent = content.replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return """
+        (function() {
+          try {
+            var injector = angular.element(document).injector();
+            var chatFactory = injector.get('chatFactory');
+            var confFactory = injector.get('confFactory');
+            var userName = WechatyBro._resolveUserName('\(escapedTo)') || '\(escapedTo)';
+            var m = chatFactory.createMessage({
+              ToUserName: userName,
+              Content: '\(escapedContent)',
+              MsgType: confFactory.MSGTYPE_TEXT
+            });
+            chatFactory.appendMessage(m);
+            chatFactory.sendMessage(m);
+            return JSON.stringify({ok: true, msgId: m.MsgId, to: userName});
+          } catch(e) {
+            return JSON.stringify({ok: false, error: e.message});
+          }
+        })()
+        """
+    }
+
     /// JavaScript to get upload parameters for media upload.
     public static func uploadParamsScript(to: String) -> String {
         let escapedTo = to.replacingOccurrences(of: "'", with: "\\'")
