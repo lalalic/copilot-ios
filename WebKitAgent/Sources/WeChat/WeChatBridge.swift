@@ -181,6 +181,12 @@ public final class WeChatBridge: NSObject, ObservableObject {
         start()
     }
 
+    /// Reload the current page and reinject the bridge.
+    public func reload() {
+        bridgeInjected = false
+        webView.reload()
+    }
+
     private static func jsEscape(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "'", with: "\\'")
@@ -317,15 +323,19 @@ public final class WeChatBridge: NSObject, ObservableObject {
         notifyEvent(event)
         switch event {
         case .scan(let code, let url):
-            qrCodeURL = url
-            if code == 201 {
+            if code == 200 || code == 201 {
+                qrCodeURL = nil
                 setState(.loggingIn)
-            } else if state != .qrReady {
-                setState(.qrReady)
+            } else {
+                qrCodeURL = url
+                if state != .qrReady {
+                    setState(.qrReady)
+                }
             }
 
         case .login(let user):
             loggedInUser = user
+            qrCodeURL = nil
             setState(.ready)
             Task { _ = await getContacts() }
 
@@ -385,6 +395,23 @@ public final class WeChatBridge: NSObject, ObservableObject {
 // MARK: - WKNavigationDelegate
 
 extension WeChatBridge: WKNavigationDelegate {
+    public nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        Task { @MainActor in
+            bridgeInjected = false
+        }
+    }
+
+    public nonisolated func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        Task { @MainActor in
+            bridgeInjected = false
+            // Fallback: start injection polling after page commits (didFinish may not fire for SPAs)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                guard let self, !self.bridgeInjected else { return }
+                self.waitForAngularAndInject()
+            }
+        }
+    }
+
     public nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
             if !bridgeInjected { waitForAngularAndInject() }
