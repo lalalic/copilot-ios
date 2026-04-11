@@ -89,6 +89,13 @@ public struct WeChatMessage: Sendable {
     public let createTime: Int?
     public let voiceBase64: String?
     public let voiceLength: Int?
+    /// Base64-encoded image data (populated for msgType 3).
+    public let imageBase64: String?
+    /// App message fields (populated for msgType 49).
+    public let appTitle: String?
+    public let appDesc: String?
+    public let appUrl: String?
+    public let appType: Int?
     /// Room actual sender (parsed by JS, nil for 1:1 messages).
     public let senderContact: WeChatContact?
     /// Stable IDs of @mentioned users in room messages.
@@ -102,6 +109,9 @@ public struct WeChatMessage: Sendable {
         fromContact: WeChatContact? = nil, toContact: WeChatContact? = nil,
         isRoom: Bool = false, createTime: Int? = nil,
         voiceBase64: String? = nil, voiceLength: Int? = nil,
+        imageBase64: String? = nil,
+        appTitle: String? = nil, appDesc: String? = nil,
+        appUrl: String? = nil, appType: Int? = nil,
         senderContact: WeChatContact? = nil,
         mentions: [String] = [], mentionMe: Bool = false
     ) {
@@ -116,6 +126,11 @@ public struct WeChatMessage: Sendable {
         self.createTime = createTime
         self.voiceBase64 = voiceBase64
         self.voiceLength = voiceLength
+        self.imageBase64 = imageBase64
+        self.appTitle = appTitle
+        self.appDesc = appDesc
+        self.appUrl = appUrl
+        self.appType = appType
         self.senderContact = senderContact
         self.mentions = mentions
         self.mentionMe = mentionMe
@@ -191,6 +206,11 @@ public enum WeChatBridgeEvent: Sendable {
                 createTime: msgData["CreateTime"] as? Int,
                 voiceBase64: msgData["voiceBase64"] as? String,
                 voiceLength: msgData["voiceLength"] as? Int,
+                imageBase64: msgData["imageBase64"] as? String,
+                appTitle: msgData["appTitle"] as? String,
+                appDesc: msgData["appDesc"] as? String,
+                appUrl: msgData["appUrl"] as? String,
+                appType: msgData["appType"] as? Int,
                 senderContact: parseContact(msgData["sender"] as? [String: Any]),
                 mentions: msgData["mentions"] as? [String] ?? [],
                 mentionMe: msgData["mentionMe"] as? Bool ?? false
