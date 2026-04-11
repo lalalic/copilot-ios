@@ -86,13 +86,21 @@ public struct WeChatMessage: Sendable {
     public let createTime: Int?
     public let voiceBase64: String?
     public let voiceLength: Int?
+    /// Room actual sender (parsed by JS, nil for 1:1 messages).
+    public let senderContact: WeChatContact?
+    /// Stable IDs of @mentioned users in room messages.
+    public let mentions: [String]
+    /// Whether the current user was @mentioned.
+    public let mentionMe: Bool
 
     public init(
         msgId: String, msgType: Int, content: String,
         fromUserName: String, toUserName: String,
         fromContact: WeChatContact? = nil, toContact: WeChatContact? = nil,
         isRoom: Bool = false, createTime: Int? = nil,
-        voiceBase64: String? = nil, voiceLength: Int? = nil
+        voiceBase64: String? = nil, voiceLength: Int? = nil,
+        senderContact: WeChatContact? = nil,
+        mentions: [String] = [], mentionMe: Bool = false
     ) {
         self.msgId = msgId
         self.msgType = msgType
@@ -105,6 +113,9 @@ public struct WeChatMessage: Sendable {
         self.createTime = createTime
         self.voiceBase64 = voiceBase64
         self.voiceLength = voiceLength
+        self.senderContact = senderContact
+        self.mentions = mentions
+        self.mentionMe = mentionMe
     }
 
     /// Whether this is a text message (MsgType 1).
@@ -116,35 +127,9 @@ public struct WeChatMessage: Sendable {
     /// Whether this is an image message (MsgType 3).
     public var isImage: Bool { msgType == 3 }
 
-    /// For room messages, extract the actual sender's UserName from the content.
-    /// WeChat Web format: `senderUserName:\nactual content`
-    public var roomSenderUserName: String? {
-        guard isRoom else { return nil }
-        // Content format: "senderUserName:\ntext" or "senderUserName:<br/>text"
-        if let colonIdx = content.firstIndex(of: ":"),
-           colonIdx > content.startIndex {
-            return String(content[content.startIndex..<colonIdx])
-        }
-        return nil
-    }
-
-    /// For room messages, extract the actual message text (without sender prefix).
-    public var cleanContent: String {
-        guard isRoom, let colonIdx = content.firstIndex(of: ":") else {
-            return content
-        }
-        let afterColon = content.index(after: colonIdx)
-        guard afterColon < content.endIndex else { return "" }
-        var text = String(content[afterColon...])
-        // Strip leading newline or <br/>
-        if text.hasPrefix("\n") { text = String(text.dropFirst()) }
-        if text.hasPrefix("<br/>") { text = String(text.dropFirst(5)) }
-        return text
-    }
-
     /// The contact ID to use for routing (room ID for rooms, sender for 1:1).
     public var routingContactId: String {
-        isRoom ? fromUserName : fromUserName
+        fromUserName
     }
 }
 
@@ -202,7 +187,10 @@ public enum WeChatBridgeEvent: Sendable {
                 isRoom: msgData["MMIsChatRoom"] as? Bool ?? false,
                 createTime: msgData["CreateTime"] as? Int,
                 voiceBase64: msgData["voiceBase64"] as? String,
-                voiceLength: msgData["voiceLength"] as? Int
+                voiceLength: msgData["voiceLength"] as? Int,
+                senderContact: parseContact(msgData["sender"] as? [String: Any]),
+                mentions: msgData["mentions"] as? [String] ?? [],
+                mentionMe: msgData["mentionMe"] as? Bool ?? false
             )
             return .message(msg)
 

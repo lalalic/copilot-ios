@@ -38,6 +38,7 @@ public final class WeChatBridge: NSObject, ObservableObject {
     public private(set) var webView: WKWebView
 
     private var bridgeInjected = false
+    private var cachedEmojis: [String]?
 
     private static let wechatURL = "https://wx.qq.com/"
 
@@ -252,6 +253,48 @@ public final class WeChatBridge: NSObject, ObservableObject {
         guard state == .ready else { return nil }
         let t = Self.jsEscape(to)
         return await eval("WechatyBro.getUploadParams('\(t)')")
+    }
+
+    /// Build an @mention string for room replies (e.g. "@Alice\u{2005}").
+    public func buildAtMention(userId: String, roomId: String) async -> String {
+        guard state == .ready else { return "" }
+        let u = Self.jsEscape(userId), r = Self.jsEscape(roomId)
+        let json = await eval("({result: WechatyBro.at('\(u)', '\(r)')})")
+        return json?["result"] as? String ?? ""
+    }
+
+    /// Get supported WeChat emoji shortcodes (cached, 209 codes).
+    public func getSupportedEmojis() async -> [String] {
+        if let cached = cachedEmojis { return cached }
+        guard state == .ready else { return [] }
+        let raw = await evalArray("WechatyBro.getSupportedEmojis().map(e => ({code: e}))")
+        let codes = raw.compactMap { $0["code"] as? String }
+        cachedEmojis = codes
+        return codes
+    }
+
+    /// Simulate an incoming message for testing (bypasses real WeChat).
+    public func simulateMessage(from: String, content: String, sender: String? = nil, msgType: Int = 1) async {
+        guard state == .ready else { return }
+        let f = Self.jsEscape(from), c = Self.jsEscape(content)
+        let senderArg = sender.map { "'\(Self.jsEscape($0))'" } ?? "null"
+        _ = await eval("WechatyBro.simulateMessage('\(f)', '\(c)', \(senderArg), \(msgType))")
+    }
+
+    /// Get a contact's avatar as base64 data URI.
+    public func getContactImage(id: String) async -> String? {
+        guard state == .ready else { return nil }
+        let i = Self.jsEscape(id)
+        let json = await eval("({result: WechatyBro.getContactImage('\(i)')})")
+        return json?["result"] as? String
+    }
+
+    /// Send a file attachment using a pre-uploaded media ID.
+    public func sendFile(to: String, mediaId: String, filename: String, fileSize: Int) async -> Bool {
+        guard state == .ready else { return false }
+        let t = Self.jsEscape(to), m = Self.jsEscape(mediaId), f = Self.jsEscape(filename)
+        let json = await eval("WechatyBro.sendFileWithMediaId('\(t)', '\(m)', '\(f)', \(fileSize))")
+        return json?["ok"] as? Bool ?? false
     }
 
     // MARK: - QR Code Generation
