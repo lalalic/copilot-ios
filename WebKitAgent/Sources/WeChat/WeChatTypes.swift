@@ -171,7 +171,11 @@ public enum WeChatBridgeEvent: Sendable {
             guard let scanData = data as? [String: Any],
                   let url = scanData["url"] as? String else { return nil }
             let code = scanData["code"] as? Int ?? 0
-            return .scan(code: code, url: url)
+            // loginUrl is the URL to encode IN the QR code (/l/ path)
+            // url is the image URL (/qrcode/ path) — transform if loginUrl missing
+            let loginUrl = scanData["loginUrl"] as? String
+                ?? url.replacingOccurrences(of: "/qrcode/", with: "/l/")
+            return .scan(code: code, url: loginUrl)
 
         case "login":
             guard let userData = data as? [String: Any] else { return nil }
