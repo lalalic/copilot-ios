@@ -224,7 +224,8 @@ public final class WeChatBridge: NSObject, ObservableObject {
                 remarkName: dict["RemarkName"] as? String,
                 headImgUrl: dict["HeadImgUrl"] as? String,
                 isRoom: dict["isRoomContact"] as? Bool ?? false,
-                sex: dict["Sex"] as? Int ?? 0
+                sex: dict["Sex"] as? Int ?? 0,
+                memberCount: dict["memberCount"] as? Int ?? 0
             )
         }
         contacts = parsed

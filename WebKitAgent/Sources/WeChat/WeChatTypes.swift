@@ -39,11 +39,13 @@ public struct WeChatContact: Sendable, Equatable, Identifiable {
     public let headImgUrl: String?
     public let isRoom: Bool
     public let sex: Int  // 0=unknown, 1=male, 2=female
+    public let memberCount: Int  // Room member count (0 for non-rooms)
 
     public init(
         id: String, name: String, userName: String,
         nickName: String? = nil, remarkName: String? = nil,
-        headImgUrl: String? = nil, isRoom: Bool = false, sex: Int = 0
+        headImgUrl: String? = nil, isRoom: Bool = false, sex: Int = 0,
+        memberCount: Int = 0
     ) {
         self.id = id
         self.name = name
@@ -53,6 +55,7 @@ public struct WeChatContact: Sendable, Equatable, Identifiable {
         self.headImgUrl = headImgUrl
         self.isRoom = isRoom
         self.sex = sex
+        self.memberCount = memberCount
     }
 }
 
