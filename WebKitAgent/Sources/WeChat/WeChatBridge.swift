@@ -111,6 +111,18 @@ public final class WeChatBridge: NSObject, ObservableObject {
         )
         config.userContentController.addUserScript(bridgeScript)
 
+        // Enable pinch-to-zoom by overriding viewport meta tag
+        let zoomScript = WKUserScript(
+            source: """
+            var meta = document.querySelector('meta[name=viewport]');
+            if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); }
+            meta.content = 'width=device-width, initial-scale=0.5, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes';
+            """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(zoomScript)
+
         self.webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 1280, height: 900),
             configuration: config
@@ -121,6 +133,15 @@ public final class WeChatBridge: NSObject, ObservableObject {
 
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.navigationDelegate = self
+        #if os(iOS)
+        webView.scrollView.minimumZoomScale = 0.25
+        webView.scrollView.maximumZoomScale = 5.0
+        webView.scrollView.bouncesZoom = true
+        #endif
+
+        if #available(iOS 16.4, *) {
+            webView.isInspectable = true
+        }
     }
 
     // MARK: - Public API
@@ -297,7 +318,7 @@ public final class WeChatBridge: NSObject, ObservableObject {
         switch event {
         case .scan(let code, let url):
             qrCodeURL = url
-            if code == 201 || code == 200 {
+            if code == 201 {
                 setState(.loggingIn)
             } else if state != .qrReady {
                 setState(.qrReady)
@@ -332,7 +353,6 @@ public final class WeChatBridge: NSObject, ObservableObject {
     }
 
     private func notifyEvent(_ event: WeChatBridgeEvent) {
-        if case .heartbeat = event { return }
         var name: String
         var data: [String: Any] = [:]
         switch event {
