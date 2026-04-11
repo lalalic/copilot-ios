@@ -32,7 +32,6 @@ public final class WeChatBridge: NSObject, ObservableObject {
 
     public var onMessage: (@Sendable (WeChatMessage) -> Void)?
     public var onStateChange: (@Sendable (WeChatChannelState) -> Void)?
-    public var onEvent: (@Sendable (_ name: String, _ data: [String: Any]) -> Void)?
 
     // MARK: - Internal
 
@@ -320,7 +319,6 @@ public final class WeChatBridge: NSObject, ObservableObject {
     // MARK: - Event Handling
 
     private func handleEvent(_ event: WeChatBridgeEvent) {
-        notifyEvent(event)
         switch event {
         case .scan(let code, let url):
             if code == 200 || code == 201 {
@@ -360,35 +358,6 @@ public final class WeChatBridge: NSObject, ObservableObject {
         case .error(let msg):
             print("[WeChatBridge] JS error: \(msg)")
         }
-    }
-
-    private func notifyEvent(_ event: WeChatBridgeEvent) {
-        var name: String
-        var data: [String: Any] = [:]
-        switch event {
-        case .scan(let code, let url):
-            name = "scan"
-            data = ["code": code, "url": String(url.prefix(60))]
-        case .login(let user):
-            name = "login"
-            data = ["user": user.name]
-        case .logout:
-            name = "logout"
-        case .message(let msg):
-            name = "message"
-            data = ["from": msg.fromContact?.name ?? msg.fromUserName, "type": msg.msgType, "content": String(msg.content.prefix(80))]
-        case .heartbeat:
-            name = "heartbeat"
-        case .contacts(let count):
-            name = "contacts"
-            data = ["count": count]
-        case .contactsReady:
-            name = "contactsReady"
-        case .error(let msg):
-            name = "error"
-            data = ["message": msg]
-        }
-        onEvent?(name, data)
     }
 }
 
