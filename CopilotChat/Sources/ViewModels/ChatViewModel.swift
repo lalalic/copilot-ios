@@ -91,10 +91,6 @@ public final class ChatViewModel: ObservableObject {
     /// to a specific workspace subdirectory.
     @Published public var projectScope: String?
 
-    /// Extra tag appended to the project prefix (e.g. "wechat room", "wechat individual").
-    /// Set by the host app when a project has special channel context.
-    public var projectTag: String?
-
     /// Skip restoring pending questions from UserDefaults on connect.
     /// Set to `true` for background project sessions that shouldn't inherit main session state.
     public var skipPendingRestore: Bool = false
@@ -742,14 +738,14 @@ public final class ChatViewModel: ObservableObject {
     /// Send a message with explicit text (bypasses inputText property).
     /// Used by automation (AppAgent) to avoid race conditions with UI bindings.
     /// When startAgent is true, starts the agent loop directly (avoids Task scheduling issues).
-    public func send(_ text: String, startAgent: Bool = false) async {
+    public func send(_ text: String, startAgent: Bool = false, source: String? = nil) async {
         inputText = text
         if startAgent {
             // Direct agent start — bypasses the fire-and-forget Task in sendPrompt()
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
             inputText = ""
-            messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope))
+            messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
             chatState = .working
             if let agent {
                 if !agent.isRunning {
@@ -793,22 +789,15 @@ public final class ChatViewModel: ObservableObject {
         await sendPrompt(trimmed)
     }
 
-    /// Inject a context steer message into the session without changing UI state.
-    /// Used for lightweight context switches (e.g. project selection).
-    public func steerWithContext(_ text: String) async {
-        guard !text.isEmpty else { return }
-        try? await session?.steer(prompt: text)
-    }
-
     /// Send a prompt directly to the relay via the underlying session WebSocket.
     /// Used by automation — sends the message and waits for session idle/on-hold.
     /// Returns the last assistant message content for diagnostics.
-    public func sendToRelay(_ text: String) async -> String {
+    public func sendToRelay(_ text: String, source: String? = nil) async -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "empty" }
         
         let beforeCount = messages.count
-        messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope))
+        messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
 
         // In loop mode, the model may be blocked waiting for ask_questions or ask_user response.
         // Answer the pending question with the user's text to unblock the model,
@@ -919,11 +908,7 @@ public final class ChatViewModel: ObservableObject {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
-            if let tag = projectTag {
-                effectiveText = "[project:\(project)][\(tag)] \(text)"
-            } else {
-                effectiveText = "[project:\(project)] \(text)"
-            }
+            effectiveText = "[Project: \(project)] \(text)"
         } else {
             effectiveText = text
         }

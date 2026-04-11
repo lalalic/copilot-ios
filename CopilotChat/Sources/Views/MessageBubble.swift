@@ -18,26 +18,43 @@ public struct MessageBubble: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if message.role == .assistant || message.role == .system {
-                avatar
-                VStack(alignment: .leading, spacing: 6) {
-                    contentBlocks
-                    if message.isStreaming {
-                        streamingIndicator
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
+            if let source = message.source {
+                sourceBadge(source)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                if message.role == .assistant || message.role == .system {
+                    avatar
+                    VStack(alignment: .leading, spacing: 6) {
+                        contentBlocks
+                        if message.isStreaming {
+                            streamingIndicator
+                        }
                     }
-                }
-                Spacer(minLength: 40)
-            } else {
-                // User message — right-aligned
-                Spacer(minLength: 40)
-                VStack(alignment: .trailing, spacing: 6) {
-                    contentBlocks
+                    Spacer(minLength: 40)
+                } else {
+                    // User message — right-aligned
+                    Spacer(minLength: 40)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        contentBlocks
+                    }
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Source Badge
+
+    private func sourceBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(Capsule())
     }
 
     // MARK: - Avatar

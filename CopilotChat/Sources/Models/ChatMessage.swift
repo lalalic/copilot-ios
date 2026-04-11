@@ -10,6 +10,8 @@ public struct ChatMessage: Identifiable, Sendable {
     public let timestamp: Date
     public var isStreaming: Bool
     public var project: String?
+    /// Display label showing where this message came from (e.g., "#general", "WeChat: Room")
+    public var source: String?
 
     public enum Role: String, Sendable, Equatable {
         case user
@@ -41,7 +43,8 @@ public struct ChatMessage: Identifiable, Sendable {
         content: [ContentBlock],
         timestamp: Date = Date(),
         isStreaming: Bool = false,
-        project: String? = nil
+        project: String? = nil,
+        source: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -49,6 +52,7 @@ public struct ChatMessage: Identifiable, Sendable {
         self.timestamp = timestamp
         self.isStreaming = isStreaming
         self.project = project
+        self.source = source
     }
 }
 
