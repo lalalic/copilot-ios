@@ -91,9 +91,9 @@ public final class ChatViewModel: ObservableObject {
     /// to a specific workspace subdirectory.
     @Published public var projectScope: String?
 
-    /// The type of the currently selected project (e.g. "project-assistant", "wechat-assistant").
-    /// Used to enrich the prompt prefix sent to the LLM.
-    public var projectType: String?
+    /// Extra tag appended to the project prefix (e.g. "wechat room", "wechat individual").
+    /// Set by the host app when a project has special channel context.
+    public var projectTag: String?
 
     /// Skip restoring pending questions from UserDefaults on connect.
     /// Set to `true` for background project sessions that shouldn't inherit main session state.
@@ -919,10 +919,10 @@ public final class ChatViewModel: ObservableObject {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
-            if let pType = projectType {
-                effectiveText = "[Project: \(project) | \(pType)] \(text)"
+            if let tag = projectTag {
+                effectiveText = "[project:\(project)][\(tag)] \(text)"
             } else {
-                effectiveText = "[Project: \(project)] \(text)"
+                effectiveText = "[project:\(project)] \(text)"
             }
         } else {
             effectiveText = text
