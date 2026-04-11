@@ -91,6 +91,10 @@ public final class ChatViewModel: ObservableObject {
     /// to a specific workspace subdirectory.
     @Published public var projectScope: String?
 
+    /// The type of the currently selected project (e.g. "project-assistant", "wechat-assistant").
+    /// Used to enrich the prompt prefix sent to the LLM.
+    public var projectType: String?
+
     /// Skip restoring pending questions from UserDefaults on connect.
     /// Set to `true` for background project sessions that shouldn't inherit main session state.
     public var skipPendingRestore: Bool = false
@@ -789,6 +793,13 @@ public final class ChatViewModel: ObservableObject {
         await sendPrompt(trimmed)
     }
 
+    /// Inject a context steer message into the session without changing UI state.
+    /// Used for lightweight context switches (e.g. project selection).
+    public func steerWithContext(_ text: String) async {
+        guard !text.isEmpty else { return }
+        try? await session?.steer(prompt: text)
+    }
+
     /// Send a prompt directly to the relay via the underlying session WebSocket.
     /// Used by automation — sends the message and waits for session idle/on-hold.
     /// Returns the last assistant message content for diagnostics.
@@ -908,7 +919,11 @@ public final class ChatViewModel: ObservableObject {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
-            effectiveText = "[Project: \(project)] \(text)"
+            if let pType = projectType {
+                effectiveText = "[Project: \(project) | \(pType)] \(text)"
+            } else {
+                effectiveText = "[Project: \(project)] \(text)"
+            }
         } else {
             effectiveText = text
         }
