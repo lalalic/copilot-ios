@@ -67,14 +67,16 @@ public final class MemoryToolProvider: Sendable {
         }
     }
 
+    /// Resolve a memory path. Accepts paths under `.neo/` (default) or project paths like `projectA/memory.md`.
+    /// All paths are sandboxed to `baseDirectory`.
     private func resolveNeoPath(_ path: String?) -> URL? {
         let relative = (path?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? path!.trimmingCharacters(in: .whitespacesAndNewlines)
             : ".neo/memory.md"
         let sanitized = relative.replacingOccurrences(of: "../", with: "")
         let resolved = baseDirectory.appendingPathComponent(sanitized).standardized
-        let neoRoot = neoDirectory.standardized
-        guard resolved.path.hasPrefix(neoRoot.path) else { return nil }
+        let base = baseDirectory.standardized
+        guard resolved.path.hasPrefix(base.path) else { return nil }
         return resolved
     }
 
@@ -178,13 +180,13 @@ public final class MemoryToolProvider: Sendable {
     private var memoryReadTool: ToolDefinition {
         ToolDefinition(
             name: "memory_read",
-            description: "Read memory markdown under .neo. Defaults to .neo/memory.md. Optionally read only a named section.",
+            description: "Read memory markdown. Defaults to .neo/memory.md. Supports project paths like 'myproject/memory.md'. Optionally read only a named section.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Path under .neo/, e.g. '.neo/memory.md'")
+                        "description": .string("Path relative to workspace, e.g. '.neo/memory.md' or 'projectA/memory.md'")
                     ]),
                     "section": .object([
                         "type": .string("string"),
@@ -201,7 +203,7 @@ public final class MemoryToolProvider: Sendable {
             let section: String?
             if case .string(let s) = dict["section"] { section = s } else { section = nil }
 
-            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+            guard let url = self.resolveNeoPath(path) else { return "Error: path must be within workspace" }
             let content = try self.readString(at: url)
             if let section, !section.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return self.extractSection(section, from: content) ?? ""
@@ -213,7 +215,7 @@ public final class MemoryToolProvider: Sendable {
     private var memoryAppendTool: ToolDefinition {
         ToolDefinition(
             name: "memory_append",
-            description: "Append timestamped memory content under .neo/memory.md (or another .neo file). Optional section writes under a section heading.",
+            description: "Append timestamped memory content. Defaults to .neo/memory.md. Supports project paths like 'projectA/memory.md'. Optional section writes under a section heading.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -223,7 +225,7 @@ public final class MemoryToolProvider: Sendable {
                     ]),
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Optional .neo path; default .neo/memory.md")
+                        "description": .string("Path relative to workspace; default .neo/memory.md. Can use project paths like 'projectA/memory.md'")
                     ]),
                     "section": .object([
                         "type": .string("string"),
@@ -244,7 +246,7 @@ public final class MemoryToolProvider: Sendable {
             let section: String?
             if case .string(let s) = dict["section"] { section = s } else { section = nil }
 
-            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+            guard let url = self.resolveNeoPath(path) else { return "Error: path must be within workspace" }
             var existing = try self.readString(at: url).trimmingCharacters(in: .whitespacesAndNewlines)
 
             let entry = "- [\(self.timestamp())] \(content.trimmingCharacters(in: .whitespacesAndNewlines))"
@@ -271,7 +273,7 @@ public final class MemoryToolProvider: Sendable {
     private var memoryWriteSectionTool: ToolDefinition {
         ToolDefinition(
             name: "memory_write_section",
-            description: "Replace or create a ## section in a memory markdown file under .neo.",
+            description: "Replace or create a ## section in a memory markdown file. Defaults to .neo/memory.md. Supports project paths like 'projectA/memory.md'.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -285,7 +287,7 @@ public final class MemoryToolProvider: Sendable {
                     ]),
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Optional .neo path; default .neo/memory.md")
+                        "description": .string("Path relative to workspace; default .neo/memory.md. Can use 'projectA/memory.md'")
                     ])
                 ]),
                 "required": .array([.string("section"), .string("content")])
@@ -300,7 +302,7 @@ public final class MemoryToolProvider: Sendable {
             }
             let path: String?
             if case .string(let p) = dict["path"] { path = p } else { path = nil }
-            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+            guard let url = self.resolveNeoPath(path) else { return "Error: path must be within workspace" }
 
             let existing = try self.readString(at: url)
             let merged = self.replaceOrAppendSection(section, with: content, in: existing)
@@ -360,13 +362,13 @@ public final class MemoryToolProvider: Sendable {
     private var memoryListTool: ToolDefinition {
         ToolDefinition(
             name: "memory_list",
-            description: "List files/directories under .neo memory workspace.",
+            description: "List files/directories in workspace. Defaults to .neo. Supports any workspace path like 'projectA'.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Optional path under .neo/, e.g. '.neo/reports/sessions'")
+                        "description": .string("Path relative to workspace, e.g. '.neo/reports/sessions' or 'projectA'")
                     ])
                 ])
             ]),
@@ -380,7 +382,7 @@ public final class MemoryToolProvider: Sendable {
                 path = ".neo"
             }
 
-            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+            guard let url = self.resolveNeoPath(path) else { return "Error: path must be within workspace" }
             let contents = try FileManager.default.contentsOfDirectory(
                 at: url,
                 includingPropertiesForKeys: [.isDirectoryKey],
@@ -397,7 +399,7 @@ public final class MemoryToolProvider: Sendable {
     private var memorySearchTool: ToolDefinition {
         ToolDefinition(
             name: "memory_search",
-            description: "Search across all .neo memory files for a keyword or phrase. Returns matching lines with file paths.",
+            description: "Search across memory files for a keyword or phrase. Returns matching lines with file paths. Defaults to .neo, can search project dirs.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -407,7 +409,7 @@ public final class MemoryToolProvider: Sendable {
                     ]),
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Optional directory to search within, e.g. '.neo/memory/topics'. Defaults to '.neo'")
+                        "description": .string("Directory to search within, e.g. '.neo/memory/topics' or 'projectA'. Defaults to '.neo'")
                     ])
                 ]),
                 "required": .array([.string("query")])
@@ -463,13 +465,13 @@ public final class MemoryToolProvider: Sendable {
     private var memoryDeleteTool: ToolDefinition {
         ToolDefinition(
             name: "memory_delete",
-            description: "Delete a memory file or a section within a file under .neo.",
+            description: "Delete a memory file or a section within a file. Works with .neo paths or project paths.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "path": .object([
                         "type": .string("string"),
-                        "description": .string("Path under .neo/ to delete, e.g. '.neo/memory/topics/old-topic.md'")
+                        "description": .string("Path relative to workspace, e.g. '.neo/memory/topics/old-topic.md' or 'projectA/memory.md'")
                     ]),
                     "section": .object([
                         "type": .string("string"),
@@ -488,7 +490,7 @@ public final class MemoryToolProvider: Sendable {
             let section: String?
             if case .string(let s) = dict["section"] { section = s } else { section = nil }
 
-            guard let url = self.resolveNeoPath(path) else { return "Error: invalid .neo path" }
+            guard let url = self.resolveNeoPath(path) else { return "Error: path must be within workspace" }
 
             if let section {
                 // Delete section from file
