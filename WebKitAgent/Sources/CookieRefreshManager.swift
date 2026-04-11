@@ -39,7 +39,7 @@ public final class CookieRefreshManager {
     private var refreshWebView: WKWebView?
     private var navigationDelegate: RefreshNavigationDelegate?
 
-    public init(refreshInterval: TimeInterval = 30 * 60) { // Default: every 30 min
+    public init(refreshInterval: TimeInterval = 60 * 60) { // Default: every 60 min
         self.refreshInterval = refreshInterval
     }
 

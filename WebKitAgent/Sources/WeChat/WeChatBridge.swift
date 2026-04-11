@@ -94,14 +94,7 @@ public final class WeChatBridge: NSObject, ObservableObject {
     // MARK: - Init
 
     public override init() {
-        let config = WKWebViewConfiguration()
-        config.processPool = WKProcessPool()
-        config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
-        #if os(iOS)
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        #endif
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
+        let config = SharedWebKitEnvironment.shared.createConfiguration()
 
         let bridgeScript = WKUserScript(
             source: Self.bridgeSource,
