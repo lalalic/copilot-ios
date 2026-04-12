@@ -43,6 +43,21 @@ public struct MessageBubble: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        let prefix = message.source.map { "\($0): " } ?? ""
+        let body = message.content.compactMap { block -> String? in
+            switch block {
+            case .text(let t): return t
+            case .markdown(let t): return t
+            case .code(let c, _): return c
+            default: return nil
+            }
+        }.joined(separator: " ")
+        return prefix + body
     }
 
     // MARK: - Source Badge

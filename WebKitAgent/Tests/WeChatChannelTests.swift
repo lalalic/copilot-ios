@@ -173,6 +173,7 @@ final class WeChatTypesTests: XCTestCase {
 
 // MARK: - WeChatBridge Tests
 
+@MainActor
 final class WeChatBridgeTests: XCTestCase {
 
     func testInjectScriptNotEmpty() {
@@ -194,16 +195,6 @@ final class WeChatBridgeTests: XCTestCase {
     func testBridgeSourceContainsSendToPuppeteer() {
         XCTAssertTrue(WeChatBridge.bridgeSource.contains("sendToPuppeteer"))
     }
-
-    func testInjectScriptContainsWechatyBro2() {
-        XCTAssertTrue(WeChatBridge.injectScript.contains("WechatyBro"))
-    }
-}
-
-// MARK: - WeChatBridge Tests
-
-@MainActor
-final class WeChatBridgeTests: XCTestCase {
 
     func testInitialState() {
         let bridge = WeChatBridge()

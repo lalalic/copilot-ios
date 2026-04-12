@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file.
+    /// All file tools: read_file, write_file, create_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool]
+        [readFileTool, writeFileTool, createProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -127,6 +127,160 @@ public final class FileToolProvider: Sendable {
                 return "Written \(content.count) chars to \(path)"
             } catch {
                 return "Error writing \(path): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - create_project
+
+    private var createProjectTool: ToolDefinition {
+        ToolDefinition(
+            name: "create_project",
+            description: "Create a new project in the workspace. Steps: 1) Read .templates/projects/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object([
+                        "type": .string("string"),
+                        "description": .string("Project name (e.g., 'Fitness Tracker')")
+                    ]),
+                    "description": .object([
+                        "type": .string("string"),
+                        "description": .string("One-line project description")
+                    ]),
+                    "template": .object([
+                        "type": .string("string"),
+                        "description": .string("Template name from .templates/projects/ (default: 'general')")
+                    ]),
+                    "goal": .object([
+                        "type": .string("string"),
+                        "description": .string("Project goal (1-2 sentences)")
+                    ]),
+                    "features": .object([
+                        "type": .string("array"),
+                        "items": .object(["type": .string("string")]),
+                        "description": .string("List of MVP features")
+                    ])
+                ]),
+                "required": .array([.string("name")])
+            ]),
+            overridesBuiltInTool: false,
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: FileToolProvider not available" }
+            guard case .object(let dict) = args else {
+                return "Error: 'name' (string) required"
+            }
+            guard case .string(let name) = dict["name"] else {
+                if dict["name"] == nil {
+                    return "Error: 'name' (string) required"
+                }
+                return "Error: 'name' (string) required"
+            }
+            guard !name.isEmpty else {
+                return "Error: project name cannot be empty"
+            }
+            // Validate name: no path traversal, no slashes
+            guard !name.contains("/"), !name.contains(".."), !name.hasPrefix(".") else {
+                return "Error: invalid project name '\(name)'"
+            }
+
+            let fm = FileManager.default
+            let projectDir = self.baseDirectory.appendingPathComponent(name, isDirectory: true)
+
+            // Check for duplicates
+            guard !fm.fileExists(atPath: projectDir.path) else {
+                return "Error: project already exists at '\(name)'"
+            }
+
+            // Extract optional params
+            let description: String? = {
+                if case .string(let s) = dict["description"] { return s }
+                return nil
+            }()
+            let templateName: String? = {
+                if case .string(let s) = dict["template"] { return s }
+                return nil
+            }()
+            let goal: String? = {
+                if case .string(let s) = dict["goal"] { return s }
+                return nil
+            }()
+            let features: [String]? = {
+                if case .array(let arr) = dict["features"] {
+                    return arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+                }
+                return nil
+            }()
+
+            do {
+                // Create project directory
+                try fm.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+                // Copy template files if template specified
+                var templateUsed: String? = nil
+                if let tpl = templateName {
+                    let templateDir = self.baseDirectory
+                        .appendingPathComponent(".templates/projects/\(tpl)", isDirectory: true)
+                    if fm.fileExists(atPath: templateDir.path) {
+                        // Copy all template contents except README.md (we'll generate that)
+                        let contents = try fm.contentsOfDirectory(
+                            at: templateDir, includingPropertiesForKeys: [.isDirectoryKey],
+                            options: [.skipsHiddenFiles]
+                        )
+                        for item in contents {
+                            let itemName = item.lastPathComponent
+                            if itemName.lowercased() == "readme.md" { continue }
+                            let dest = projectDir.appendingPathComponent(itemName)
+                            try fm.copyItem(at: item, to: dest)
+                        }
+                        templateUsed = tpl
+                    }
+                }
+
+                // Create default directories
+                for dir in ["docs", "progress"] {
+                    let dirURL = projectDir.appendingPathComponent(dir, isDirectory: true)
+                    if !fm.fileExists(atPath: dirURL.path) {
+                        try fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+                    }
+                }
+
+                // Generate README.md
+                var readme = "---\nname: \(name)\n"
+                if let desc = description { readme += "description: \(desc)\n" }
+                if let tpl = templateUsed { readme += "template: \(tpl)\n" }
+                readme += "---\n\n# \(name)\n"
+                if let desc = description { readme += "\n\(desc)\n" }
+                if let g = goal {
+                    readme += "\n# goal\n\(g)\n"
+                }
+                if let feats = features, !feats.isEmpty {
+                    readme += "\n# features\n"
+                    for f in feats { readme += "- [ ] \(f)\n" }
+                }
+
+                try readme.write(
+                    to: projectDir.appendingPathComponent("README.md"),
+                    atomically: true, encoding: .utf8
+                )
+
+                // Generate package.json
+                var pkg: [String: Any] = ["name": name, "version": "0.1.0"]
+                if let desc = description { pkg["description"] = desc }
+                if let tpl = templateUsed { pkg["projectType"] = tpl }
+                let pkgData = try JSONSerialization.data(withJSONObject: pkg, options: [.prettyPrinted, .sortedKeys])
+                try pkgData.write(to: projectDir.appendingPathComponent("package.json"))
+
+                var msg = "Created project '\(name)'"
+                if let tpl = templateUsed { msg += " from template '\(tpl)'" }
+                msg += " at \(name)/"
+                logger.info("create_project: \(msg)")
+                return msg
+            } catch {
+                // Clean up on failure
+                try? fm.removeItem(at: projectDir)
+                return "Error creating project: \(error.localizedDescription)"
             }
         }
     }
