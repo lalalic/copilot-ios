@@ -151,6 +151,7 @@ public struct ChatView: View {
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: viewModel.filteredMessages.count) { _, _ in
                 if let lastId = viewModel.filteredMessages.last?.id {
                     proxy.scrollTo(lastId, anchor: .bottom)
