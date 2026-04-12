@@ -817,6 +817,29 @@ public final class ChatViewModel: ObservableObject {
         await sendPrompt(trimmed)
     }
 
+    /// Add a message to the displayed list without triggering agent processing.
+    /// Used to mirror project-session messages into the main chat view.
+    @MainActor
+    public func mirror(_ message: ChatMessage) {
+        messages.append(message)
+    }
+
+    /// State-aware send for channel messages (Discord, WeChat).
+    /// Routes to the correct method based on current chat state:
+    /// - idle → start agent (new turn)
+    /// - waitingForQuestions / waitingForUser → answer/resume (answer-question)
+    /// - working → steer running agent
+    public func channelSend(_ text: String, source: String? = nil) async {
+        switch chatState {
+        case .waitingForQuestions, .waitingForUser:
+            _ = await sendToRelay(text, source: source)
+        case .working:
+            await send(text, startAgent: false, source: source)
+        default:
+            await send(text, startAgent: true, source: source)
+        }
+    }
+
     /// Send a prompt directly to the relay via the underlying session WebSocket.
     /// Used by automation — sends the message and waits for session idle/on-hold.
     /// Returns the last assistant message content for diagnostics.
@@ -1022,10 +1045,11 @@ public final class ChatViewModel: ObservableObject {
         }
 
         // Headless/background sessions: auto-answer so the agent loop completes.
-        // Return a clear "no user" signal so the model finishes instead of looping.
+        // Return a neutral acknowledgment — avoid "end conversation" directives that
+        // would poison the conversation history and prevent future turns from calling tools.
         if skipPendingRestore {
             return .object([
-                "answer": .string("USER_NOT_AVAILABLE — Do not call ask_questions again. End the conversation now.")
+                "answer": .string("Acknowledged. No follow-up needed right now.")
             ])
         }
 
