@@ -145,6 +145,12 @@ public final class ChatViewModel: ObservableObject {
     /// Used by DiscordService to receive discord_message notifications via the shared WS.
     public var onCustomNotification: ((_ method: String, _ params: [String: JSONValue]?) -> Void)?
 
+    /// Callback for channel-forwarded ask_questions in headless sessions.
+    /// When set, questions are dispatched through this handler (e.g., to Discord/WeChat)
+    /// instead of being auto-answered. The handler receives the question text for display.
+    /// The session enters `.waitingForQuestions` and the next `channelSend` resumes the continuation.
+    public var onChannelQuestions: ((_ questionText: String) async -> Void)?
+
     /// Send a raw JSON-RPC request via the session's connection.
     /// Returns the result value. Throws if not connected or on RPC error.
     public func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
@@ -1044,9 +1050,31 @@ public final class ChatViewModel: ObservableObject {
             return .object([:])
         }
 
-        // Headless/background sessions: auto-answer so the agent loop completes.
-        // Return a neutral acknowledgment — avoid "end conversation" directives that
-        // would poison the conversation history and prevent future turns from calling tools.
+        // Headless/background sessions with channel forwarding:
+        // If onChannelQuestions is set, forward questions to the channel (Discord/WeChat)
+        // and wait for the next channelSend to resume the continuation.
+        if skipPendingRestore, let onChannelQuestions {
+            // Build a text representation of the questions for the channel
+            let questionText: String
+            if questions.count == 1 {
+                questionText = questions[0].question
+            } else {
+                questionText = questions.enumerated().map { i, q in "\(i + 1). \(q.question)" }.joined(separator: "\n")
+            }
+
+            chatState = .waitingForQuestions(questions)
+            activeQuestions = questions
+
+            // Dispatch to channel (Discord/WeChat) — non-blocking
+            await onChannelQuestions(questionText)
+
+            // Wait for answer via continuation (channelSend will call submitAskQuestions)
+            return await withCheckedContinuation { continuation in
+                self.askQuestionsContinuation = continuation
+            }
+        }
+
+        // Headless/background sessions without channel forwarding: auto-answer.
         if skipPendingRestore {
             return .object([
                 "answer": .string("Acknowledged. No follow-up needed right now.")
