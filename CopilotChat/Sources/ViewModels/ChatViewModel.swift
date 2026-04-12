@@ -141,6 +141,24 @@ public final class ChatViewModel: ObservableObject {
     /// Diagnostic: whether session is non-nil (for testing tools).
     public var hasSessionForDiag: Bool { session != nil }
 
+    /// Handler for custom JSON-RPC notifications that aren't session.event or relay notifications.
+    /// Used by DiscordService to receive discord_message notifications via the shared WS.
+    public var onCustomNotification: ((_ method: String, _ params: [String: JSONValue]?) -> Void)?
+
+    /// Send a raw JSON-RPC request via the session's connection.
+    /// Returns the result value. Throws if not connected or on RPC error.
+    public func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        guard let session = session ?? agent?.session else {
+            throw ChatViewModelError.notConnected
+        }
+        return try await session.sendRPC(method: method, params: params)
+    }
+
+    enum ChatViewModelError: LocalizedError {
+        case notConnected
+        var errorDescription: String? { "Not connected to relay" }
+    }
+
     /// Clear all session history (JSONL files).
     public func clearSessionHistory() {
         sessionLogger?.clearHistory()
@@ -339,6 +357,11 @@ public final class ChatViewModel: ObservableObject {
             self?.handleRelayNotification(type: type, params: params)
         }
 
+        // Forward custom notifications (e.g., discord_message)
+        session.onCustomNotification = { [weak self] method, params in
+            self?.onCustomNotification?(method, params)
+        }
+
         usageTracker.resetSession()
         loadChatHistory()
         chatState = .idle
@@ -389,6 +412,11 @@ public final class ChatViewModel: ObservableObject {
         // Handle relay server notifications (usage, progress, build status, delegation)
         agent.session.onRelayNotification = { [weak self] type, params in
             self?.handleRelayNotification(type: type, params: params)
+        }
+
+        // Forward custom notifications (e.g., discord_message)
+        agent.session.onCustomNotification = { [weak self] method, params in
+            self?.onCustomNotification?(method, params)
         }
 
         loadChatHistory()

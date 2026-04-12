@@ -112,6 +112,18 @@ public enum JSONValue: Codable, Equatable, Sendable {
         return nil
     }
     
+    /// Extract the object value, or nil if not an object.
+    public var objectValue: [String: JSONValue]? {
+        if case .object(let obj) = self { return obj }
+        return nil
+    }
+
+    /// Extract the array value, or nil if not an array.
+    public var arrayValue: [JSONValue]? {
+        if case .array(let arr) = self { return arr }
+        return nil
+    }
+
     /// Subscript for object key access.
     public subscript(key: String) -> JSONValue? {
         if case .object(let dict) = self { return dict[key] }

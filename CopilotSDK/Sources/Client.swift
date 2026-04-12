@@ -878,6 +878,10 @@ public final class CopilotSession: @unchecked Sendable {
     /// Called on any JSON-RPC `notification` method message from the relay.
     public var onRelayNotification: ((_ type: String, _ params: [String: JSONValue]) -> Void)?
 
+    /// Handler for custom notifications — called for any JSON-RPC notification method
+    /// that is NOT `notification` or `session.event` (e.g., `discord_message`).
+    public var onCustomNotification: ((_ method: String, _ params: [String: JSONValue]?) -> Void)?
+
     init(sessionId: String, connection: JSONRPCConnection, config: SessionConfig? = nil, tools: [ToolDefinition]? = nil, hooks: SessionHooks? = nil) {
         self.sessionId = sessionId
         self.connection = connection
@@ -1001,6 +1005,16 @@ public final class CopilotSession: @unchecked Sendable {
                         if case .string(let t) = params["type"] { type = t } else { type = "unknown" }
                         NSLog("[CopilotSDK] Relay notification type=%@, hasHandler=%@", type, self.onRelayNotification != nil ? "yes" : "no")
                         self.onRelayNotification?(type, params)
+                    }
+                    continue
+                }
+
+                // Dispatch custom notifications (e.g., discord_message) before session.event guard
+                if notification.method != "session.event" && notification.method != "session.lifecycle" {
+                    if let handler = self.onCustomNotification {
+                        let params: [String: JSONValue]?
+                        if case .object(let p) = notification.params { params = p } else { params = nil }
+                        handler(notification.method, params)
                     }
                     continue
                 }
