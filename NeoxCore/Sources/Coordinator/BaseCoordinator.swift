@@ -502,7 +502,7 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Reconnect
 
-    public func reconnect() {
+    open func reconnect() {
         applyRelaySelection()
         saveRelaySettings()
         chatViewModel?.disconnect()
@@ -620,7 +620,7 @@ open class BaseCoordinator: ObservableObject {
         }
     }
 
-    public func saveRelaySettings() {
+    open func saveRelaySettings() {
         NeoxCoreSettings.saveRelaySettings(
             useLocalRelay: useLocalRelay,
             localRelayURL: localRelayURL,
