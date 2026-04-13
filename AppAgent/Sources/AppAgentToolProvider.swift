@@ -8,15 +8,21 @@ public final class AppAgentToolProvider {
 
     public let scanner: AccessibilityScanner
     public let engine: InteractionEngine
+    public let demoRuntime: DemoRuntime
+    public let demoToolProvider: DemoToolProvider
 
     public init() {
         self.scanner = AccessibilityScanner()
         self.engine = InteractionEngine(scanner: scanner)
+        self.demoRuntime = DemoRuntime(scanner: scanner)
+        self.demoToolProvider = DemoToolProvider(runtime: demoRuntime)
     }
 
     public init(scanner: AccessibilityScanner, engine: InteractionEngine) {
         self.scanner = scanner
         self.engine = engine
+        self.demoRuntime = DemoRuntime(scanner: scanner)
+        self.demoToolProvider = DemoToolProvider(runtime: demoRuntime)
     }
 
     // MARK: - Skill Prompt
@@ -39,10 +45,10 @@ public final class AppAgentToolProvider {
     Workflow: snapshot → read refs → tap/type/swipe → snapshot again after interactions.
     """
 
-    // MARK: - Single Tool
+    // MARK: - Tools (app_agent + demo)
 
     public var tools: [ToolDefinition] {
-        [appAgentTool]
+        [appAgentTool] + demoToolProvider.tools
     }
 
     private var appAgentTool: ToolDefinition {
