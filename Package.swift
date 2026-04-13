@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "WebKitAgent", targets: ["WebKitAgent"]),
         .library(name: "AppAgent", targets: ["AppAgent"]),
         .library(name: "MediaKit", targets: ["MediaKit"]),
+        .library(name: "NeoxCore", targets: ["NeoxCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/yangliu-1995/ffmpeg-kit-spm.git", exact: "6.0.0"),
@@ -95,6 +96,13 @@ let package = Package(
             name: "MediaKitTests",
             dependencies: ["MediaKit"],
             path: "MediaKit/Tests"
+        ),
+
+        // MARK: - NeoxCore (depends on CopilotSDK + CopilotChat + AppAgent + WebKitAgent)
+        .target(
+            name: "NeoxCore",
+            dependencies: ["CopilotSDK", "CopilotChat", "AppAgent", "WebKitAgent"],
+            path: "NeoxCore/Sources"
         ),
     ]
 )
