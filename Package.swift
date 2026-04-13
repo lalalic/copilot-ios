@@ -98,10 +98,10 @@ let package = Package(
             path: "MediaKit/Tests"
         ),
 
-        // MARK: - NeoxCore (depends on CopilotSDK + CopilotChat + AppAgent + WebKitAgent)
+        // MARK: - NeoxCore (depends on CopilotSDK + CopilotChat + AppAgent + WebKitAgent + MediaKit)
         .target(
             name: "NeoxCore",
-            dependencies: ["CopilotSDK", "CopilotChat", "AppAgent", "WebKitAgent"],
+            dependencies: ["CopilotSDK", "CopilotChat", "AppAgent", "WebKitAgent", "MediaKit"],
             path: "NeoxCore/Sources"
         ),
     ]
