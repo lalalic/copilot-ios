@@ -3,8 +3,8 @@ import StoreKit
 
 // MARK: - PaymentManager
 
-/// Manages Apple IAP credit purchases using StoreKit 2.
-/// Credits are consumable products that add to the local balance.
+/// Manages credit purchases via Apple IAP and Stripe.
+/// Host app configures SKUs and Stripe URL at init time.
 public class PaymentManager: ObservableObject, @unchecked Sendable {
     
     // MARK: - Published State
@@ -13,19 +13,49 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     @Published public private(set) var isPurchasing: Bool = false
     @Published public private(set) var lastError: String?
     
-    // MARK: - Product IDs
+    // MARK: - Configuration
     
-    public static let topupProductID = "com.neox.credits.topup"
+    /// A credit pack definition — maps a product ID to its credit value.
+    public struct CreditPack: Sendable {
+        public let productID: String
+        public let credits: Double
+        public let description: String
+        
+        public init(productID: String, credits: Double, description: String = "") {
+            self.productID = productID
+            self.credits = credits
+            self.description = description
+        }
+    }
     
-    public static let productIDs: Set<String> = [
-        topupProductID,  // $9.99 → $7.50 credits
-    ]
+    /// Apple IAP credit packs configured by the host app.
+    public let iapPacks: [CreditPack]
     
-    /// How much credit (in USD equivalent) each product grants.
-    public static let creditValues: [String: Double] = [
-        "com.neox.credits.test": 0.75,      // sandbox test
-        topupProductID: 7.50,
-    ]
+    /// Stripe payment link URL (nil = Stripe disabled).
+    /// Should include `{CLIENT_ID}` placeholder for client_reference_id substitution.
+    public let stripePaymentURL: String?
+    
+    /// Stripe relay verification URL (e.g., "https://relay.ai.qili2.com/stripe/verify").
+    public let stripeVerifyURL: String?
+    
+    /// Client ID for Stripe (typically device UUID).
+    public let clientID: String
+    
+    /// Lookup: product ID → credit value.
+    public var creditValues: [String: Double] {
+        var map: [String: Double] = [:]
+        for pack in iapPacks {
+            map[pack.productID] = pack.credits
+        }
+        return map
+    }
+    
+    // MARK: - Backward Compatibility
+    
+    /// Product IDs for StoreKit fetch.
+    public var productIDs: Set<String> {
+        Set(iapPacks.map(\.productID))
+    }
     
     // MARK: - Dependencies
     
@@ -34,8 +64,31 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     
     // MARK: - Init
     
-    public init(usageTracker: UsageTracker) {
+    /// Create a PaymentManager with configurable packs and optional Stripe support.
+    /// - Parameters:
+    ///   - usageTracker: The usage tracker for crediting balance.
+    ///   - iapPacks: Apple IAP credit packs (product IDs + credit values).
+    ///   - stripePaymentURL: Stripe Payment Link URL template (nil to disable).
+    ///   - stripeVerifyURL: Relay endpoint for verifying Stripe sessions.
+    ///   - clientID: Device/user identifier for Stripe client_reference_id.
+    /// Default device identifier for Stripe client reference.
+    private static let defaultClientID: String = {
+        // Evaluated once at class load time — safe outside main actor.
+        UUID().uuidString
+    }()
+
+    public init(
+        usageTracker: UsageTracker,
+        iapPacks: [CreditPack] = [],
+        stripePaymentURL: String? = nil,
+        stripeVerifyURL: String? = nil,
+        clientID: String? = nil
+    ) {
         self.usageTracker = usageTracker
+        self.iapPacks = iapPacks
+        self.stripePaymentURL = stripePaymentURL
+        self.stripeVerifyURL = stripeVerifyURL
+        self.clientID = clientID ?? Self.defaultClientID
         transactionListener = listenForTransactions()
     }
     
@@ -47,8 +100,9 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     
     /// Fetch products from App Store Connect.
     public func loadProducts() async {
+        guard !productIDs.isEmpty else { return }
         do {
-            let storeProducts = try await Product.products(for: Self.productIDs)
+            let storeProducts = try await Product.products(for: productIDs)
             products = storeProducts.sorted {
                 ($0.price as NSDecimalNumber).doubleValue < ($1.price as NSDecimalNumber).doubleValue
             }
@@ -58,7 +112,7 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
         }
     }
     
-    // MARK: - Purchase
+    // MARK: - Apple IAP Purchase
     
     /// Purchase a product and add credits to balance.
     @MainActor
@@ -74,12 +128,10 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
                 
-                // Add credits to balance
-                if let credits = Self.creditValues[product.id] {
+                if let credits = creditValues[product.id] {
                     usageTracker.addCredits(credits)
                 }
                 
-                // Finish the transaction
                 await transaction.finish()
                 
             case .userCancelled:
@@ -96,9 +148,82 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
         }
     }
     
+    // MARK: - Stripe
+    
+    /// Whether Stripe checkout is available.
+    public var isStripeEnabled: Bool {
+        stripePaymentURL != nil
+    }
+    
+    /// Build the Stripe checkout URL with client reference ID.
+    public func stripeCheckoutURL() -> URL? {
+        guard let template = stripePaymentURL else { return nil }
+        let urlString = template.replacingOccurrences(of: "{CLIENT_ID}", with: clientID)
+        return URL(string: urlString)
+    }
+    
+    /// Verify a Stripe session after redirect and grant credits.
+    /// Call this from your deep link handler.
+    @MainActor
+    public func verifyStripeSession(sessionID: String) async -> Bool {
+        guard let verifyURL = stripeVerifyURL,
+              let url = URL(string: verifyURL) else { return false }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["session_id": sessionID])
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  response["ok"] as? Bool == true,
+                  let productId = response["productId"] as? String else {
+                return false
+            }
+            
+            if let credits = creditValues[productId] {
+                usageTracker.addCredits(credits)
+                return true
+            }
+        } catch {
+            lastError = "Stripe verification failed: \(error.localizedDescription)"
+        }
+        return false
+    }
+    
+    /// Check for pending Stripe sessions on foreground resume.
+    @MainActor
+    public func checkPendingStripeSession() async -> Bool {
+        guard let verifyURL = stripeVerifyURL,
+              let url = URL(string: verifyURL) else { return false }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["client_reference_id": clientID])
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  response["ok"] as? Bool == true,
+                  response["duplicate"] as? Bool != true,
+                  let productId = response["productId"] as? String else {
+                return false
+            }
+            
+            if let credits = creditValues[productId] {
+                usageTracker.addCredits(credits)
+                return true
+            }
+        } catch {
+            // Silent — this is a background check
+        }
+        return false
+    }
+    
     // MARK: - Transaction Listener
     
-    /// Listen for transaction updates (e.g., pending purchases that complete later).
     private func listenForTransactions() -> Task<Void, Never> {
         Task.detached { [weak self] in
             for await result in Transaction.updates {
@@ -106,8 +231,7 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
                 do {
                     let transaction = try self.checkVerified(result)
                     
-                    // Add credits if not already credited
-                    if let credits = Self.creditValues[transaction.productID] {
+                    if let credits = self.creditValues[transaction.productID] {
                         await MainActor.run {
                             self.usageTracker.addCredits(credits)
                         }
@@ -135,18 +259,13 @@ public class PaymentManager: ObservableObject, @unchecked Sendable {
     // MARK: - Helpers
     
     /// Formatted credit value for a product.
-    public static func creditString(for productId: String) -> String {
+    public func creditString(for productId: String) -> String {
         guard let credits = creditValues[productId] else { return "?" }
         return String(format: "$%.2f", credits)
     }
     
     /// Human-readable description of what a product gives.
-    public static func productDescription(for productId: String) -> String {
-        switch productId {
-        case topupProductID:
-            return "$7.50 credits · ~1.5M tokens on GPT-4.1"
-        default:
-            return ""
-        }
+    public func productDescription(for productId: String) -> String {
+        iapPacks.first { $0.productID == productId }?.description ?? ""
     }
 }

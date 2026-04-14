@@ -100,6 +100,15 @@ open class BaseCoordinator: ObservableObject {
     /// App identifier for relay session appId (e.g., "neox", "intento").
     open var appId: String { "neox-core" }
 
+    /// Apple IAP credit packs. Override in subclass to configure host-app-specific SKUs.
+    open var iapPacks: [PaymentManager.CreditPack] { [] }
+
+    /// Stripe payment link URL template. Include `{CLIENT_ID}` for substitution.
+    open var stripePaymentURL: String? { nil }
+
+    /// Stripe session verification endpoint.
+    open var stripeVerifyURL: String? { nil }
+
     // MARK: - Init
 
     public init() {
@@ -487,7 +496,13 @@ open class BaseCoordinator: ObservableObject {
         )
 
         self.chatViewModel = vm
-        self.paymentManager = PaymentManager(usageTracker: vm.usageTracker)
+        self.paymentManager = PaymentManager(
+            usageTracker: vm.usageTracker,
+            iapPacks: iapPacks,
+            stripePaymentURL: stripePaymentURL,
+            stripeVerifyURL: stripeVerifyURL,
+            clientID: UIDevice.current.identifierForVendor?.uuidString
+        )
 
         // Allow subclasses to do additional wiring (e.g., Discord)
         configureChat(vm: vm)

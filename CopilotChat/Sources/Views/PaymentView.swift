@@ -35,6 +35,7 @@ public struct PaymentView: View {
                         ForEach(paymentManager.products, id: \.id) { product in
                             CreditPackRow(
                                 product: product,
+                                paymentManager: paymentManager,
                                 isPurchasing: paymentManager.isPurchasing
                             ) {
                                 Task {
@@ -145,6 +146,7 @@ private struct BalanceCardView: View {
 
 private struct CreditPackRow: View {
     let product: Product
+    let paymentManager: PaymentManager
     let isPurchasing: Bool
     let onPurchase: () -> Void
     
@@ -162,13 +164,13 @@ private struct CreditPackRow: View {
                     .font(.body)
                     .fontWeight(.semibold)
                 
-                if let credits = PaymentManager.creditValues[product.id] {
+                if let credits = paymentManager.creditValues[product.id] {
                     Text("\(String(format: "$%.2f", credits)) in credits")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 
-                let desc = PaymentManager.productDescription(for: product.id)
+                let desc = paymentManager.productDescription(for: product.id)
                 if !desc.isEmpty {
                     Text(desc)
                         .font(.caption2)
