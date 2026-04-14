@@ -65,8 +65,6 @@ public final class DemoRuntime: ObservableObject {
 
     public func spotlight(ref: String?, label: String?, text: String?) {
         guard !isPaused else { return }
-        // Re-scan to get fresh frames
-        _ = scanner.scan()
         guard let frame = resolveFrame(ref: ref, label: label) else { return }
         spotlightFrame = frame
         if let text {
@@ -79,7 +77,6 @@ public final class DemoRuntime: ObservableObject {
 
     public func annotate(ref: String?, label: String?, text: String) {
         guard !isPaused else { return }
-        _ = scanner.scan()
         guard let frame = resolveFrame(ref: ref, label: label) else { return }
         tooltipText = text
         tooltipPosition = CGPoint(x: frame.midX, y: frame.maxY + 8)
@@ -121,7 +118,6 @@ public final class DemoRuntime: ObservableObject {
 
     public func cursorTo(ref: String?, label: String?) async {
         guard !isPaused else { return }
-        _ = scanner.scan()
         guard let frame = resolveFrame(ref: ref, label: label) else { return }
         let target = CGPoint(x: frame.midX, y: frame.midY)
         cursorVisible = true
@@ -135,7 +131,6 @@ public final class DemoRuntime: ObservableObject {
 
     public func highlight(ref: String?, label: String?) {
         guard !isPaused else { return }
-        _ = scanner.scan()
         guard let frame = resolveFrame(ref: ref, label: label) else { return }
         // Briefly show spotlight without dimming (just the green pulse)
         spotlightFrame = frame
