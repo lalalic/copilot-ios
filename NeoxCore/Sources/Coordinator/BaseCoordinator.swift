@@ -90,6 +90,9 @@ open class BaseCoordinator: ObservableObject {
     private var agentTask: Task<Void, Never>?
     @Published public private(set) var chatViewModel: ChatViewModel?
     @Published public private(set) var paymentManager: PaymentManager?
+    
+    /// Shared usage tracker — created at init, shared with ChatViewModel and PaymentManager.
+    public let usageTracker = UsageTracker()
 
     // MARK: - Project Sessions
 
@@ -160,6 +163,14 @@ open class BaseCoordinator: ObservableObject {
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
         self.agentProfile = try? loader.load(from: resolvedWorkspace)
+
+        self.paymentManager = PaymentManager(
+            usageTracker: usageTracker,
+            iapPacks: iapPacks,
+            stripePaymentURL: stripePaymentURL,
+            stripeVerifyURL: stripeVerifyURL,
+            clientID: UIDevice.current.identifierForVendor?.uuidString
+        )
 
         applyRelaySelection()
         registerDefaultTools()
@@ -483,6 +494,7 @@ open class BaseCoordinator: ObservableObject {
                 onAskUser: { _ in "" }
             )),
             inputModes: chatInputModes,
+            usageTracker: usageTracker,
             workspaceURL: workspaceURL,
             notificationFilter: { [weak self] type in
                 guard let self else { return true }
@@ -496,13 +508,6 @@ open class BaseCoordinator: ObservableObject {
         )
 
         self.chatViewModel = vm
-        self.paymentManager = PaymentManager(
-            usageTracker: vm.usageTracker,
-            iapPacks: iapPacks,
-            stripePaymentURL: stripePaymentURL,
-            stripeVerifyURL: stripeVerifyURL,
-            clientID: UIDevice.current.identifierForVendor?.uuidString
-        )
 
         // Allow subclasses to do additional wiring (e.g., Discord)
         configureChat(vm: vm)
