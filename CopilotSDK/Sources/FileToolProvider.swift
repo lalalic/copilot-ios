@@ -30,9 +30,9 @@ public final class FileToolProvider: Sendable {
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, create_project.
+    /// All file tools: read_file, write_file, patch_file, create_project.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, createProjectTool]
+        [readFileTool, writeFileTool, patchFileTool, createProjectTool]
     }
 
     // MARK: - Path Resolution
@@ -127,6 +127,58 @@ public final class FileToolProvider: Sendable {
                 return "Written \(content.count) chars to \(path)"
             } catch {
                 return "Error writing \(path): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - patch_file
+
+    private var patchFileTool: ToolDefinition {
+        ToolDefinition(
+            name: "patch_file",
+            description: "Apply a targeted edit to an existing file. Replaces the first occurrence of `old_string` with `new_string`. More efficient than rewriting the whole file with write_file. Use for small edits to large files.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Relative path within the workspace")
+                    ]),
+                    "old_string": .object([
+                        "type": .string("string"),
+                        "description": .string("Exact text to find and replace (must match exactly)")
+                    ]),
+                    "new_string": .object([
+                        "type": .string("string"),
+                        "description": .string("Replacement text")
+                    ])
+                ]),
+                "required": .array([.string("path"), .string("old_string"), .string("new_string")])
+            ]),
+            overridesBuiltInTool: true,
+            skipPermission: true
+        ) { [weak self] args in
+            guard let self else { return "Error: FileToolProvider not available" }
+            guard case .object(let dict) = args,
+                  case .string(let path) = dict["path"],
+                  case .string(let oldStr) = dict["old_string"],
+                  case .string(let newStr) = dict["new_string"] else {
+                return "Error: 'path', 'old_string', and 'new_string' required"
+            }
+            guard let url = self.resolve(path) else {
+                return "Error: invalid path '\(path)'"
+            }
+            do {
+                var content = try String(contentsOf: url, encoding: .utf8)
+                guard let range = content.range(of: oldStr) else {
+                    return "Error: old_string not found in \(path)"
+                }
+                content.replaceSubrange(range, with: newStr)
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                logger.info("patch_file: \(path) replaced \(oldStr.count) → \(newStr.count) chars")
+                return "Patched \(path): replaced \(oldStr.count) chars with \(newStr.count) chars"
+            } catch {
+                return "Error patching \(path): \(error.localizedDescription)"
             }
         }
     }
