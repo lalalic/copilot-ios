@@ -131,6 +131,74 @@ public final class CameraToolProvider {
         ]
     }
 
+    // MARK: - Unified Single Tool
+
+    /// Single tool that replaces all 15 compact tools via a `command` subcommand.
+    /// Reduces tool count from 15 → 1, relying on the agent to pick the right subcommand.
+    public var unifiedCameraTool: ToolDefinition {
+        // Build a dispatch table from compact tools
+        let compactByName: [String: ToolDefinition] = {
+            var map: [String: ToolDefinition] = [:]
+            for tool in allCompactTools {
+                map[tool.name] = tool
+            }
+            return map
+        }()
+
+        return ToolDefinition(
+            name: "camera",
+            description: """
+            Camera control tool. Use `command` to select action, pass additional params as needed.
+            Commands:
+            - observe_camera: Look through the camera (returns image)
+            - configure_camera: Set camera params (position, lens, zoom, exposure, iso, shutter_speed, focus_x, focus_y, white_balance, flash, slow_motion)
+            - analyze_vision: Run vision analysis (include: scene/objects/faces/poses/composition/horizon/blur/shot_type/scene_type/rectangles/all)
+            - speak: Speak message aloud (message)
+            - listen: Listen to user speech (duration)
+            - start_recording: Start video recording (shot_name)
+            - stop_recording: Stop recording
+            - pause_recording / resume_recording: Pause/resume recording
+            - capture_photo: Take a photo (filename)
+            - track_subject: Track detected subject
+            - get_audio_levels: Get current audio levels
+            - generate_image: Generate image via Apple Intelligence (prompt)
+            - animate_camera: Keyframed camera animation (keyframes, duration)
+            - wait: Wait seconds (seconds)
+            """,
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "command": .object([
+                        "type": .string("string"),
+                        "description": .string("The camera subcommand to execute"),
+                        "enum": .array([
+                            .string("observe_camera"), .string("configure_camera"), .string("analyze_vision"),
+                            .string("speak"), .string("listen"),
+                            .string("start_recording"), .string("stop_recording"),
+                            .string("pause_recording"), .string("resume_recording"),
+                            .string("capture_photo"), .string("track_subject"),
+                            .string("get_audio_levels"), .string("generate_image"),
+                            .string("animate_camera"), .string("wait"),
+                        ]),
+                    ]),
+                ]),
+                "required": .array([.string("command")]),
+            ]),
+            skipPermission: true,
+            handler: { args in
+                guard case .object(let dict) = args,
+                      case .string(let command) = dict["command"] else {
+                    return "Error: 'command' parameter required"
+                }
+                guard let tool = compactByName[command] else {
+                    return "Error: unknown command '\(command)'. Available: \(compactByName.keys.sorted().joined(separator: ", "))"
+                }
+                // Forward the full args dict to the sub-handler (sub-tools parse their own params)
+                return try await tool.handler(args)
+            }
+        )
+    }
+
     // MARK: - Observation Tools
 
     public var observeCameraTool: ToolDefinition {
