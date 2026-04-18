@@ -225,7 +225,7 @@ open class BaseCoordinator: ObservableObject {
             RegisteredTool(name: "start_coding_task", description: "Start coding task: create GitHub repo, issue, assign coding agent"),
             RegisteredTool(name: "send_response", description: "Send a response message to the user"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
-            RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
+            RegisteredTool(name: "stripe_checkout", description: "Open external payment checkout for credits when requested"),
             RegisteredTool(name: "task", description: "Run a named sub-agent in a separate session"),
             RegisteredTool(name: "get_context", description: "Get device context: time, battery, network, projects"),
             RegisteredTool(name: "memory_search", description: "Search across memory files by keyword"),

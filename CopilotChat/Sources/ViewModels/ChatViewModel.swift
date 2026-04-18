@@ -1499,7 +1499,7 @@ public final class ChatViewModel: ObservableObject {
     private func makeStripeCheckoutTool() -> ToolDefinition {
         ToolDefinition(
             name: "stripe_checkout",
-            description: "Generate an external Stripe checkout link. Use only when user explicitly asks for Stripe payment or when credits are low. Keep Apple IAP as default for in-app digital credits.",
+            description: "Open external payment checkout for credits. Use when credits are low or user requests top-up.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1509,7 +1509,7 @@ public final class ChatViewModel: ObservableObject {
                     ]),
                     "reason": .object([
                         "type": .string("string"),
-                        "description": .string("Why Stripe is needed (e.g. user asked for Stripe, credits exhausted)"),
+                        "description": .string("Why top-up is needed (e.g. credits exhausted, user requested)"),
                     ]),
                 ]),
             ]),
@@ -1527,7 +1527,7 @@ public final class ChatViewModel: ObservableObject {
         let base = (UserDefaults.standard.string(forKey: "stripePaymentLink") ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty, base.hasPrefix("https://") else {
-            return "Stripe checkout is not configured."
+            return "External payment checkout is not configured."
         }
 
         var requestedAmount: Double?
@@ -1538,14 +1538,14 @@ public final class ChatViewModel: ObservableObject {
             if case .string(let r) = dict["reason"] { reason = r }
         }
 
-        let explicitStripeIntent = reason.lowercased().contains("stripe") || reason.lowercased().contains("checkout") || reason.lowercased().contains("payment")
-        if !usageTracker.isLowBalance && !usageTracker.hasInsufficientBalance && !explicitStripeIntent {
-            return "Balance is still sufficient ($\(String(format: "%.2f", usageTracker.balance))). Keep Apple IAP as default unless user explicitly requests Stripe."
+        let explicitPaymentIntent = reason.lowercased().contains("checkout") || reason.lowercased().contains("payment") || reason.lowercased().contains("top up") || reason.lowercased().contains("topup")
+        if !usageTracker.isLowBalance && !usageTracker.hasInsufficientBalance && !explicitPaymentIntent {
+            return "Balance is still sufficient ($\(String(format: "%.2f", usageTracker.balance))). No need to top up right now."
         }
 
         // Don't open if checkout already in progress
         if self.stripeCheckoutURL != nil {
-            return "Stripe checkout is already in progress."
+            return "Payment checkout is already in progress."
         }
 
         var checkoutURL = base
@@ -1594,10 +1594,10 @@ public final class ChatViewModel: ObservableObject {
                     }
                 }
             }
-            return "Opening Stripe checkout. After payment, credits will be added automatically."
+            return "Opening payment checkout. After payment, credits will be added automatically."
         }
 
-        return "Stripe checkout link (external): \(checkoutURL)\nNote: Apple IAP remains the default in-app credit flow."
+        return "Payment checkout link: \(checkoutURL)"
     }
 
     /// Build the `view` tool definition.

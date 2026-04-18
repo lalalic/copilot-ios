@@ -43,13 +43,7 @@ public struct SharedTopUpSettingsSection: View {
                 }
             }
 
-            if coordinator.supportsStripeTopUp {
-                Label("Stripe top-up available in chat", systemImage: "message")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !coordinator.supportsStoreKitTopUp && !coordinator.supportsStripeTopUp {
+            if !coordinator.supportsStoreKitTopUp {
                 Text("No top-up options are configured for this app yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
