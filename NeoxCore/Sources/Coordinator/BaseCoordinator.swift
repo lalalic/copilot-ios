@@ -94,6 +94,9 @@ open class BaseCoordinator: ObservableObject {
     /// Shared usage tracker — created at init, shared with ChatViewModel and PaymentManager.
     public let usageTracker = UsageTracker()
 
+    /// App identity and commerce configuration loaded from Info.plist.
+    public let appRuntimeConfig: AIAppRuntimeConfig
+
     // MARK: - Project Sessions
 
     public private(set) var projectSessions: [String: ChatViewModel] = [:]
@@ -101,20 +104,33 @@ open class BaseCoordinator: ObservableObject {
     public var activeWatcherCount: Int { projectSessions.count }
 
     /// App identifier for relay session appId (e.g., "neox", "intento").
-    open var appId: String { "neox-core" }
+    open var appId: String { appRuntimeConfig.appId }
 
     /// Apple IAP credit packs. Override in subclass to configure host-app-specific SKUs.
-    open var iapPacks: [PaymentManager.CreditPack] { [] }
+    open var iapPacks: [PaymentManager.CreditPack] { appRuntimeConfig.iapPacks }
 
     /// Stripe payment link URL template. Include `{CLIENT_ID}` for substitution.
-    open var stripePaymentURL: String? { nil }
+    open var stripePaymentURL: String? { appRuntimeConfig.stripePaymentURL }
 
     /// Stripe session verification endpoint.
-    open var stripeVerifyURL: String? { nil }
+    open var stripeVerifyURL: String? { appRuntimeConfig.stripeVerifyURL }
+
+    /// Shared About links shown in settings.
+    open var aboutLinks: [AIAppInfoLink] { appRuntimeConfig.aboutLinks }
+
+    /// Shared toolkits that should be included in chat sessions by default.
+    open var sharedToolKits: [SharedToolKit] { SharedToolKit.defaultOrder }
+
+    /// Shared toolkits to omit from `buildTools()`.
+    open var excludedSharedToolKits: Set<SharedToolKit> { [] }
+
+    /// Shared tool names to omit from `buildTools()`.
+    open var excludedSharedToolNames: Set<String> { [] }
 
     // MARK: - Init
 
     public init() {
+        let runtimeConfig = AIAppRuntimeConfig.load()
         let bootstrapper = WorkspaceBootstrapper()
         let loader = AgentProfileLoader()
         let resolvedWorkspace: URL
@@ -133,6 +149,7 @@ open class BaseCoordinator: ObservableObject {
 
         self.workspaceBootstrapper = bootstrapper
         self.profileLoader = loader
+    self.appRuntimeConfig = runtimeConfig
         self.workspaceURL = resolvedWorkspace
         self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
@@ -166,15 +183,16 @@ open class BaseCoordinator: ObservableObject {
 
         self.paymentManager = PaymentManager(
             usageTracker: usageTracker,
-            iapPacks: iapPacks,
-            stripePaymentURL: stripePaymentURL,
-            stripeVerifyURL: stripeVerifyURL,
+            iapPacks: runtimeConfig.iapPacks,
+            stripePaymentURL: runtimeConfig.stripePaymentURL,
+            stripeVerifyURL: runtimeConfig.stripeVerifyURL,
             clientID: UIDevice.current.identifierForVendor?.uuidString
         )
 
         applyRelaySelection()
         registerDefaultTools()
         subAgentToolProvider.appId = appId
+        syncStripePaymentLink()
     }
 
     // MARK: - Tool Registration
@@ -274,17 +292,41 @@ open class BaseCoordinator: ObservableObject {
 
     public func buildTools() -> [CopilotSDK.ToolDefinition] {
         var tools: [CopilotSDK.ToolDefinition] = []
-        tools.append(contentsOf: fileToolProvider.tools)
-        tools.append(contentsOf: memoryToolProvider.tools)
-        tools.append(contentsOf: subAgentToolProvider.tools)
-        tools.append(contentsOf: contextToolProvider.tools)
-        tools.append(contentsOf: terminalToolProvider.tools)
-        tools.append(contentsOf: scriptToolProvider.tools)
-        tools.append(contentsOf: downloadToolProvider.tools)
-        #if canImport(MediaKit)
-        tools.append(contentsOf: ffmpegToolProvider.tools)
-        #endif
-        return tools
+
+        for toolkit in sharedToolKits where !excludedSharedToolKits.contains(toolkit) {
+            tools.append(contentsOf: toolsForSharedToolkit(toolkit))
+        }
+
+        if excludedSharedToolNames.isEmpty {
+            return tools
+        }
+
+        return tools.filter { !excludedSharedToolNames.contains($0.name) }
+    }
+
+    public func toolsForSharedToolkit(_ toolkit: SharedToolKit) -> [CopilotSDK.ToolDefinition] {
+        switch toolkit {
+        case .files:
+            return fileToolProvider.tools
+        case .memory:
+            return memoryToolProvider.tools
+        case .subAgents:
+            return subAgentToolProvider.tools
+        case .context:
+            return contextToolProvider.tools
+        case .terminal:
+            return terminalToolProvider.tools
+        case .scripts:
+            return scriptToolProvider.tools
+        case .downloads:
+            return downloadToolProvider.tools
+        case .ffmpeg:
+            #if canImport(MediaKit)
+            return ffmpegToolProvider.tools
+            #else
+            return []
+            #endif
+        }
     }
 
     /// Override point: apps can add their own tools to the set.
@@ -349,6 +391,37 @@ open class BaseCoordinator: ObservableObject {
         * Day: \(weekdayFmt.string(from: now)), \(timeOfDay)
         * Timezone: \(TimeZone.current.identifier)
         """
+    }
+
+    public var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        return "\(version) (\(build))"
+    }
+
+    public func resolvedStripePaymentURL() -> URL? {
+        guard let stripePaymentURL else { return nil }
+        let clientID = UIDevice.current.identifierForVendor?.uuidString ?? neoxUserId
+        let resolved = stripePaymentURL.replacingOccurrences(of: "{CLIENT_ID}", with: clientID)
+        return URL(string: resolved)
+    }
+
+    public var supportsStoreKitTopUp: Bool {
+        guard let paymentManager else { return false }
+        return !paymentManager.iapPacks.isEmpty
+    }
+
+    public var supportsStripeTopUp: Bool {
+        resolvedStripePaymentURL() != nil
+    }
+
+    /// Sync runtime-config Stripe payment URL into UserDefaults for the chat tool.
+    private func syncStripePaymentLink() {
+        if let url = stripePaymentURL, !url.isEmpty {
+            UserDefaults.standard.set(url, forKey: "stripePaymentLink")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "stripePaymentLink")
+        }
     }
 
     public func buildWorkspaceTree() -> String {
@@ -526,6 +599,8 @@ open class BaseCoordinator: ObservableObject {
     open func reconnect() {
         applyRelaySelection()
         saveRelaySettings()
+        saveSharedSettings()
+        syncStripePaymentLink()
         chatViewModel?.disconnect()
         chatViewModel = nil
         _ = createChatViewModel()
@@ -648,6 +723,19 @@ open class BaseCoordinator: ObservableObject {
             relayHost: relayHost,
             relayPort: relayPort
         )
+    }
+
+    open func saveSharedSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(useDevServer, forKey: NeoxCoreSettings.useDevServerKey)
+        defaults.set(devServerPort, forKey: NeoxCoreSettings.devServerPortKey)
+        defaults.set(enableTextInput, forKey: NeoxCoreSettings.enableTextInputKey)
+        defaults.set(enableSpeechInput, forKey: NeoxCoreSettings.enableSpeechInputKey)
+        defaults.set(enableAttachmentInput, forKey: NeoxCoreSettings.enableAttachmentInputKey)
+        defaults.set(selectedModel, forKey: NeoxCoreSettings.selectedModelKey)
+        defaults.set(showUsageInChat, forKey: NeoxCoreSettings.showUsageInChatKey)
+        defaults.set(showProgressInChat, forKey: NeoxCoreSettings.showProgressInChatKey)
+        defaults.set(showBuildInChat, forKey: NeoxCoreSettings.showBuildInChatKey)
     }
 
     public func parseLocalRelayURL() -> (host: String, port: UInt16) {

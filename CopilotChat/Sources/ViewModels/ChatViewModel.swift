@@ -1523,11 +1523,10 @@ public final class ChatViewModel: ObservableObject {
 
     /// Handle `stripe_checkout` tool call.
     private func handleStripeCheckout(_ args: JSONValue) async -> String {
-        // Payment link URL — set via UserDefaults or fall back to test link
-        let base = (UserDefaults.standard.string(forKey: "stripePaymentLink")
-            ?? "https://buy.stripe.com/test_14A7sLfQc0DY3YTfGp24004")
+        // Payment link URL — set via UserDefaults from runtime config
+        let base = (UserDefaults.standard.string(forKey: "stripePaymentLink") ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !base.isEmpty else {
+        guard !base.isEmpty, base.hasPrefix("https://") else {
             return "Stripe checkout is not configured."
         }
 
@@ -1544,18 +1543,37 @@ public final class ChatViewModel: ObservableObject {
             return "Balance is still sufficient ($\(String(format: "%.2f", usageTracker.balance))). Keep Apple IAP as default unless user explicitly requests Stripe."
         }
 
+        // Don't open if checkout already in progress
+        if self.stripeCheckoutURL != nil {
+            return "Stripe checkout is already in progress."
+        }
+
         var checkoutURL = base
-        if var components = URLComponents(string: base) {
+        let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        UserDefaults.standard.set(deviceId, forKey: "pendingStripeCheckoutRef")
+
+        // Handle {CLIENT_ID} token replacement
+        if base.contains("{CLIENT_ID}") {
+            checkoutURL = base.replacingOccurrences(of: "{CLIENT_ID}", with: deviceId)
+        }
+
+        if var components = URLComponents(string: checkoutURL) {
             var query = components.queryItems ?? []
-            // client_reference_id flows through to checkout.session.completed
-            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
-            UserDefaults.standard.set(deviceId, forKey: "pendingStripeCheckoutRef")
-            query.append(URLQueryItem(name: "client_reference_id", value: deviceId))
-            if let requestedAmount, requestedAmount > 0 {
+            let existingKeys = Set(query.compactMap { $0.name })
+
+            // Append client_reference_id if not already present and no token replacement
+            if !existingKeys.contains("client_reference_id") && !base.contains("{CLIENT_ID}") {
+                query.append(URLQueryItem(name: "client_reference_id", value: deviceId))
+            } else if let existing = query.first(where: { $0.name == "client_reference_id" })?.value {
+                UserDefaults.standard.set(existing, forKey: "pendingStripeCheckoutRef")
+            }
+
+            // Append amount_usd if not already present and requested
+            if let requestedAmount, requestedAmount > 0, !existingKeys.contains("amount_usd") {
                 query.append(URLQueryItem(name: "amount_usd", value: String(format: "%.2f", requestedAmount)))
             }
             components.queryItems = query
-            checkoutURL = components.url?.absoluteString ?? base
+            checkoutURL = components.url?.absoluteString ?? checkoutURL
         }
 
         // Open payment link — try SFSafariViewController via notification, fallback to external Safari
