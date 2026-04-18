@@ -1,0 +1,12 @@
+{
+  "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "abi-baseline-json" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK.abi.json",
+    "const-values" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK-primary.d",
+    "diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK-primary.dia",
+    "objc-header" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK-Swift.h",
+    "swiftdoc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK.swiftdoc",
+    "swiftmodule" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK.swiftmodule",
+    "swiftsourceinfo" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotSDK.build/Objects-normal/arm64/CopilotSDK.swiftsourceinfo"
+  }
+}

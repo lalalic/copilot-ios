@@ -1,0 +1,4 @@
+module WebKitAgent {
+header "WebKitAgent-Swift.h"
+export *
+}

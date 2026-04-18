@@ -1,0 +1,4 @@
+module MediaKit {
+header "MediaKit-Swift.h"
+export *
+}

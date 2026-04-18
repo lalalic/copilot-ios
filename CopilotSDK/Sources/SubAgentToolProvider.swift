@@ -12,13 +12,14 @@ private struct AgentFrontmatter {
     var skills: [String]?
 }
 
-/// Provides the `run_sub_agent` tool that spawns a separate relay session
+/// Provides the `task` tool that spawns a separate relay session
 /// using a named agent's instructions, runs a task, and returns the result.
 public final class SubAgentToolProvider: @unchecked Sendable {
     private let workspaceURL: URL
     private let relayHost: String
     private let relayPort: UInt16
     private let userId: String?
+    public var appId: String?
     private let toolsBuilder: @Sendable () -> [ToolDefinition]
     /// Callback for progress reports from sub-agents.
     public var onProgress: (@Sendable (_ agent: String, _ progress: String) -> Void)?
@@ -29,7 +30,7 @@ public final class SubAgentToolProvider: @unchecked Sendable {
     ///   - relayPort: Relay server port
     ///   - userId: User ID for session routing
     ///   - toolsBuilder: Closure that builds shared tools (memory, file, etc.) for the sub-agent.
-    ///                   Should NOT include run_sub_agent itself to prevent recursion.
+    ///                   Should NOT include task tool itself to prevent recursion.
     public init(
         workspaceURL: URL,
         relayHost: String,
@@ -139,7 +140,7 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
     private var runSubAgentTool: ToolDefinition {
         ToolDefinition(
-            name: "run_sub_agent",
+            name: "task",
             description: "Run a named sub-agent in a separate session. The sub-agent gets its own conversation context and can use shared tools (memory, files). Available agents: \(availableAgents().joined(separator: ", "))",
             parameters: .object([
                 "type": .string("object"),
@@ -163,6 +164,7 @@ public final class SubAgentToolProvider: @unchecked Sendable {
                 ]),
                 "required": .array([.string("agent"), .string("task")]),
             ]),
+            overridesBuiltInTool: true,
             handler: { [weak self] args in
                 guard let self else { return "SubAgentToolProvider deallocated" }
                 return await self.handleRunSubAgent(args)
@@ -284,6 +286,7 @@ public final class SubAgentToolProvider: @unchecked Sendable {
                 sessionId: "subagent-\(UUID().uuidString.lowercased())",
                 tools: subAgentTools,
                 systemMessage: .replace(body),
+                appId: appId,
                 userId: userId
             )
 

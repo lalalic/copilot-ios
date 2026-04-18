@@ -1,0 +1,151 @@
+{
+  "" : {
+    "const-values" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary.d",
+    "diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary.dia",
+    "emit-module-dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary-emit-module.dia",
+    "pch" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CopilotChat-primary.swiftdeps"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Models/AskQuestions.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestions.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestions.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestions.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Models/ChatMessage.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatMessage.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatMessage.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatMessage.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Models/TodoItem.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoItem.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoItem.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoItem.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Services/ChatSessionLogger.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatSessionLogger.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatSessionLogger.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatSessionLogger.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Services/CodingAgentNotificationHandler.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CodingAgentNotificationHandler.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CodingAgentNotificationHandler.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/CodingAgentNotificationHandler.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Services/SpeechService.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/SpeechService.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/SpeechService.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/SpeechService.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/ViewModels/ChatViewModel.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatViewModel.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatViewModel.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatViewModel.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/AskQuestionsView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestionsView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestionsView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AskQuestionsView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/AttachmentChipBar.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentChipBar.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentChipBar.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentChipBar.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/AttachmentPicker.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentPicker.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentPicker.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/AttachmentPicker.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/ChatView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ChatView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/FileExplorerView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/FileExplorerView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/FileExplorerView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/FileExplorerView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/HTMLPreviewView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/HTMLPreviewView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/HTMLPreviewView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/HTMLPreviewView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/InputBar.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/InputBar.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/InputBar.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/InputBar.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/MarkdownH1FileEditorView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownH1FileEditorView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownH1FileEditorView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownH1FileEditorView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/MarkdownView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MarkdownView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/MermaidView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MermaidView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MermaidView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MermaidView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/MessageBubble.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MessageBubble.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MessageBubble.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/MessageBubble.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/ModelPickerView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ModelPickerView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ModelPickerView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ModelPickerView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/PaymentView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PaymentView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PaymentView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PaymentView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/PlanHistoryView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanHistoryView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanHistoryView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanHistoryView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/PlanManagerView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanManagerView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanManagerView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlanManagerView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/PlatformColors.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlatformColors.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlatformColors.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/PlatformColors.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/ProjectsView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ProjectsView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ProjectsView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ProjectsView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/TodoPanelView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoPanelView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoPanelView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/TodoPanelView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/ToolActivityView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ToolActivityView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ToolActivityView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/ToolActivityView.o"
+  },
+  "/Volumes/free2/copilot-ios/CopilotChat/Sources/Views/UsageBadgeView.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/UsageBadgeView.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/UsageBadgeView.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/UsageBadgeView.o"
+  },
+  "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/CopilotChat.build/Objects-normal/arm64/resource_bundle_accessor.o"
+  }
+}

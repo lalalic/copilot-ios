@@ -466,20 +466,115 @@ public struct MCPServerConfig: Sendable {
 /// Configuration for a custom agent.
 public struct CustomAgentConfig: Sendable {
     public let name: String
+    public let displayName: String?
     public let description: String?
-    public let systemMessage: String?
+    public let tools: [String]?
+    public let prompt: String?
+    public let infer: Bool?
 
-    public init(name: String, description: String? = nil, systemMessage: String? = nil) {
+    public init(
+        name: String,
+        displayName: String? = nil,
+        description: String? = nil,
+        tools: [String]? = nil,
+        prompt: String? = nil,
+        infer: Bool? = nil
+    ) {
         self.name = name
+        self.displayName = displayName
         self.description = description
-        self.systemMessage = systemMessage
+        self.tools = tools
+        self.prompt = prompt
+        self.infer = infer
     }
 
     var wireFormat: JSONValue {
         var dict: [String: JSONValue] = ["name": .string(name)]
+        if let displayName { dict["displayName"] = .string(displayName) }
         if let description { dict["description"] = .string(description) }
-        if let systemMessage { dict["systemMessage"] = .string(systemMessage) }
+        if let tools { dict["tools"] = .array(tools.map { .string($0) }) }
+        if let prompt { dict["prompt"] = .string(prompt) }
+        if let infer { dict["infer"] = .bool(infer) }
         return .object(dict)
+    }
+
+    /// Load all `.agent.md` files from `.github/agents/` in the given workspace directory.
+    /// Parses YAML frontmatter for name, description, tools and uses the markdown body as prompt.
+    public static func loadAll(from workspaceURL: URL) -> [CustomAgentConfig] {
+        let agentsDir = workspaceURL
+            .appendingPathComponent(".github", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: agentsDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return files
+            .filter { $0.pathExtension == "md" && $0.lastPathComponent.hasSuffix(".agent.md") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { url -> CustomAgentConfig? in
+                guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+                let baseName = url.lastPathComponent.replacingOccurrences(of: ".agent.md", with: "")
+                // Skip main — it's the orchestrator, not a sub-agent
+                if baseName == "main" { return nil }
+                let (fm, body) = parseFrontmatter(content)
+                return CustomAgentConfig(
+                    name: fm["name"] ?? baseName,
+                    displayName: fm["displayName"],
+                    description: fm["description"],
+                    tools: parseList(fm["tools"]),
+                    prompt: body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : body.trimmingCharacters(in: .whitespacesAndNewlines),
+                    infer: true
+                )
+            }
+    }
+
+    /// Minimal YAML frontmatter parser — returns key-value pairs from `---` delimited block.
+    private static func parseFrontmatter(_ content: String) -> (dict: [String: String], body: String) {
+        guard content.hasPrefix("---") else { return ([:], content) }
+        let lines = content.components(separatedBy: "\n")
+        guard let endIndex = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }) else {
+            return ([:], content)
+        }
+        var dict: [String: String] = [:]
+        var listKey: String?
+        var listItems: [String] = []
+
+        func flushList() {
+            if let key = listKey, !listItems.isEmpty {
+                dict[key] = listItems.joined(separator: ",")
+                listItems = []
+            }
+            listKey = nil
+        }
+
+        for line in lines[1..<endIndex] {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("- ") {
+                listItems.append(String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces))
+                continue
+            }
+            flushList()
+            guard let colonIdx = trimmed.firstIndex(of: ":") else { continue }
+            let key = String(trimmed[..<colonIdx]).trimmingCharacters(in: .whitespaces)
+            let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+            if value.isEmpty {
+                listKey = key
+            } else {
+                dict[key] = value
+            }
+        }
+        flushList()
+
+        let body = lines[(endIndex + 1)...].joined(separator: "\n")
+        return (dict, body)
+    }
+
+    private static func parseList(_ csv: String?) -> [String]? {
+        guard let csv, !csv.isEmpty else { return nil }
+        return csv.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 }
 
@@ -1728,6 +1823,10 @@ public struct AgentConfig: Sendable {
     public var apnsEnv: String?
     /// User identifier for multi-user routing.
     public var userId: String?
+    /// Custom sub-agents available in this session (native copilot-cli customAgents).
+    public var customAgents: [CustomAgentConfig]?
+    /// Pre-select a named custom agent for the session.
+    public var agent: String?
 
     public init(
         model: String? = nil,
@@ -1740,6 +1839,8 @@ public struct AgentConfig: Sendable {
         deviceToken: String? = nil,
         apnsEnv: String? = nil,
         userId: String? = nil,
+        customAgents: [CustomAgentConfig]? = nil,
+        agent: String? = nil,
         onResponse: @escaping @Sendable (String) async -> Void,
         onAskUser: @escaping @Sendable (String) async -> String,
         onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
@@ -1754,6 +1855,8 @@ public struct AgentConfig: Sendable {
         self.deviceToken = deviceToken
         self.apnsEnv = apnsEnv
         self.userId = userId
+        self.customAgents = customAgents
+        self.agent = agent
         self.onResponse = onResponse
         self.onAskUser = onAskUser
         self.onAskQuestions = onAskQuestions
@@ -1958,7 +2061,8 @@ public final class CopilotAgent: @unchecked Sendable {
             tools: buildTools(config: config),
             systemMessage: systemMessage,
             workingDirectory: config.workingDirectory,
-            infiniteSessions: InfiniteSessionConfig(enabled: true),
+            customAgents: config.customAgents,
+            agent: config.agent,
             snapshot: config.snapshot,
             appId: config.appId,
             deviceToken: config.deviceToken,

@@ -174,6 +174,7 @@ open class BaseCoordinator: ObservableObject {
 
         applyRelaySelection()
         registerDefaultTools()
+        subAgentToolProvider.appId = appId
     }
 
     // MARK: - Tool Registration
@@ -207,7 +208,7 @@ open class BaseCoordinator: ObservableObject {
             RegisteredTool(name: "send_response", description: "Send a response message to the user"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
-            RegisteredTool(name: "run_sub_agent", description: "Run a named sub-agent in a separate session"),
+            RegisteredTool(name: "task", description: "Run a named sub-agent in a separate session"),
             RegisteredTool(name: "get_context", description: "Get device context: time, battery, network, projects"),
             RegisteredTool(name: "memory_search", description: "Search across memory files by keyword"),
             RegisteredTool(name: "memory_delete", description: "Delete a memory file or section"),

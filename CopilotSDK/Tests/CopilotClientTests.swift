@@ -387,4 +387,70 @@ final class CopilotClientTests: XCTestCase {
         XCTAssertNil(session.snapshotTimestamp)
         XCTAssertNil(session.recoveredContext)
     }
+
+    // MARK: - CustomAgentConfig Tests
+
+    func testCustomAgentConfigWireFormatMinimal() {
+        let agent = CustomAgentConfig(name: "researcher")
+        let wire = agent.wireFormat
+        guard case .object(let dict) = wire else { XCTFail("Expected object"); return }
+        XCTAssertEqual(dict["name"], .string("researcher"))
+        XCTAssertNil(dict["displayName"])
+        XCTAssertNil(dict["description"])
+        XCTAssertNil(dict["tools"])
+        XCTAssertNil(dict["prompt"])
+        XCTAssertNil(dict["infer"])
+    }
+
+    func testCustomAgentConfigWireFormatFull() {
+        let agent = CustomAgentConfig(
+            name: "scene-scout",
+            displayName: "Scene Scout",
+            description: "Analyzes the environment before filming",
+            tools: ["observe_camera", "analyze_vision"],
+            prompt: "You are a scene scout. Analyze the environment.",
+            infer: true
+        )
+        let wire = agent.wireFormat
+        guard case .object(let dict) = wire else { XCTFail("Expected object"); return }
+        XCTAssertEqual(dict["name"], .string("scene-scout"))
+        XCTAssertEqual(dict["displayName"], .string("Scene Scout"))
+        XCTAssertEqual(dict["description"], .string("Analyzes the environment before filming"))
+        XCTAssertEqual(dict["tools"], .array([.string("observe_camera"), .string("analyze_vision")]))
+        XCTAssertEqual(dict["prompt"], .string("You are a scene scout. Analyze the environment."))
+        XCTAssertEqual(dict["infer"], .bool(true))
+    }
+
+    func testSessionConfigIncludesCustomAgents() {
+        let config = SessionConfig(
+            model: "gpt-4.1",
+            customAgents: [
+                CustomAgentConfig(name: "researcher", description: "Explores code", tools: ["grep", "view"]),
+                CustomAgentConfig(name: "editor", description: "Makes changes", tools: ["edit", "bash"]),
+            ],
+            agent: "researcher"
+        )
+        let params = config.buildParams(sessionId: "test-sid")
+
+        // customAgents array should be present
+        guard case .array(let agents) = params["customAgents"] else {
+            XCTFail("Expected customAgents array"); return
+        }
+        XCTAssertEqual(agents.count, 2)
+
+        // First agent
+        guard case .object(let first) = agents[0] else { XCTFail("Expected object"); return }
+        XCTAssertEqual(first["name"], .string("researcher"))
+        XCTAssertEqual(first["tools"], .array([.string("grep"), .string("view")]))
+
+        // agent pre-selection
+        XCTAssertEqual(params["agent"], .string("researcher"))
+    }
+
+    func testSessionConfigOmitsNilCustomAgents() {
+        let config = SessionConfig(model: "gpt-4.1")
+        let params = config.buildParams(sessionId: "test-sid")
+        XCTAssertNil(params["customAgents"])
+        XCTAssertNil(params["agent"])
+    }
 }

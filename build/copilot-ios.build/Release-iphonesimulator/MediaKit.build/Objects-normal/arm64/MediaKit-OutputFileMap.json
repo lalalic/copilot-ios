@@ -1,0 +1,16 @@
+{
+  "" : {
+    "const-values" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary.d",
+    "diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary.dia",
+    "emit-module-dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary-emit-module.dia",
+    "pch" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/MediaKit-primary.swiftdeps"
+  },
+  "/Volumes/free2/copilot-ios/MediaKit/Sources/FFmpegToolProvider.swift" : {
+    "index-unit-output-path" : "/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/FFmpegToolProvider.o",
+    "llvm-bc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/FFmpegToolProvider.bc",
+    "object" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/MediaKit.build/Objects-normal/arm64/FFmpegToolProvider.o"
+  }
+}

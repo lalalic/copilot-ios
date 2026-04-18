@@ -1,0 +1,4 @@
+module AppAgent {
+header "AppAgent-Swift.h"
+export *
+}

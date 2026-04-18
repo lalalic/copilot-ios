@@ -1,0 +1,4 @@
+module CameraKit {
+header "CameraKit-Swift.h"
+export *
+}

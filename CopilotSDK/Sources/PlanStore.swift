@@ -167,7 +167,7 @@ public class PlanStore {
             id: "memory-reports",
             name: "Memory Reports",
             prompt: """
-            Run the memory sub-agent to generate reports. Use run_sub_agent with agent "memory" and the following task:
+            Run the memory sub-agent to generate reports. Use task tool with agent "memory" and the following task:
 
             Generate memory reports for today. Check the current date and:
 
@@ -191,7 +191,7 @@ public class PlanStore {
             schedule: .interval(seconds: 86400),
             model: "gpt-4.1-mini",
             enabled: true,
-            tools: ["run_sub_agent"]
+            tools: ["task"]
         )
 
         createPlan(plan)

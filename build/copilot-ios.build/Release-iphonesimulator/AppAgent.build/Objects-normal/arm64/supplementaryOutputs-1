@@ -1,0 +1,12 @@
+{
+  "/Volumes/free2/copilot-ios/AppAgent/Sources/AccessibilityScanner.swift" : {
+    "abi-baseline-json" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent.abi.json",
+    "const-values" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent-primary.swiftconstvalues",
+    "dependencies" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent-primary.d",
+    "diagnostics" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent-primary.dia",
+    "objc-header" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent-Swift.h",
+    "swiftdoc" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent.swiftdoc",
+    "swiftmodule" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent.swiftmodule",
+    "swiftsourceinfo" : "/Volumes/free2/intento/copilot-ios/build/copilot-ios.build/Release-iphonesimulator/AppAgent.build/Objects-normal/arm64/AppAgent.swiftsourceinfo"
+  }
+}

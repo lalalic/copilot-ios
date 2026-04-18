@@ -223,17 +223,26 @@ public final class WorkspaceBootstrapper: Sendable {
                 .appendingPathComponent("agents")
             try manager.createDirectory(at: destAgents, withIntermediateDirectories: true)
 
-            // Only add new files, don't overwrite existing
-            let files = try manager.contentsOfDirectory(at: extractedAgents, includingPropertiesForKeys: nil)
+            // Sync: add new files, remove stale ones that are no longer in the bundle
+            let bundledFiles = try manager.contentsOfDirectory(at: extractedAgents, includingPropertiesForKeys: nil)
+            let bundledNames = Set(bundledFiles.map { $0.lastPathComponent })
             var added = 0
-            for file in files {
+            for file in bundledFiles {
                 let dest = destAgents.appendingPathComponent(file.lastPathComponent)
                 if !manager.fileExists(atPath: dest.path) {
                     try manager.copyItem(at: file, to: dest)
                     added += 1
                 }
             }
-            NSLog("[Workspace] syncAgents: %d agents in zip, %d newly added to %@", files.count, added, destAgents.path)
+
+            // Remove agents on device that are not in the bundle
+            let existingFiles = (try? manager.contentsOfDirectory(at: destAgents, includingPropertiesForKeys: nil)) ?? []
+            var removed = 0
+            for file in existingFiles where !bundledNames.contains(file.lastPathComponent) {
+                try? manager.removeItem(at: file)
+                removed += 1
+            }
+            NSLog("[Workspace] syncAgents: %d in zip, %d added, %d removed at %@", bundledFiles.count, added, removed, destAgents.path)
         } catch {
             NSLog("[Workspace] syncAgents error: %@", error.localizedDescription)
         }
