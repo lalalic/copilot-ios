@@ -343,8 +343,8 @@ public final class ChatViewModel: ObservableObject {
         chatState = .disconnected
     }
 
-    /// Close session on relay (frees Copilot seat) and clean up.
-    public func close() {
+    /// Destroy session on relay (frees Copilot seat) and clean up.
+    public func destroy() {
         let session = self.session
         agentTask?.cancel()
         agentTask = nil
@@ -353,9 +353,9 @@ public final class ChatViewModel: ObservableObject {
         self.session = nil
         client = nil
         chatState = .disconnected
-        // Send close to relay in background
+        // Send destroy to relay in background
         if let session {
-            Task { try? await session.close() }
+            Task { try? await session.destroy() }
         }
     }
 

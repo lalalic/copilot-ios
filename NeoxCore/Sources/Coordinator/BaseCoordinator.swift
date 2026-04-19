@@ -679,7 +679,7 @@ open class BaseCoordinator: ObservableObject {
     public func destroyProjectSession(projectId: String) {
         guard let vm = projectSessions.removeValue(forKey: projectId) else { return }
         projectResponseHandlers.removeValue(forKey: projectId)
-        vm.close()
+        vm.destroy()
         print("[BaseCoordinator] Destroyed project session for '\(projectId)'")
     }
 

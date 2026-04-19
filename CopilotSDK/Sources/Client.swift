@@ -1612,7 +1612,9 @@ public final class CopilotSession: @unchecked Sendable {
 
     // MARK: - Session Lifecycle
 
-    /// Disconnect this session, preserving state on disk for later resume.
+    /// Disconnect this session, preserving state in pool for later resume.
+    /// Only works for resumable sessions (client sent a deterministic sessionId).
+    /// Temp sessions are auto-destroyed on disconnect.
     public func disconnect() async throws {
         eventTask?.cancel()
         eventTask = nil
@@ -1621,22 +1623,12 @@ public final class CopilotSession: @unchecked Sendable {
         ])
     }
 
-    /// Destroy this session permanently, removing all persisted state.
+    /// Destroy this session permanently, freeing the Copilot seat immediately.
+    /// Sends session.destroy to CLI and removes from relay pool.
     public func destroy() async throws {
         eventTask?.cancel()
         eventTask = nil
         _ = try await connection.send(method: "session.destroy", params: [
-            "sessionId": .string(sessionId),
-        ])
-    }
-
-    /// Close this session and free the Copilot seat immediately.
-    /// Unlike disconnect/destroy which keep the session for resumption,
-    /// close tells the relay to destroy the CLI session and remove it from the pool.
-    public func close() async throws {
-        eventTask?.cancel()
-        eventTask = nil
-        _ = try await connection.send(method: "session.close", params: [
             "sessionId": .string(sessionId),
         ])
     }
