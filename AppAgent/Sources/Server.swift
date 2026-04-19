@@ -547,6 +547,9 @@ public final class MCPServer {
         case "webp": mime = "image/webp"
         case "json": mime = "application/json"
         case "srt": mime = "text/plain"
+        case "html", "htm": mime = "text/html"
+        case "js": mime = "application/javascript"
+        case "css": mime = "text/css"
         default: mime = "application/octet-stream"
         }
 
