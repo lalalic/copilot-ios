@@ -36,6 +36,8 @@ public final class WebAgentToolProvider {
     - `web-agent upload <ref> <filePath>` — Upload a file to a file input element.
     - `web-agent evaluate <script>` — Run JavaScript on the current page.
     - `web-agent screenshot` — Take a screenshot. Returns base64 JPEG.
+    - `web-agent set_cookies <json>` — Inject cookies. JSON array of {name, value, domain, path, ...}.
+    - `web-agent get_cookies [domain]` — Export cookies as JSON, optionally filtered by domain.
 
     Workflow: navigate → snapshot → read refs → click/type/download → snapshot again after changes.
 
@@ -123,8 +125,19 @@ public final class WebAgentToolProvider {
             }
             return "Error: screenshot failed"
 
+        case "set_cookies":
+            // Parse: "web-agent set_cookies <json_array>"
+            // JSON array of {name, value, domain, path, ...}
+            guard !rest.isEmpty else { return "Error: JSON required. Usage: web-agent set_cookies '[{\"name\":\"x\",\"value\":\"y\",\"domain\":\".example.com\",\"path\":\"/\"}]'" }
+            return await setCookiesFromJSON(rest)
+
+        case "get_cookies":
+            // Parse: "web-agent get_cookies [domain]"
+            let domain = rest.trimmingCharacters(in: .whitespaces)
+            return await getCookiesJSON(domain: domain.isEmpty ? nil : domain)
+
         default:
-            return "Error: unknown command '\(subcommand)'. Use: navigate, snapshot, click, type, download, upload, site, evaluate, screenshot"
+            return "Error: unknown command '\(subcommand)'. Use: navigate, snapshot, click, type, download, upload, site, evaluate, screenshot, set_cookies, get_cookies"
         }
     }
 
@@ -296,6 +309,23 @@ public final class WebAgentToolProvider {
             // Try to parse as JSON array for formatting
             if let data = resultJSON.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+
+                // Multi-step navigation: if first result has _navigateTo, navigate there and re-run script
+                if let first = json.first, let nextURL = first["_navigateTo"] as? String {
+                    _ = try await manager.navigate(to: nextURL)
+                    if let wait = adapter.waitSeconds, wait > 0 {
+                        try await Task.sleep(for: .seconds(wait + 1))
+                    } else {
+                        try await Task.sleep(for: .seconds(3))
+                    }
+                    let retryResult = try await manager.evaluateJSPublic(wrappedScript)
+                    if let retryData = retryResult.data(using: .utf8),
+                       let retryJSON = try? JSONSerialization.jsonObject(with: retryData) as? [[String: Any]] {
+                        return PipelineEngine.formatOutput(retryJSON)
+                    }
+                    return retryResult
+                }
+
                 return PipelineEngine.formatOutput(json)
             }
             return resultJSON
@@ -310,6 +340,9 @@ public final class WebAgentToolProvider {
     private static let knownRefreshURLs: [String: String] = [
         "xiaohongshu": "https://www.xiaohongshu.com",
         "wechat": "https://wx.qq.com",
+        "wechat-channels": "https://channels.weixin.qq.com/platform",
+        "youtube": "https://www.youtube.com",
+        "tiktok": "https://www.tiktok.com",
         "twitter": "https://x.com/home",
         "bilibili": "https://www.bilibili.com",
         "zhihu": "https://www.zhihu.com",
@@ -330,12 +363,17 @@ public final class WebAgentToolProvider {
         "github": "https://github.com/login",
         "reddit": "https://www.reddit.com/login",
         "youtube": "https://accounts.google.com/signin",
+        "tiktok": "https://www.tiktok.com/login",
+        "wechat-channels": "https://channels.weixin.qq.com/platform",
     ]
 
     /// Known auth domains and required cookies for popular sites.
     private static let knownAuthDomains: [(site: String, domain: String, requiredCookies: [String]?)] = [
         ("xiaohongshu", "xiaohongshu.com", ["web_session"]),
         ("wechat", "wx.qq.com", nil),
+        ("wechat-channels", "channels.weixin.qq.com", ["sessionid"]),
+        ("youtube", "youtube.com", ["LOGIN_INFO"]),
+        ("tiktok", "tiktok.com", ["sessionid"]),
         ("twitter", "x.com", ["ct0", "auth_token"]),
         ("bilibili", "bilibili.com", ["SESSDATA"]),
         ("zhihu", "zhihu.com", ["z_c0"]),
@@ -527,5 +565,104 @@ public final class WebAgentToolProvider {
         let outputFilename = "\(baseName).\(targetFormat)"
         let result = try await manager.download(url: dlURL, filename: outputFilename)
         return result
+    }
+
+    // MARK: - Cookie Transfer
+
+    /// Inject cookies from JSON array into the shared WKWebsiteDataStore.
+    /// JSON format: [{"name":"x","value":"y","domain":".example.com","path":"/","expiresDate":1234567890,"isSecure":true,"isHttpOnly":true}]
+    private func setCookiesFromJSON(_ json: String) async -> String {
+        guard let data = json.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return "Error: invalid JSON array"
+        }
+
+        let store = SharedWebKitEnvironment.shared.dataStore.httpCookieStore
+        var count = 0
+
+        for item in array {
+            guard let name = item["name"] as? String,
+                  let value = item["value"] as? String,
+                  let domain = item["domain"] as? String else {
+                continue
+            }
+
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: name,
+                .value: value,
+                .domain: domain,
+                .path: (item["path"] as? String) ?? "/"
+            ]
+
+            if let expires = item["expiresDate"] as? TimeInterval {
+                properties[.expires] = Date(timeIntervalSince1970: expires)
+            } else if let expires = item["expires"] as? TimeInterval {
+                properties[.expires] = Date(timeIntervalSince1970: expires)
+            }
+
+            if let secure = item["isSecure"] as? Bool, secure {
+                properties[.secure] = "TRUE"
+            } else if let secure = item["secure"] as? Bool, secure {
+                properties[.secure] = "TRUE"
+            }
+
+            if let httpOnly = item["isHttpOnly"] as? Bool, httpOnly {
+                properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
+            } else if let httpOnly = item["httpOnly"] as? Bool, httpOnly {
+                properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
+            }
+
+            if let sameSite = item["sameSite"] as? String {
+                properties[.sameSitePolicy] = sameSite
+            }
+
+            if let cookie = HTTPCookie(properties: properties) {
+                await store.setCookie(cookie)
+                count += 1
+            }
+        }
+
+        return "Set \(count) cookies (of \(array.count) provided)"
+    }
+
+    /// Export cookies as JSON, optionally filtered by domain.
+    private func getCookiesJSON(domain: String?) async -> String {
+        let store = SharedWebKitEnvironment.shared.dataStore.httpCookieStore
+        let allCookies = await store.allCookies()
+
+        let filtered: [HTTPCookie]
+        if let domain = domain {
+            filtered = allCookies.filter { cookie in
+                cookie.domain == domain ||
+                cookie.domain == ".\(domain)" ||
+                domain.hasSuffix(cookie.domain.hasPrefix(".") ? cookie.domain : ".\(cookie.domain)")
+            }
+        } else {
+            filtered = allCookies
+        }
+
+        let items: [[String: Any]] = filtered.map { cookie in
+            var dict: [String: Any] = [
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain,
+                "path": cookie.path
+            ]
+            if let expires = cookie.expiresDate {
+                dict["expiresDate"] = expires.timeIntervalSince1970
+            }
+            dict["isSecure"] = cookie.isSecure
+            dict["isHttpOnly"] = cookie.isHTTPOnly
+            if let sameSite = cookie.sameSitePolicy?.rawValue {
+                dict["sameSite"] = sameSite
+            }
+            return dict
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: items, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return "\(filtered.count) cookies\n\(json)"
     }
 }

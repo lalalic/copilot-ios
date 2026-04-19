@@ -298,7 +298,7 @@ public final class SubAgentToolProvider: @unchecked Sendable {
                 ?? "Sub-agent completed with no output"
 
             logger.info("[SubAgent] result: \(result.prefix(200))")
-            try? await session.destroy()
+            try? await session.close()
 
             logger.info("Sub-agent '\(agentName)' completed: \(result.prefix(200))")
             return result

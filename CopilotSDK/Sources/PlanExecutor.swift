@@ -171,7 +171,7 @@ public class PlanExecutor: @unchecked Sendable {
             postCompletionNotification(plan: plan, result: resultText, cost: cost)
             
             // 7. Disconnect
-            try? await session.disconnect()
+            try? await session.close()
             
         } catch {
             execution.fail(error: error.localizedDescription)

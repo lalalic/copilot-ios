@@ -168,6 +168,15 @@ public final class AdapterRegistry {
 
         // ProductHunt adapters (browser-based)
         registerProductHuntAdapters()
+
+        // WeChat Channels (视频号) adapters
+        registerWeChatChannelsAdapters()
+
+        // YouTube adapters (browser-based)
+        registerYouTubeAdapters()
+
+        // TikTok adapters (browser-based)
+        registerTikTokAdapters()
     }
 
     // MARK: - GitHub Adapters
@@ -492,26 +501,33 @@ public final class AdapterRegistry {
         auth: cookie
         domain: xiaohongshu.com
         requiresBrowser: true
-        preNavigate: https://www.xiaohongshu.com/user/profile
-        waitSeconds: 3
+        preNavigate: https://www.xiaohongshu.com/explore
+        waitSeconds: 2
         script: |
           (() => {
-            const nameEl = document.querySelector('[class*="user-name"], .user-name, .name');
-            const idEl = document.querySelector('[class*="user-id"], .user-redId, .red-id');
-            const bioEl = document.querySelector('[class*="user-desc"], .desc');
-            const followingEl = document.querySelector('[class*="following"] [class*="count"], .count:first-child');
-            const fansEl = document.querySelector('[class*="fans"] [class*="count"]');
-            const avatarEl = document.querySelector('[class*="avatar"] img, .avatar img');
-            if (!nameEl) {
-              return JSON.stringify([{error: "Profile not found. You may not be logged in.", url: window.location.href}]);
+            const nameEl = document.querySelector('[class*="user-name"], .user-name');
+            if (nameEl) {
+              const idEl = document.querySelector('[class*="user-redId"], .red-id');
+              const bioEl = document.querySelector('[class*="user-desc"], .desc');
+              const avatarEl = document.querySelector('[class*="avatar"] img');
+              return JSON.stringify([{
+                name: nameEl.textContent.trim(),
+                redId: idEl ? idEl.textContent.replace('小红书号：','').trim() : '',
+                bio: bioEl ? bioEl.textContent.trim() : '',
+                avatar: avatarEl ? avatarEl.src : '',
+                url: window.location.href
+              }]);
             }
-            return JSON.stringify([{
-              name: nameEl ? nameEl.textContent.trim() : '',
-              redId: idEl ? idEl.textContent.trim() : '',
-              bio: bioEl ? bioEl.textContent.trim() : '',
-              avatar: avatarEl ? avatarEl.src : '',
-              url: window.location.href
-            }]);
+            const profileLink = document.querySelector('a[href*="/user/profile/"]');
+            if (!profileLink) {
+              return JSON.stringify([{error: "Not logged in.", url: window.location.href}]);
+            }
+            const href = profileLink.getAttribute('href');
+            const userId = href.match(/\\/user\\/profile\\/([a-f0-9]+)/)?.[1];
+            if (!userId) {
+              return JSON.stringify([{error: "Could not extract user ID.", url: window.location.href}]);
+            }
+            return JSON.stringify([{_navigateTo: "https://www.xiaohongshu.com/user/profile/" + userId}]);
           })()
         """
 
@@ -704,6 +720,388 @@ public final class AdapterRegistry {
         """
 
         for yaml in [wxLogin, wxStatus, wxContacts, wxSend] {
+            try? register(yaml: yaml)
+        }
+    }
+
+    // MARK: - WeChat Channels (视频号) Adapters
+
+    private func registerWeChatChannelsAdapters() {
+        // wechat-channels/profile — get channel profile info
+        let chProfile = """
+        site: wechat-channels
+        name: profile
+        description: Get WeChat Channels (视频号) profile info
+        auth: cookie
+        domain: channels.weixin.qq.com
+        requiresBrowser: true
+        preNavigate: https://channels.weixin.qq.com/platform
+        waitSeconds: 5
+        script: |
+          (() => {
+            const getText = (sel) => {
+              const el = document.querySelector(sel);
+              if (el) return el.textContent.trim();
+              const wa = document.querySelector('wujie-app');
+              if (wa && wa.shadowRoot) {
+                const inner = wa.shadowRoot.querySelector(sel);
+                if (inner) return inner.textContent.trim();
+              }
+              return '';
+            };
+            const name = getText('.finder-nickname, .account-name, .nick-name');
+            const id = getText('.finder-id, .account-id');
+            if (!name) {
+              return JSON.stringify([{error: "Profile not found. You may not be logged in.", url: window.location.href}]);
+            }
+            return JSON.stringify([{
+              platform: "wechat-channels",
+              name: name,
+              channelId: id,
+              url: window.location.href
+            }]);
+          })()
+        """
+
+        // wechat-channels/trending — get dashboard metrics and trending info
+        let chTrending = """
+        site: wechat-channels
+        name: trending
+        description: Get WeChat Channels dashboard metrics
+        auth: cookie
+        domain: channels.weixin.qq.com
+        requiresBrowser: true
+        preNavigate: https://channels.weixin.qq.com/platform
+        waitSeconds: 5
+        script: |
+          (() => {
+            const getText = (sel) => {
+              const el = document.querySelector(sel);
+              if (el) return el.textContent.trim();
+              const wa = document.querySelector('wujie-app');
+              if (wa && wa.shadowRoot) {
+                const inner = wa.shadowRoot.querySelector(sel);
+                if (inner) return inner.textContent.trim();
+              }
+              return '';
+            };
+            const cards = document.querySelectorAll('.data-card, .overview-card, [class*="data-item"]');
+            const metrics = [];
+            cards.forEach((card) => {
+              const label = card.querySelector('.label, .title, .name');
+              const value = card.querySelector('.value, .count, .num');
+              if (label && value) {
+                metrics.push({
+                  metric: label.textContent.trim(),
+                  value: value.textContent.trim()
+                });
+              }
+            });
+            return JSON.stringify(metrics.length > 0 ? metrics : [{info: "Navigate to dashboard to see metrics", url: window.location.href}]);
+          })()
+        """
+
+        // wechat-channels/post — navigate to create post page
+        let chPost = """
+        site: wechat-channels
+        name: post
+        description: Navigate to WeChat Channels video upload page
+        auth: cookie
+        domain: channels.weixin.qq.com
+        requiresBrowser: true
+        preNavigate: https://channels.weixin.qq.com/platform/post/create
+        waitSeconds: 5
+        script: |
+          (() => {
+            return JSON.stringify([{
+              status: "ready",
+              message: "WeChat Channels upload page loaded. Use snapshot + upload + type to fill details.",
+              url: window.location.href,
+              tips: "Shadow DOM: use wujie-app >>> selector pattern if elements not found"
+            }]);
+          })()
+        """
+
+        for yaml in [chProfile, chTrending, chPost] {
+            try? register(yaml: yaml)
+        }
+    }
+
+    // MARK: - YouTube Adapters
+
+    private func registerYouTubeAdapters() {
+        // youtube/profile — get channel info from YouTube Studio
+        let ytProfile = """
+        site: youtube
+        name: profile
+        description: Get YouTube channel profile info from Studio
+        auth: cookie
+        domain: youtube.com
+        requiresBrowser: true
+        preNavigate: https://studio.youtube.com
+        waitSeconds: 5
+        script: |
+          (() => {
+            const nameEl = document.querySelector('.channel-name, [class*="channel-name"], .ytcd-channel-name');
+            const subsEl = document.querySelector('[class*="subscriber-count"], .subscriber-count');
+            const avatarEl = document.querySelector('.channel-thumbnail img, [class*="channel-avatar"] img');
+            const channelUrl = window.location.href;
+            const channelIdMatch = channelUrl.match(/channel\\/(UC[a-zA-Z0-9_-]+)/);
+            return JSON.stringify([{
+              platform: "youtube",
+              name: nameEl ? nameEl.textContent.trim() : '',
+              channelId: channelIdMatch ? channelIdMatch[1] : '',
+              subscribers: subsEl ? subsEl.textContent.trim() : '',
+              avatar: avatarEl ? avatarEl.src : '',
+              studioUrl: window.location.href
+            }]);
+          })()
+        """
+
+        // youtube/trending — get trending videos
+        let ytTrending = """
+        site: youtube
+        name: trending
+        description: Get trending YouTube videos
+        auth: none
+        requiresBrowser: true
+        preNavigate: https://www.youtube.com/feed/trending
+        waitSeconds: 5
+        args:
+          limit:
+            type: int
+            default: 20
+            description: Number of videos to return
+        script: |
+          (() => {
+            const limit = parseInt(__adapterArgs.limit) || 20;
+            const items = document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer');
+            const results = [];
+            items.forEach((item, i) => {
+              if (i >= limit) return;
+              const titleEl = item.querySelector('#video-title');
+              const channelEl = item.querySelector('#channel-name a, ytd-channel-name a');
+              const viewsEl = item.querySelector('#metadata-line span');
+              const linkEl = item.querySelector('a#video-title-link, a#thumbnail, a[href*="watch"]');
+              const thumbEl = item.querySelector('img');
+              results.push({
+                rank: i + 1,
+                title: titleEl ? titleEl.textContent.trim() : '',
+                channel: channelEl ? channelEl.textContent.trim() : '',
+                views: viewsEl ? viewsEl.textContent.trim() : '',
+                url: linkEl ? linkEl.href : '',
+                thumbnail: thumbEl ? thumbEl.src : ''
+              });
+            });
+            if (results.length === 0) {
+              return JSON.stringify([{info: "No videos found. Page may still be loading.", url: window.location.href}]);
+            }
+            return JSON.stringify(results);
+          })()
+        """
+
+        // youtube/inspiration — get AI-suggested topics from Studio
+        let ytInspiration = """
+        site: youtube
+        name: inspiration
+        description: Get AI-suggested video topics from YouTube Studio Inspiration tab
+        auth: cookie
+        domain: youtube.com
+        requiresBrowser: true
+        preNavigate: https://studio.youtube.com
+        waitSeconds: 5
+        script: |
+          (() => {
+            // Try to find and click the Inspiration tab
+            const tabs = document.querySelectorAll('[role="tab"], .navigation-item, a[href*="inspiration"]');
+            let inspirationTab = null;
+            tabs.forEach(tab => {
+              if (tab.textContent.toLowerCase().includes('inspiration')) {
+                inspirationTab = tab;
+              }
+            });
+            if (inspirationTab) {
+              inspirationTab.click();
+              return JSON.stringify([{status: "navigating", message: "Clicked Inspiration tab. Run again in a few seconds to get topics."}]);
+            }
+            // If already on inspiration page, extract topics
+            const topics = document.querySelectorAll('[class*="inspiration-card"], [class*="topic-card"], [class*="suggestion"]');
+            const results = [];
+            topics.forEach((card, i) => {
+              const titleEl = card.querySelector('h3, .title, [class*="title"]');
+              const descEl = card.querySelector('p, .description, [class*="description"]');
+              if (titleEl) {
+                results.push({
+                  rank: i + 1,
+                  topic: titleEl.textContent.trim(),
+                  description: descEl ? descEl.textContent.trim() : ''
+                });
+              }
+            });
+            if (results.length === 0) {
+              return JSON.stringify([{info: "No inspiration topics found. Try navigating to the Inspiration tab manually.", url: window.location.href}]);
+            }
+            return JSON.stringify(results);
+          })()
+        """
+
+        // youtube/post — navigate to upload page
+        let ytPost = """
+        site: youtube
+        name: post
+        description: Navigate to YouTube video upload page
+        auth: cookie
+        domain: youtube.com
+        requiresBrowser: true
+        preNavigate: https://www.youtube.com/upload
+        waitSeconds: 5
+        script: |
+          (() => {
+            return JSON.stringify([{
+              status: "ready",
+              message: "YouTube upload page loaded. Use upload to select video file, then fill title and description.",
+              url: window.location.href,
+              tips: "Wait for 'Checks complete' before publishing. Title max 100 chars."
+            }]);
+          })()
+        """
+
+        for yaml in [ytProfile, ytTrending, ytInspiration, ytPost] {
+            try? register(yaml: yaml)
+        }
+    }
+
+    // MARK: - TikTok Adapters
+
+    private func registerTikTokAdapters() {
+        // tiktok/profile — get TikTok profile info
+        let ttProfile = """
+        site: tiktok
+        name: profile
+        description: Get TikTok creator profile info
+        auth: cookie
+        domain: tiktok.com
+        requiresBrowser: true
+        preNavigate: https://www.tiktok.com/creator-center/overview
+        waitSeconds: 5
+        script: |
+          (() => {
+            const nameEl = document.querySelector('[class*="user-name"], [class*="nickname"], .creator-name, h2');
+            const handleEl = document.querySelector('[class*="user-handle"], [class*="unique-id"]');
+            const followersEl = document.querySelector('[class*="follower-count"], [data-e2e="followers-count"]');
+            const followingEl = document.querySelector('[class*="following-count"], [data-e2e="following-count"]');
+            const likesEl = document.querySelector('[class*="likes-count"], [data-e2e="likes-count"]');
+            const avatarEl = document.querySelector('[class*="avatar"] img, .avatar img');
+            return JSON.stringify([{
+              platform: "tiktok",
+              name: nameEl ? nameEl.textContent.trim() : '',
+              handle: handleEl ? handleEl.textContent.trim() : '',
+              followers: followersEl ? followersEl.textContent.trim() : '',
+              following: followingEl ? followingEl.textContent.trim() : '',
+              likes: likesEl ? likesEl.textContent.trim() : '',
+              avatar: avatarEl ? avatarEl.src : '',
+              url: window.location.href
+            }]);
+          })()
+        """
+
+        // tiktok/trending — get trending content/topics
+        let ttTrending = """
+        site: tiktok
+        name: trending
+        description: Get trending topics and hashtags from TikTok
+        auth: cookie
+        domain: tiktok.com
+        requiresBrowser: true
+        preNavigate: https://www.tiktok.com/discover
+        waitSeconds: 5
+        args:
+          limit:
+            type: int
+            default: 20
+            description: Number of trending items to return
+        script: |
+          (() => {
+            const limit = parseInt(__adapterArgs.limit) || 20;
+            // Try trending hashtags
+            const cards = document.querySelectorAll('[class*="DivCardContainer"], [class*="trending-item"], [class*="discover-card"]');
+            const results = [];
+            cards.forEach((card, i) => {
+              if (i >= limit) return;
+              const titleEl = card.querySelector('h3, [class*="title"], a');
+              const viewsEl = card.querySelector('[class*="views"], [class*="count"], span');
+              const linkEl = card.querySelector('a[href*="/tag/"], a[href*="/discover/"]');
+              if (titleEl) {
+                results.push({
+                  rank: i + 1,
+                  topic: titleEl.textContent.trim(),
+                  views: viewsEl ? viewsEl.textContent.trim() : '',
+                  url: linkEl ? linkEl.href : ''
+                });
+              }
+            });
+            if (results.length === 0) {
+              return JSON.stringify([{info: "No trending items found. Try loading the page first.", url: window.location.href}]);
+            }
+            return JSON.stringify(results);
+          })()
+        """
+
+        // tiktok/inspiration — get content inspiration from Creator Center
+        let ttInspiration = """
+        site: tiktok
+        name: inspiration
+        description: Get content inspiration from TikTok Creator Center
+        auth: cookie
+        domain: tiktok.com
+        requiresBrowser: true
+        preNavigate: https://www.tiktok.com/creator-center/content-inspiration
+        waitSeconds: 5
+        script: |
+          (() => {
+            const cards = document.querySelectorAll('[class*="inspiration"], [class*="topic-card"], [class*="suggestion"]');
+            const results = [];
+            cards.forEach((card, i) => {
+              const titleEl = card.querySelector('h3, .title, [class*="title"]');
+              const descEl = card.querySelector('p, .description, [class*="desc"]');
+              const trendEl = card.querySelector('[class*="trend"], [class*="views"]');
+              if (titleEl) {
+                results.push({
+                  rank: i + 1,
+                  topic: titleEl.textContent.trim(),
+                  description: descEl ? descEl.textContent.trim() : '',
+                  trend: trendEl ? trendEl.textContent.trim() : ''
+                });
+              }
+            });
+            if (results.length === 0) {
+              return JSON.stringify([{info: "No inspiration found. Page may need to load.", url: window.location.href}]);
+            }
+            return JSON.stringify(results);
+          })()
+        """
+
+        // tiktok/post — navigate to upload page
+        let ttPost = """
+        site: tiktok
+        name: post
+        description: Navigate to TikTok video upload page
+        auth: cookie
+        domain: tiktok.com
+        requiresBrowser: true
+        preNavigate: https://www.tiktok.com/creator-center/upload
+        waitSeconds: 5
+        script: |
+          (() => {
+            return JSON.stringify([{
+              status: "ready",
+              message: "TikTok upload page loaded. Upload video (max 30GB, 60min, mp4 recommended), then fill caption.",
+              url: window.location.href
+            }]);
+          })()
+        """
+
+        for yaml in [ttProfile, ttTrending, ttInspiration, ttPost] {
             try? register(yaml: yaml)
         }
     }

@@ -343,6 +343,22 @@ public final class ChatViewModel: ObservableObject {
         chatState = .disconnected
     }
 
+    /// Close session on relay (frees Copilot seat) and clean up.
+    public func close() {
+        let session = self.session
+        agentTask?.cancel()
+        agentTask = nil
+        agent?.stop()
+        agent = nil
+        self.session = nil
+        client = nil
+        chatState = .disconnected
+        // Send close to relay in background
+        if let session {
+            Task { try? await session.close() }
+        }
+    }
+
     // MARK: - Session Mode
 
     private func connectSession(config: SessionConfig) async throws {
