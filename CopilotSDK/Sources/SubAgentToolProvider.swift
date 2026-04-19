@@ -283,7 +283,6 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
             let config = SessionConfig(
                 model: model,
-                sessionId: "subagent-\(UUID().uuidString.lowercased())",
                 tools: subAgentTools,
                 systemMessage: .replace(body),
                 appId: appId,

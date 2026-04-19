@@ -1803,6 +1803,10 @@ private actor LoopControl {
 public struct AgentConfig: Sendable {
     /// Model to use (e.g. "gpt-4.1", "claude-sonnet-4").
     public var model: String?
+    /// Deterministic session ID for resumable sessions.
+    /// If set, the relay keeps the session for later resume.
+    /// If nil, the relay generates a temp ID (session auto-closes on disconnect).
+    public var sessionId: String?
     /// System instructions for the agent.
     /// When `sections` is nil, this replaces the entire system message (`.loop` mode).
     /// When `sections` is set, this becomes additional content appended after all sections (`.customize` mode).
@@ -1841,6 +1845,7 @@ public struct AgentConfig: Sendable {
 
     public init(
         model: String? = nil,
+        sessionId: String? = nil,
         instructions: String,
         sections: [String: SystemMessageSectionAction]? = nil,
         tools: [ToolDefinition] = [],
@@ -1857,6 +1862,7 @@ public struct AgentConfig: Sendable {
         onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
     ) {
         self.model = model
+        self.sessionId = sessionId
         self.instructions = instructions
         self.sections = sections
         self.tools = tools
@@ -2069,6 +2075,7 @@ public final class CopilotAgent: @unchecked Sendable {
 
         return SessionConfig(
             model: config.model,
+            sessionId: config.sessionId,
             tools: buildTools(config: config),
             systemMessage: systemMessage,
             workingDirectory: config.workingDirectory,

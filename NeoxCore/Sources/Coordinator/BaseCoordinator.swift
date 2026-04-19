@@ -551,6 +551,7 @@ open class BaseCoordinator: ObservableObject {
             transport: transport,
             mode: .agent(AgentConfig(
                 model: model,
+                sessionId: "\(appId)-\(neoxUserId ?? "anon")",
                 instructions: instructions,
                 sections: finalSections,
                 tools: tools,
@@ -641,6 +642,7 @@ open class BaseCoordinator: ObservableObject {
             transport: transport,
             mode: .agent(AgentConfig(
                 model: model,
+                sessionId: "\(appIdStr)-\(projectId)-\(neoxUserId ?? "anon")",
                 instructions: projectContext,
                 tools: tools,
                 appId: "\(appIdStr)-\(projectId)",
