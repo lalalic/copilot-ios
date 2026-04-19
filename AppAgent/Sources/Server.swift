@@ -102,6 +102,14 @@ public final class MCPServer {
         Array(toolHandlers.keys).sorted()
     }
 
+    /// Optional root directory for serving static files at `/assets/`.
+    nonisolated(unsafe) private var _staticFileRoot: URL?
+
+    /// Set a root directory to serve static files from via GET `/assets/...`.
+    public func setStaticFileRoot(_ url: URL?) {
+        _staticFileRoot = url
+    }
+
     // MARK: - Server Lifecycle
 
     /// Start listening for MCP connections.
@@ -281,7 +289,13 @@ public final class MCPServer {
             sendJSON(connection: connection, status: 200, json: info)
 
         default:
-            sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
+            // Static file serving: GET /assets/...
+            if method == "GET", path.hasPrefix("/assets/"), let root = _staticFileRoot {
+                let relativePath = String(path.dropFirst("/assets/".count))
+                serveStaticFile(relativePath: relativePath, root: root, connection: connection)
+            } else {
+                sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
+            }
         }
     }
 
@@ -399,7 +413,9 @@ public final class MCPServer {
         case 204: statusText = "No Content"
         case 400: statusText = "Bad Request"
         case 404: statusText = "Not Found"
+        case 403: statusText = "Forbidden"
         case 405: statusText = "Method Not Allowed"
+        case 500: statusText = "Internal Server Error"
         default: statusText = "Unknown"
         }
 
@@ -493,5 +509,50 @@ public final class MCPServer {
 
     private func log(_ message: String) {
         onLog?(message)
+    }
+
+    // MARK: - Static File Serving
+
+    nonisolated private func serveStaticFile(relativePath: String, root: URL, connection: NWConnection) {
+        // Security: prevent path traversal
+        let cleaned = relativePath.replacingOccurrences(of: "..", with: "")
+        let fileURL = root.appendingPathComponent(cleaned)
+
+        // Verify the resolved path is still under root
+        guard fileURL.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path) else {
+            sendHTTP(connection: connection, status: 403, body: "Forbidden".data(using: .utf8))
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
+            return
+        }
+
+        guard let data = try? Data(contentsOf: fileURL) else {
+            sendHTTP(connection: connection, status: 500, body: "Read error".data(using: .utf8))
+            return
+        }
+
+        let ext = fileURL.pathExtension.lowercased()
+        let mime: String
+        switch ext {
+        case "mp4": mime = "video/mp4"
+        case "mov": mime = "video/quicktime"
+        case "wav": mime = "audio/wav"
+        case "mp3": mime = "audio/mpeg"
+        case "m4a", "aac": mime = "audio/mp4"
+        case "png": mime = "image/png"
+        case "jpg", "jpeg": mime = "image/jpeg"
+        case "webp": mime = "image/webp"
+        case "json": mime = "application/json"
+        case "srt": mime = "text/plain"
+        default: mime = "application/octet-stream"
+        }
+
+        sendHTTP(connection: connection, status: 200, body: data, contentType: mime, extraHeaders: [
+            "Content-Length": "\(data.count)",
+            "Accept-Ranges": "bytes",
+        ])
     }
 }

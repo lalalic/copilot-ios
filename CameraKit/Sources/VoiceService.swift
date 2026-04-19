@@ -6,6 +6,12 @@ import os
 
 private let voiceLog = Logger(subsystem: "com.copilot.camerakit", category: "voice")
 
+/// Wrapper for TTS synthesis result to satisfy Sendable.
+private struct TTSResult: @unchecked Sendable {
+    let format: AVAudioFormat
+    let buffers: [AVAudioPCMBuffer]
+}
+
 // MARK: - Voice Output (TTS)
 
 /// Text-to-speech service.
@@ -45,6 +51,38 @@ public final class VoiceOutput: NSObject, ObservableObject, AVSpeechSynthesizerD
         isSpeaking = false
         speakContinuation?.resume()
         speakContinuation = nil
+    }
+
+    /// Synthesize text to a WAV audio file. Returns the file URL.
+    public func synthesizeToFile(_ text: String, outputURL: URL, language: String = "en-US", rate: Float = 0.95, pitch: Float = 1.05) async throws -> URL {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * rate
+        utterance.pitchMultiplier = pitch
+        utterance.voice = AVSpeechSynthesisVoice(language: language)
+
+        let wrapper = await withCheckedContinuation { (continuation: CheckedContinuation<TTSResult, Never>) in
+            nonisolated(unsafe) var capturedFormat: AVAudioFormat?
+            nonisolated(unsafe) var buffers: [AVAudioPCMBuffer] = []
+            nonisolated(unsafe) var finished = false
+            synthesizer.write(utterance) { buffer in
+                guard !finished else { return }
+                if let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 {
+                    if capturedFormat == nil { capturedFormat = pcm.format }
+                    buffers.append(pcm.copy() as! AVAudioPCMBuffer)
+                } else if !buffers.isEmpty, let fmt = capturedFormat {
+                    finished = true
+                    continuation.resume(returning: TTSResult(format: fmt, buffers: buffers))
+                }
+            }
+        }
+
+        let audioFile = try AVAudioFile(forWriting: outputURL, settings: wrapper.format.settings)
+        for pcm in wrapper.buffers {
+            try audioFile.write(from: pcm)
+        }
+
+        voiceLog.info("Synthesized TTS to \(outputURL.lastPathComponent), \(audioFile.length) frames")
+        return outputURL
     }
 
     // MARK: - Delegate
