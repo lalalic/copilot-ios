@@ -645,7 +645,7 @@ open class BaseCoordinator: ObservableObject {
                 sessionId: "\(appIdStr)-\(projectId)-\(neoxUserId ?? "anon")",
                 instructions: projectContext,
                 tools: tools,
-                appId: "\(appIdStr)-\(projectId)",
+                appId: appIdStr,
                 deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
                 apnsEnv: {
                     #if DEBUG
@@ -667,7 +667,7 @@ open class BaseCoordinator: ObservableObject {
         projectSessions[projectId] = vm
         vm.skipPendingRestore = true
         Task { await vm.connect() }
-        NSLog("[BaseCoordinator] Created project session for '%@' (appId: %@-%@)", projectId, appIdStr, projectId)
+        NSLog("[BaseCoordinator] Created project session for '%@' (appId: %@)", projectId, appIdStr)
         return vm
     }
 
