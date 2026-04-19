@@ -1630,6 +1630,17 @@ public final class CopilotSession: @unchecked Sendable {
         ])
     }
 
+    /// Close this session and free the Copilot seat immediately.
+    /// Unlike disconnect/destroy which keep the session for resumption,
+    /// close tells the relay to destroy the CLI session and remove it from the pool.
+    public func close() async throws {
+        eventTask?.cancel()
+        eventTask = nil
+        _ = try await connection.send(method: "session.close", params: [
+            "sessionId": .string(sessionId),
+        ])
+    }
+
     /// Change the model for this session.
     public func setModel(_ model: String, reasoningEffort: String? = nil) async throws {
         var params: [String: JSONValue] = [
