@@ -293,7 +293,7 @@ public struct FileExplorerView: View {
     private func openFile(_ entry: FileEntry) {
         // Only open text-like files
         let textExtensions: Set<String> = [
-            "txt", "md", "json", "jsonl", "yaml", "yml", "swift", "js", "ts", "py",
+            "txt", "md", "json", "jsonl", "yaml", "yml", "swift", "js", "ts", "jsx", "tsx", "py",
             "html", "css", "xml", "csv", "log", "sh", "zsh", "bash",
             "toml", "ini", "cfg", "conf", "env", "gitignore",
             "h", "m", "c", "cpp", "rs", "go", "rb", "java", "kt"
