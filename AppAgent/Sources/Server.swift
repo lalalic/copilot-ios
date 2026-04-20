@@ -289,9 +289,9 @@ public final class MCPServer {
             sendJSON(connection: connection, status: 200, json: info)
 
         default:
-            // Static file serving: GET /assets/...
-            if method == "GET", path.hasPrefix("/assets/"), let root = _staticFileRoot {
-                let relativePath = String(path.dropFirst("/assets/".count))
+            // Static file serving: GET /public/...
+            if method == "GET", path.hasPrefix("/public/"), let root = _staticFileRoot {
+                let relativePath = String(path.dropFirst("/public/".count))
                 serveStaticFile(relativePath: relativePath, root: root, connection: connection)
             } else {
                 sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))

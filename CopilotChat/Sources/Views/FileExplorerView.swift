@@ -191,6 +191,9 @@ public struct FileExplorerView: View {
 
     // MARK: - File Preview
 
+    @State private var isEditing = false
+    @State private var editContent = ""
+
     private func filePreviewView(file: FileEntry, content: String) -> some View {
         VStack(spacing: 0) {
             // Header with back button
@@ -214,8 +217,13 @@ public struct FileExplorerView: View {
 
                 Spacer()
 
-                // Placeholder for symmetry
-                Text("Back").font(.subheadline).opacity(0)
+                Button {
+                    editContent = content
+                    isEditing = true
+                } label: {
+                    Text("Edit")
+                        .font(.subheadline)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -231,6 +239,34 @@ public struct FileExplorerView: View {
                     .padding(12)
                     .textSelection(.enabled)
             }
+        }
+        .sheet(isPresented: $isEditing) {
+            fileEditorSheet(file: file)
+        }
+    }
+
+    private func fileEditorSheet(file: FileEntry) -> some View {
+        NavigationStack {
+            TextEditor(text: $editContent)
+                .font(.system(.caption, design: .monospaced))
+                .padding(8)
+                .navigationTitle(file.name)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { isEditing = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            let fileURL = file.url
+                            try? editContent.write(to: fileURL, atomically: true, encoding: .utf8)
+                            fileContent = editContent
+                            isEditing = false
+                        }
+                    }
+                }
         }
     }
 
