@@ -112,7 +112,7 @@ Create a new conversation session.
 - `systemMessage: SystemMessageConfig?` — System message customization (see below)
 - `commands: [CommandDefinition]?` — Slash commands for TUI
 - `onPermissionRequest: PermissionHandler?` — Handler for permission requests (default: auto-approve)
-- `onUserInputRequest: UserInputHandler?` — Handler for user input (enables ask_user tool)
+- `onUserInputRequest: UserInputHandler?` — Handler for user input (enables ask_questions tool)
 - `hooks: SessionHooks?` — Session lifecycle hooks (see below)
 - `workingDirectory: String?` — Working directory path
 - `streaming: Bool?` — Enable streaming events
@@ -434,7 +434,7 @@ let session = try await client.createSession(config: SessionConfig(
 
 ## User Input Requests
 
-Enable the `ask_user` tool:
+Enable the `ask_questions` tool:
 
 ```swift
 let session = try await client.createSession(config: SessionConfig(
@@ -592,7 +592,7 @@ try await session.loop(initialPrompt: "Start working on the task.") { session in
 ## Autonomous Agent
 
 The `CopilotAgent` provides a higher-level abstraction over the loop mode, automatically injecting
-`send_response` and `ask_user` tools and configuring the session for infinite autonomous operation.
+`send_response` and `ask_questions` tools and configuring the session for infinite autonomous operation.
 
 This is the **recommended way** to use CopilotSDK for most apps.
 
@@ -606,10 +606,10 @@ let agent = try await client.createAgent(config: AgentConfig(
         // Called when agent uses send_response to deliver results
         print("Agent: \(message)")
     },
-    onAskUser: { question in
-        // Called when agent uses ask_user to request input
-        print("Agent asks: \(question)")
-        return readLine()!
+    onAskQuestions: { args in
+        // Called when agent uses ask_questions to request input
+        print("Agent asks: \(args)")
+        return .object(["answer": .string(readLine() ?? "")])
     }
 ))
 
@@ -619,7 +619,7 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 
 ### How It Works
 
-1. **Auto-injected tools**: `send_response` (delivers results to `onResponse`) and `ask_user` (blocks until user answers via `onAskUser`)
+1. **Auto-injected tools**: `send_response` (delivers results to `onResponse`) and `ask_questions` (blocks until user answers via `onAskQuestions`)
 2. **System message**: Instructs the model to use these tools instead of ending turns naturally
 3. **Infinite session**: `InfiniteSessionConfig(enabled: true)` is set automatically
 4. **Auto-resume**: When a turn ends, the agent is automatically resumed with a continuation prompt
@@ -633,7 +633,7 @@ try await agent.start(prompt: "Build a REST API with user authentication")
 | `sections` | `[String: SystemMessageSectionAction]?` | Customize specific sections of the system prompt (see below) |
 | `tools` | `[ToolDefinition]` | App-defined tools the model can call |
 | `onResponse` | `(String) -> Void` | Called when agent delivers results via `send_response` |
-| `onAskUser` | `(String) async -> String` | Called when agent asks a question via `ask_user` |
+| `onAskQuestions` | `(JSONValue) async -> JSONValue` | Called when agent uses `ask_questions`. Receives the args (questions array); return JSON answer keyed by question header. |
 | `userId` | `String?` | User identifier for session pinning and multi-user routing |
 | `appId` | `String?` | Routes to a specific workspace on the relay |
 | `snapshot` | `String?` | Base64 workspace snapshot for context recovery |
@@ -683,7 +683,7 @@ let agent = try await client.createAgent(config: AgentConfig(
     ],
     tools: gestureTools,
     onResponse: { message in handleResponse(message) },
-    onAskUser: { _ in return "" }
+    onAskQuestions: { _ in .object([:]) }
 ))
 ```
 
@@ -699,11 +699,11 @@ let agent = try await client.createAgent(config: AgentConfig(
     userId: "user-123",                   // session pinning
     appId: "toybox",                 // workspace routing
     onResponse: { message in handleResponse(message) },
-    onAskUser: { question in return getUserAnswer(question) }
+    onAskQuestions: { args in .object(["answer": .string(getUserAnswer(args))]) }
 ))
 ```
 
-- **`userId`**: User identifier for session pinning. If the client disconnects while the agent is waiting for input (`ask_user`), the relay holds the session. On reconnect with the same `userId`, the session resumes exactly where it left off.
+- **`userId`**: User identifier for session pinning. If the client disconnects while the agent is waiting for input (`ask_questions`), the relay holds the session. On reconnect with the same `userId`, the session resumes exactly where it left off.
 - **`appId`**: Routes to a workspace-specific CLI process on the relay. Each app can have its own instructions, skills, and files.
 - **`snapshot`**: If the relay held session expired, it returns a workspace snapshot. Pass this back on reconnect to restore conversation context.
 
@@ -724,13 +724,13 @@ agent.stop()
 For apps that need ask-and-answer (not a continuous loop), use `agent.session.sendAndWait()`:
 
 ```swift
-// Create agent once (registers send_response + ask_user tools on the session)
+// Create agent once (registers send_response + ask_questions tools on the session)
 let agent = try await client.createAgent(config: AgentConfig(
     instructions: "You are a helpful assistant.",
     onResponse: { [weak self] message in
         self?.capturedResponse = message   // relay delivers via send_response tool
     },
-    onAskUser: { _ in return "" }
+    onAskQuestions: { _ in .object([:]) }
 ))
 
 // For each user message, use the dual-capture pattern:
@@ -750,12 +750,12 @@ any app that needs one-shot interactions rather than a continuous autonomous loo
 
 | Feature | `session.loop()` | `CopilotAgent` |
 |---------|------------------|-----------------|
-| Tool injection | Manual | Automatic (`send_response` + `ask_user`) |
+| Tool injection | Manual | Automatic (`send_response` + `ask_questions`) |
 | System message | Manual `.loop()` config | Auto-generated from `instructions` or `sections` |
 | Section customization | Manual `.customize()` | Pass `sections` in AgentConfig |
 | Infinite sessions | Manual config | Enabled by default |
 | Resume control | `onTurnEnd` callback | Automatic |
-| User interaction | Custom implementation | Built-in `onAskUser` callback |
+| User interaction | Custom implementation | Built-in `onAskQuestions` callback |
 | Relay pinning | Manual `userId` in SessionConfig | Pass `userId` in AgentConfig |
 
 ## Custom Providers
@@ -872,8 +872,8 @@ class ChatService {
                 self?.capturedResponse = message
                 self?.speak(message)
             },
-            onAskUser: { question in
-                return "Yes"  // or present UI and wait for user input
+            onAskQuestions: { _ in
+                return .object(["answer": .string("Yes")])  // or present UI and wait for user input
             }
         ))
     }
@@ -918,7 +918,7 @@ let agent = try await client.createAgent(config: AgentConfig(
     instructions: "You are a weather assistant.",
     tools: [weatherTool],
     onResponse: { message in print(message) },
-    onAskUser: { _ in return "" }
+    onAskQuestions: { _ in .object([:]) }
 ))
 
 try await agent.start(prompt: "What's the weather in Tokyo?")
@@ -940,7 +940,7 @@ let agent = try await client.createAgent(config: AgentConfig(
         // "Oink oink! Piggy loves mud puddles! 🐷"
         print(message)
     },
-    onAskUser: { question in return getUserInput(question) }
+    onAskQuestions: { args in .object(["answer": .string(getUserInput(args))]) }
 ))
 ```
 
@@ -949,11 +949,11 @@ let agent = try await client.createAgent(config: AgentConfig(
 The production relay at `wss://relay.ai.qili2.com` provides:
 
 - **Session pooling**: Pre-warmed CLI sessions for instant response
-- **Hold/resume**: If client disconnects during `ask_user`, session is held for 10 min
+- **Hold/resume**: If client disconnects during `ask_questions`, session is held for 10 min
 - **User pinning**: Same `userId` reconnects to the same session
 - **Multi-workspace**: Route to different workspaces via `appId`
 - **Context recovery**: Workspace snapshots on hold expiry, restored on reconnect
-- **Agent loop injection**: `send_response` + `ask_user` tools and loop system message auto-injected
+- **Agent loop injection**: `send_response` + `ask_questions` tools and loop system message auto-injected
 
 See [copilot-relay](https://github.com/lalalic/copilot-relay) for deployment and architecture.
 
@@ -974,7 +974,7 @@ let transport = WebSocketTransport(host: "localhost", port: 8765)
 
 - **Hooks**: Typed hook API exists (`onFileEdit`, `onTerminalCommand`, etc.) but hooks are not invoked by Copilot CLI v1.0.11. Will work when CLI adds support.
 - **`getMessages()`**: Session message history returns empty from CLI. Conversation turns are available via events instead.
-- **`ask_user` reliability**: The `ask_user` tool is sometimes not reliably triggered by the model. Using the Agent pattern with auto-injected system messages improves this.
+- **`ask_questions` reliability**: The `ask_questions` tool is sometimes not reliably triggered by the model. Using the Agent pattern with auto-injected system messages improves this.
 - **Telemetry**: `sendTelemetry()` API exists but is not yet implemented in the CLI.
 - **`listModels()`**: Returns empty; model selection happens server-side.
 

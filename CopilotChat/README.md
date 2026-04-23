@@ -9,8 +9,8 @@ Three scenarios, identical for both modes. Each supports **text**, **speech**, a
 ### 1. User sends a prompt
 User types/speaks a message → sends it. In session mode this happens frequently (back-and-forth). In autonomous mode this is typically the initial prompt and occasional follow-ups.
 
-### 2. ask_user — waiting for user input
-The model calls `ask_user` to request input. The UI indicates it's waiting. User responds via text, speech, or attachment. This is the same in both modes.
+### 2. ask_questions — waiting for user input
+The model calls `ask_questions` to request input. The UI indicates it's waiting. User responds via text, speech, or attachment. This is the same in both modes.
 
 ### 3. Steer — inject context during tool calling
 While the model is executing tools, the user can send a steer message to redirect or add context. Works the same in both modes.
@@ -25,7 +25,7 @@ Session mode:  CopilotClient → CopilotSession → events → ChatViewModel →
 Agent mode:    CopilotClient → CopilotAgent (session + send_response) → ChatViewModel → ChatView
 ```
 
-**One ChatViewModel** handles both modes. Agent mode adds `send_response` + `ask_user` tools via `CopilotAgent`, but the UI layer doesn't care — it just renders messages and handles user input.
+**One ChatViewModel** handles both modes. Agent mode adds `send_response` + `ask_questions` tools via `CopilotAgent`, but the UI layer doesn't care — it just renders messages and handles user input.
 
 ## Components
 
@@ -55,7 +55,7 @@ ChatView(viewModel: chat, inputModes: [.text, .speech, .attachment]) // all
 │ Text+Speech: [📎] [Type a message...      ] [🎤] │  ← default
 │ Text only:         [Type a message...      ] [➤] │
 │ Speech only:       [     🎤 Tap to speak        ] │
-│ Waiting:     [📎] [Reply...               ] [🎤] │  ← ask_user pending (pulsing)
+│ Waiting:     [📎] [Reply...               ] [🎤] │  ← ask_questions pending (pulsing)
 │ Working:     [📎] [Steer...               ] [🎤] │  ← tools running (can steer)
 │ Listening:   [📎] [ 🔴 Listening...       ] [⏹] │  ← speech active
 └───────────────────────────────────────────────────┘
@@ -88,7 +88,7 @@ let chat = ChatViewModel(
         tools: myTools,
         appId: "intento",
         onResponse: { _ in },
-        onAskUser: { _ in "" }
+        onAskQuestions: { _ in "" }
     ))
 )
 

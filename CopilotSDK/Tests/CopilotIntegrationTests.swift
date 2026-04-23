@@ -851,7 +851,7 @@ final class CopilotIntegrationTests: XCTestCase {
     
     // MARK: - User Input Request
     
-    /// Verify onUserInputRequest callback works with ask_user tool.
+    /// Verify onUserInputRequest callback works with ask_questions tool.
     func testUserInputRequest_Callback() async throws {
         try await skipIfNoRelay()
         
@@ -867,14 +867,14 @@ final class CopilotIntegrationTests: XCTestCase {
         let session = try await client.createSession(config: config)
         
         let response = try await session.sendAndWait(
-            prompt: "Ask the user what their favorite city is using the ask_user tool, then tell me their answer.",
+            prompt: "Ask the user what their favorite city is using the ask_questions tool, then tell me their answer.",
             timeout: Self.defaultTimeout
         )
         
         let questions = await inputTracker.questions
         print("UserInput test - questions: \(questions), response: \(response ?? "nil")")
         
-        // The model may or may not use ask_user - it depends on model behavior
+        // The model may or may not use ask_questions - it depends on model behavior
         XCTAssertNotNil(response)
     }
     
@@ -1002,16 +1002,12 @@ final class CopilotIntegrationTests: XCTestCase {
             instructions: "You are a helpful assistant. When asked to count, count the numbers using send_response for each.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { question in
-                Task { await askCount.increment() }
-                return "stop"
             }
         ))
 
-        // Run agent in a task with timeout; stop after 2 send_response calls or ask_user
+        // Run agent in a task with timeout; stop after 2 send_response calls or ask_questions
         let agentTask = Task {
-            try await agent.start(prompt: "Count from 1 to 3, using send_response for each number. When done counting, use ask_user to ask what to do next.")
+            try await agent.start(prompt: "Count from 1 to 3, using send_response for each number. When done counting, use ask_questions to ask what to do next.")
         }
 
         // Wait up to 120s, checking for responses periodically

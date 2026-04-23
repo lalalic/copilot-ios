@@ -19,7 +19,7 @@ let agent = try await client.createAgent(config: AgentConfig(
     instructions: CameraSkill.filmDirector.systemPrompt,
     tools: toolProvider.compactTools(for: .filmDirector),
     onResponse: { print("Director: \($0)") },
-    onAskUser: { _ in readLine()! }
+    onAskQuestions: { _ in .object(["answer": .string(readLine() ?? "")]) }
 ))
 try await agent.start(prompt: "Film a cooking tutorial")
 ```

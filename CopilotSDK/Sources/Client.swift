@@ -90,7 +90,7 @@ public enum CopilotError: Error, LocalizedError {
         case .serverError(let message): return "Server error: \(message)"
         case .connectionFailed(let message): return "Connection failed: \(message)"
         case .timeout: return "Operation timed out"
-        case .noPendingQuestion: return "No pending ask_user question to answer"
+        case .noPendingQuestion: return "No pending ask_questions question to answer"
         }
     }
 }
@@ -634,7 +634,7 @@ public let approveAll: PermissionHandler = { _ in .approved }
 
 // MARK: - User Input Request
 
-/// Information about a user input request from the agent's ask_user tool.
+/// Information about a user input request from the agent's ask_questions tool.
 public struct UserInputRequest: Sendable {
     public let question: String
     public let choices: [String]?
@@ -947,9 +947,9 @@ public final class CopilotSession: @unchecked Sendable {
 
     /// Whether this session was resumed from a pinned on-hold session (relay v2).
     public internal(set) var resumed: Bool = false
-    /// The pending question from ask_user if the session was resumed while on-hold (relay v2).
+    /// The pending question from ask_questions if the session was resumed while on-hold (relay v2).
     public internal(set) var pendingQuestion: String?
-    /// The requestId for the pending ask_user tool call (relay v2).
+    /// The requestId for the pending ask_questions tool call (relay v2).
     /// Use this to answer the pending question via `session.tools.handlePendingToolCall`.
     public internal(set) var pendingRequestId: String?
     /// Base64-encoded snapshot received from the relay's server-side cache (relay v2).
@@ -1199,7 +1199,7 @@ public final class CopilotSession: @unchecked Sendable {
                     }
                 case "external_tool.requested":
                     // Spawn tool calls in a separate task to avoid blocking the event dispatch loop.
-                    // This is critical because tools like ask_user block until user responds,
+                    // This is critical because tools like ask_questions block until user responds,
                     // which would prevent all subsequent notifications from being processed.
                     let selfRef = self
                     Task { await selfRef.handleToolCall(data) }
@@ -1228,7 +1228,7 @@ public final class CopilotSession: @unchecked Sendable {
               case .string(let requestId) = data["requestId"] else { return }
 
         // Store requestId so views can persist it for recovery after app restart
-        if toolName == "ask_questions" || toolName == "ask_user" {
+        if toolName == "ask_questions" {
             self.pendingRequestId = requestId
         }
 
@@ -1514,7 +1514,7 @@ public final class CopilotSession: @unchecked Sendable {
         ])
     }
 
-    /// Answer the pending ask_user question from a resumed on-hold session (relay v2).
+    /// Answer the pending ask_questions question from a resumed on-hold session (relay v2).
     /// Call this after `createSession` returns `session.resumed == true` with a `pendingRequestId`.
     ///
     /// ```swift
@@ -1702,7 +1702,7 @@ public final class CopilotSession: @unchecked Sendable {
         }
 
         // Send initial prompt (skip if nil — e.g., when resuming a session
-        // where the model is already running after answering a pending ask_user)
+        // where the model is already running after answering a pending ask_questions)
         if let initialPrompt {
             _ = try await send(prompt: initialPrompt)
         }
@@ -1813,8 +1813,6 @@ public struct AgentConfig: Sendable {
     public var tools: [ToolDefinition]
     /// Called when the agent uses ask_questions with a message to deliver a result.
     public var onResponse: @Sendable (String) async -> Void
-    /// Called when the agent uses ask_user to request input. Return the user's answer.
-    public var onAskUser: @Sendable (String) async -> String
     /// Called when the agent uses ask_questions to request structured input.
     /// Return a JSON object keyed by question header.
     public var onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)?
@@ -1850,7 +1848,6 @@ public struct AgentConfig: Sendable {
         customAgents: [CustomAgentConfig]? = nil,
         agent: String? = nil,
         onResponse: @escaping @Sendable (String) async -> Void,
-        onAskUser: @escaping @Sendable (String) async -> String,
         onAskQuestions: (@Sendable (JSONValue) async -> JSONValue)? = nil
     ) {
         self.model = model
@@ -1867,7 +1864,6 @@ public struct AgentConfig: Sendable {
         self.customAgents = customAgents
         self.agent = agent
         self.onResponse = onResponse
-        self.onAskUser = onAskUser
         self.onAskQuestions = onAskQuestions
     }
 }
@@ -1940,7 +1936,6 @@ public final class CopilotAgent: @unchecked Sendable {
         var tools = config.tools
 
         let onResponse = config.onResponse
-        let onAskUser = config.onAskUser
         let onAskQuestions = config.onAskQuestions
         tools.append(ToolDefinition(
             name: "ask_questions",
@@ -2013,17 +2008,7 @@ public final class CopilotAgent: @unchecked Sendable {
                     return "User answered."
                 }
 
-                let question: String
-                if case .object(let dict) = args,
-                   case .array(let arr) = dict["questions"],
-                   case .object(let first) = arr.first,
-                   case .string(let text) = first["question"] {
-                    question = text
-                } else {
-                    question = "What would you like me to do next?"
-                }
-                let answer = await onAskUser(question)
-                return "User answered: \(answer)"
+                return "User answered."
             }
         ))
 
@@ -2226,9 +2211,9 @@ public final class CopilotClient: @unchecked Sendable {
     ///     instructions: "You are a coding assistant.",
     ///     tools: [readFileTool, writeFileTool],
     ///     onResponse: { message in print("Agent: \(message)") },
-    ///     onAskUser: { question in
-    ///         print("Agent asks: \(question)")
-    ///         return readLine()!
+    ///     onAskQuestions: { args in
+    ///         print("Agent asks: \(args)")
+    ///         return .object(["answer": .string(readLine() ?? "")])
     ///     }
     /// ))
     /// try await agent.start(prompt: "Build a REST API")

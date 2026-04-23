@@ -5,7 +5,7 @@ import XCTest
 // MARK: - Remote Agent Integration Tests (via relay WebSocket)
 
 /// Integration tests for the CopilotAgent pattern via a remote relay server.
-/// Tests the full agent loop: connect → send_response/ask_user tools → loop control.
+/// Tests the full agent loop: connect → send_response/ask_questions tools → loop control.
 /// Requires: relay server running (either remote at relay.ai.qili2.com:443 or local at localhost:8765).
 ///
 /// To skip: set SKIP_INTEGRATION_TESTS=1
@@ -49,8 +49,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 
         let agent = try await client.createAgent(config: AgentConfig(
             instructions: "You are a test agent.",
-            onResponse: { _ in },
-            onAskUser: { _ in "stop" }
+            onResponse: { _ in }
         ))
 
         XCTAssertFalse(agent.session.sessionId.isEmpty, "Agent session should have a valid ID")
@@ -68,10 +67,6 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             instructions: "You are a helpful assistant. Always use send_response to deliver your answer.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in
-                Task { await askCount.increment() }
-                return "No more tasks."
             }
         ))
 
@@ -100,7 +95,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         XCTAssertTrue(joined.uppercased().contains("HELLO"), "Response should contain greeting, got: \(joined)")
     }
 
-    /// Verify agent calls ask_user tool and receives the answer.
+    /// Verify agent calls ask_questions tool and receives the answer.
     func testAgent_AskUser_ReceivesAnswer() async throws {
         try await skipIfNoRelay()
 
@@ -108,13 +103,9 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         let questions = AgentResponseCollector()
 
         let agent = try await client.createAgent(config: AgentConfig(
-            instructions: "You have exactly one task: ask the user their name using ask_user, then greet them using send_response.",
+            instructions: "You have exactly one task: ask the user their name using ask_questions, then greet them using send_response.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { question in
-                Task { await questions.add(question) }
-                return "Alice"
             }
         ))
 
@@ -139,7 +130,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
         print("[RemoteAgent] Questions: \(qs), Responses: \(msgs)")
 
         // The agent should have asked a question and received the answer "Alice"
-        XCTAssertGreaterThanOrEqual(qs.count, 1, "Agent should ask at least 1 question via ask_user")
+        XCTAssertGreaterThanOrEqual(qs.count, 1, "Agent should ask at least 1 question via ask_questions")
         XCTAssertGreaterThanOrEqual(msgs.count, 1, "Agent should deliver a greeting via send_response")
         let allText = msgs.joined().lowercased()
         XCTAssertTrue(allText.contains("alice"), "Greeting should include user name 'Alice', got: \(allText)")
@@ -155,8 +146,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             instructions: "You are a counter. Count numbers forever using send_response.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "keep going" }
+            }
         ))
 
         let agentTask = Task {
@@ -218,8 +208,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             tools: [weatherTool],
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "No more tasks." }
+            }
         ))
 
         let agentTask = Task {
@@ -277,8 +266,8 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             }
         )
 
-        let askUserTool = ToolDefinition(
-            name: "ask_user",
+        let askQuestionsTool = ToolDefinition(
+            name: "ask_questions",
             description: "Ask the user a question",
             parameters: .object([
                 "type": .string("object"),
@@ -293,7 +282,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 
         let config = SessionConfig(
             model: "gpt-4.1",
-            tools: [sendResponseTool, askUserTool]
+            tools: [sendResponseTool, askQuestionsTool]
         )
         let session = try await client.createSession(config: config)
 
@@ -327,8 +316,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             userId: userId,
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         XCTAssertFalse(agent.session.sessionId.isEmpty, "Session with userId should be created")
@@ -366,8 +354,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             userId: userId,
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         let agentTask = Task {
@@ -409,8 +396,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             """,
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         let agentTask = Task {
@@ -450,8 +436,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             """,
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         let agentTask = Task {
@@ -493,8 +478,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
             ],
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         let agentTask = Task {
@@ -528,7 +512,7 @@ final class RemoteAgentIntegrationTests: XCTestCase {
 // MARK: - Local Agent Integration Tests (via Copilot CLI stdio)
 
 /// Integration tests for the CopilotAgent pattern via local Copilot CLI (stdio transport).
-/// Tests the full agent loop: spawn CLI → send_response/ask_user tools → loop control.
+/// Tests the full agent loop: spawn CLI → send_response/ask_questions tools → loop control.
 /// Requires: Copilot CLI installed and authenticated.
 final class LocalAgentIntegrationTests: XCTestCase {
 
@@ -639,8 +623,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
 
         let agent = try await client.createAgent(config: AgentConfig(
             instructions: "You are a test agent.",
-            onResponse: { _ in },
-            onAskUser: { _ in "stop" }
+            onResponse: { _ in }
         ))
 
         XCTAssertFalse(agent.session.sessionId.isEmpty)
@@ -658,10 +641,6 @@ final class LocalAgentIntegrationTests: XCTestCase {
             instructions: "You are a helpful assistant. Always use send_response to deliver your answer.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in
-                Task { await askCount.increment() }
-                return "No more tasks."
             }
         ))
 
@@ -731,8 +710,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
             tools: [calculatorTool],
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "No more tasks." }
+            }
         ))
 
         let agentTask = Task {
@@ -761,7 +739,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
         XCTAssertTrue(allText.contains("56"), "Result should contain 56, got: \(allText)")
     }
 
-    /// Verify agent ask_user works via local CLI.
+    /// Verify agent ask_questions works via local CLI.
     func testLocalAgent_AskUser() async throws {
         try await skipIfNoCLI()
 
@@ -769,13 +747,9 @@ final class LocalAgentIntegrationTests: XCTestCase {
         let responses = AgentResponseCollector()
 
         let agent = try await client.createAgent(config: AgentConfig(
-            instructions: "Ask the user for their favorite color using ask_user, then respond with it using send_response.",
+            instructions: "Ask the user for their favorite color using ask_questions, then respond with it using send_response.",
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { question in
-                Task { await questions.add(question) }
-                return "Blue"
             }
         ))
 
@@ -879,8 +853,7 @@ final class LocalAgentIntegrationTests: XCTestCase {
             """,
             onResponse: { message in
                 Task { await responses.add(message) }
-            },
-            onAskUser: { _ in "stop" }
+            }
         ))
 
         let agentTask = Task {

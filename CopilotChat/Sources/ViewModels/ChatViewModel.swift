@@ -30,7 +30,7 @@ public enum ChatState: Sendable, Equatable {
     case working
     /// Context is being compacted (conversation compressed).
     case compacting
-    /// Model called `ask_user` — waiting for user reply.
+    /// Model called `ask_questions` — waiting for user reply.
     case waitingForUser(question: String)
     /// Model called `ask_questions` — waiting for structured user replies.
     case waitingForQuestions([AskQuestionItem])
@@ -118,7 +118,7 @@ public final class ChatViewModel: ObservableObject {
     private var session: CopilotSession?
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Error>?
-    /// Continuation for ask_user — resumed when user replies.
+    /// Continuation for ask_questions — resumed when user replies.
     private var askUserContinuation: CheckedContinuation<String, Never>?
     /// Continuation for ask_questions — resumed when user submits structured replies.
     private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
@@ -409,14 +409,6 @@ public final class ChatViewModel: ObservableObject {
             await originalOnResponse(message)
         }
 
-        // Wrap onAskUser to update UI and wait for user input
-        let originalOnAskUser = config.onAskUser
-        _ = originalOnAskUser
-        config.onAskUser = { [weak self] question in
-            guard let self else { return "" }
-            return await self.handleAgentAskUser(question)
-        }
-
         let originalOnAskQuestions = config.onAskQuestions
         _ = originalOnAskQuestions
         config.onAskQuestions = { [weak self] payload in
@@ -561,7 +553,7 @@ public final class ChatViewModel: ObservableObject {
         await session.on(.sessionIdle) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                // Only go idle if not waiting for user (ask_user sets its own state)
+                // Only go idle if not waiting for user (ask_questions sets its own state)
                 if case .waitingForUser = self.chatState { return }
                 if case .waitingForQuestions = self.chatState { return }
                 self.chatState = .idle
@@ -701,7 +693,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Send a message. Handles three cases:
     /// 1. Normal prompt — user sends a new message
-    /// 2. ask_user reply — resumes the waiting continuation
+    /// 2. ask_questions reply — resumes the waiting continuation
     /// 3. Steer — injects immediate message during tool execution
     public func send() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -739,7 +731,7 @@ public final class ChatViewModel: ObservableObject {
 
         switch chatState {
         case .waitingForUser:
-            // Resume ask_user continuation
+            // Resume ask_questions continuation
             askUserContinuation?.resume(returning: promptText)
             askUserContinuation = nil
             chatState = .working
@@ -872,7 +864,7 @@ public final class ChatViewModel: ObservableObject {
         let beforeCount = messages.count
         messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
 
-        // In loop mode, the model may be blocked waiting for ask_questions or ask_user response.
+        // In loop mode, the model may be blocked waiting for ask_questions or ask_questions response.
         // Answer the pending question with the user's text to unblock the model,
         // rather than sending a new session.send (which would deadlock).
         let needsSend: Bool

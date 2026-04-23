@@ -15,8 +15,8 @@
 - `session.getMessages()` RPC call succeeds but returns 0 messages
 - May require different RPC method or newer CLI version
 
-### User input (ask_user tool) not reliably triggered
-- Model doesn't always use the `ask_user` tool when asked
+### User input (ask_questions tool) not reliably triggered
+- Model doesn't always use the `ask_questions` tool when asked
 - `onUserInputRequest` callback is implemented but depends on model behavior
 - Both v1 (event-based) and v2 (RPC-based) handlers are wired up
 

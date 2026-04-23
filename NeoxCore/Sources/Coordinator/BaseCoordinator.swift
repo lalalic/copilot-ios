@@ -565,8 +565,7 @@ open class BaseCoordinator: ObservableObject {
                     #endif
                 }(),
                 userId: neoxUserId,
-                onResponse: { _ in },
-                onAskUser: { _ in "" }
+                onResponse: { _ in }
             )),
             inputModes: chatInputModes,
             usageTracker: usageTracker,
@@ -658,8 +657,7 @@ open class BaseCoordinator: ObservableObject {
                 onResponse: { [weak self] response in
                     let handler = await MainActor.run { self?.projectResponseHandlers[projectId] }
                     await handler?(response)
-                },
-                onAskUser: { _ in "" }
+                }
             )),
             workspaceURL: workspaceURL
         )

@@ -33,7 +33,7 @@ let agent = try await client.createAgent(config: AgentConfig(
     instructions: "You are a helpful assistant.",
     tools: [myTool],
     onResponse: { message in print("Agent:", message) },
-    onAskUser: { question in return getUserInput(question) }
+    onAskQuestions: { args in .object(["answer": .string(getUserInput(args))]) }
 ))
 try await agent.run(prompt: "Hello!")
 ```
@@ -85,7 +85,7 @@ Swift port of the official [`@github/copilot-sdk`](https://github.com/github/cop
 
 **Features:**
 - Session management: `createSession()`, `resumeSession()`, `sendAndWait()`
-- Agent mode: `createAgent()` with `send_response`/`ask_user` tools auto-injected
+- Agent mode: `createAgent()` with `send_response`/`ask_questions` tools auto-injected
 - Tool definitions with JSON Schema parameters
 - Streaming events, system message customization, model selection
 - Relay v2: `clientId` pinning, `appId` workspace routing, hold/resume, snapshots
