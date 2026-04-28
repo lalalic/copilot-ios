@@ -64,6 +64,16 @@ open class BaseCoordinator: ObservableObject {
 
     @Published public var selectedModel: String = UserDefaults.standard.string(forKey: NeoxCoreSettings.selectedModelKey) ?? NeoxCoreSettings.defaultModel
 
+    // MARK: - Per-app Model Catalog (loaded from relay)
+
+    /// Per-app model list, populated by `loadAvailableModels()` from
+    /// `GET /apps/{appId}/models`. Falls back to `ModelCatalog.allModels`
+    /// before first load or on failure.
+    public let availableModelsStore = RemoteModelCatalog()
+    /// Convenience accessor for views: prefer the live store value, then
+    /// fall back to the static catalog.
+    public var availableModels: [ModelInfo] { availableModelsStore.models }
+
     // MARK: - Tool Providers
 
     private var webToolProvider: WebAgentToolProvider?
@@ -193,6 +203,32 @@ open class BaseCoordinator: ObservableObject {
         registerDefaultTools()
         subAgentToolProvider.appId = appId
         syncStripePaymentLink()
+
+        // Load per-app supported model list from relay (best-effort, async).
+        Task { await self.loadAvailableModels() }
+    }
+
+    /// Fetch the per-app supported model list from
+    /// `GET <relay>/apps/{appId}/models` and update `availableModelsStore`.
+    /// Best-effort: failures are kept on `availableModelsStore.lastError`
+    /// and the static catalog stays in place. Also auto-corrects
+    /// `selectedModel` to the server-advertised default when the current
+    /// selection is no longer available.
+    public func loadAvailableModels() async {
+        let base: String
+        if useLocalRelay, !localRelayURL.isEmpty {
+            base = localRelayURL
+        } else {
+            // Match WebSocketTransport default: "https://<relayHost>".
+            base = "https://\(relayHost)"
+        }
+        await availableModelsStore.load(appId: appId, relayBase: base)
+        let ids = Set(availableModelsStore.models.map(\.id))
+        if !ids.contains(selectedModel),
+           let fallback = availableModelsStore.defaultId ?? availableModelsStore.models.first?.id {
+            selectedModel = fallback
+            UserDefaults.standard.set(fallback, forKey: NeoxCoreSettings.selectedModelKey)
+        }
     }
 
     // MARK: - Tool Registration

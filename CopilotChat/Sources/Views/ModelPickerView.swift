@@ -98,18 +98,32 @@ public enum ModelCatalog {
 // MARK: - Model Picker View
 
 /// A settings view for selecting the LLM model.
+///
+/// Pass `models:` to display a per-app dynamic list (typically loaded by
+/// `RemoteModelCatalog`). When omitted, falls back to `ModelCatalog.allModels`.
 public struct ModelPickerView: View {
     @Binding var selectedModelId: String
+    var models: [ModelInfo]
     var onModelChanged: ((String) -> Void)?
-    
-    public init(selectedModelId: Binding<String>, onModelChanged: ((String) -> Void)? = nil) {
+
+    public init(selectedModelId: Binding<String>,
+                models: [ModelInfo] = ModelCatalog.allModels,
+                onModelChanged: ((String) -> Void)? = nil) {
         self._selectedModelId = selectedModelId
+        self.models = models
         self.onModelChanged = onModelChanged
     }
-    
+
+    private var byTier: [(tier: ModelTier, models: [ModelInfo])] {
+        ModelTier.allCases.compactMap { tier in
+            let group = models.filter { $0.tier == tier }
+            return group.isEmpty ? nil : (tier, group)
+        }
+    }
+
     public var body: some View {
         List {
-            ForEach(ModelCatalog.byTier, id: \.tier) { group in
+            ForEach(byTier, id: \.tier) { group in
                 Section(group.tier.rawValue) {
                     ForEach(group.models) { model in
                         ModelRowView(
