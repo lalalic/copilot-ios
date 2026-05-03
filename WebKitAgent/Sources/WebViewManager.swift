@@ -1,5 +1,8 @@
 import Foundation
 import WebKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Manages a WKWebView instance for agent-driven browser automation.
 /// Handles navigation, JavaScript evaluation, downloads, and page lifecycle.
@@ -51,11 +54,46 @@ public final class WebViewManager: NSObject, ObservableObject {
         // Use desktop user-agent so sites serve their full desktop version
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
+        // Enable Safari Web Inspector (desktop Safari → Develop → iPhone → Intento)
+        if #available(iOS 16.4, *) {
+            webView.isInspectable = true
+        }
+
         webView.navigationDelegate = self
         webView.uiDelegate = self
 
         // Create downloads directory
         try? FileManager.default.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Window Attachment
+
+    /// Attach the webView to the app's active key window as a hidden subview.
+    /// This is required on iOS for proper WebKit layout/rendering of headless
+    /// pages — many sites (TikTok, YouTube Studio) defer file-input pipelines
+    /// and dynamic widgets until the WKWebView has a real superview/window.
+    /// Idempotent: no-op if already attached.
+    public func attachToActiveWindow() {
+        #if canImport(UIKit)
+        guard webView.superview == nil else { return }
+        // Find the active foreground key window across connected scenes.
+        let scenes = UIApplication.shared.connectedScenes
+        let keyWindow = scenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow } ?? scenes
+                .compactMap { ($0 as? UIWindowScene)?.windows.first }
+                .first
+        guard let window = keyWindow else { return }
+        // Layout-driving size, but invisible and non-interactive so it doesn't
+        // intercept touches or affect the visible UI.
+        webView.frame = CGRect(x: 0, y: 0, width: 1280, height: 900)
+        webView.alpha = 1.0
+        webView.isUserInteractionEnabled = false
+        // Insert at the bottom so it sits behind every visible view.
+        window.insertSubview(webView, at: 0)
+        #endif
     }
 
     // MARK: - Navigation
@@ -250,6 +288,16 @@ public final class WebViewManager: NSObject, ObservableObject {
 
     // MARK: - Upload
 
+    /// Preload file URLs for the next file chooser interaction.
+    public func prepareUpload(urls: [URL]) {
+        pendingUploadURLs = urls
+    }
+
+    /// Clear any preloaded file chooser URLs.
+    public func clearPreparedUpload() {
+        pendingUploadURLs = nil
+    }
+
     /// Trigger a file upload on a file input element.
     public func upload(ref: String, filePath: String) async throws -> String {
         let fileURL = URL(fileURLWithPath: filePath)
@@ -442,7 +490,8 @@ extension WebViewManager: WKDownloadDelegate {
 // MARK: - WKUIDelegate
 
 extension WebViewManager: WKUIDelegate {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
+    @available(iOS 18.4, *)
     public func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
         // Return pre-loaded file URLs for upload
         let urls = pendingUploadURLs
