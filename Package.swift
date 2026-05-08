@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "AppAgent", targets: ["AppAgent"]),
         .library(name: "MediaKit", targets: ["MediaKit"]),
         .library(name: "NeoxCore", targets: ["NeoxCore"]),
+        .library(name: "Feedback", targets: ["Feedback"]),
     ],
     dependencies: [
         .package(url: "https://github.com/yangliu-1995/ffmpeg-kit-spm.git", exact: "6.0.0"),
@@ -103,6 +104,21 @@ let package = Package(
             name: "NeoxCore",
             dependencies: ["CopilotSDK", "CopilotChat", "AppAgent", "WebKitAgent", "MediaKit"],
             path: "NeoxCore/Sources"
+        ),
+
+        // MARK: - Feedback (leaf, no dependencies)
+        // Drop-in client that turns user/auto bug reports into GitHub issues
+        // through a relay endpoint that hides the target repo + token from
+        // end users. See Feedback/README.md for the wire protocol and the
+        // copilot-infinite "feedback" skill for the cross-platform contract.
+        .target(
+            name: "Feedback",
+            path: "Feedback/Sources"
+        ),
+        .testTarget(
+            name: "FeedbackTests",
+            dependencies: ["Feedback"],
+            path: "Feedback/Tests"
         ),
     ]
 )
