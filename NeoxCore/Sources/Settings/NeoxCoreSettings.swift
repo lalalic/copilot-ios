@@ -19,14 +19,25 @@ public enum NeoxCoreSettings {
     public static let showUsageInChatKey = "showUsageInChat"
     public static let showProgressInChatKey = "showProgressInChat"
     public static let showBuildInChatKey = "showBuildInChat"
+    public static let useDirectProviderKey = "useDirectProvider"
+
+    // Feedback (Send Feedback + auto crash report) — see Feedback target
+    public static let feedbackEndpointKey = "feedbackEndpoint"
+    public static let feedbackAutoCrashReportKey = "feedbackAutoCrashReport"
 
     // MARK: - Defaults
 
     public static let defaultRelayHost = "relay.ai.qili2.com"
     public static let defaultRelayPort: UInt16 = 443
     public static let defaultLocalRelayURL = "http://10.0.0.111:8765"
-    public static let defaultModel = "gpt-4.1"
+    public static let defaultModel = "deepseek-v4-flash"
     public static let defaultDevServerPort = 9223
+    public static let defaultProvider = "deepseek"
+
+    /// Default Feedback endpoint. Empty unless set per-app via the bootstrap
+    /// helper. Apps should ship their own endpoint as a build-time constant
+    /// rather than asking end users to type it in.
+    public static let defaultFeedbackEndpoint = ""
 
     // MARK: - Helpers
 
