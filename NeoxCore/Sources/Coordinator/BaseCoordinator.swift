@@ -809,9 +809,9 @@ open class BaseCoordinator: ObservableObject {
         }
 
         // Only send reasoning_effort for models that support reasoning.
-        // Falls back to the static catalog for lookup; unknown models default
-        // to no reasoning_effort.
-        let resolvedModelInfo = ModelCatalog.model(for: resolvedModelId)
+        // Falls back to the SDK ModelRegistry for lookup; unknown models
+        // default to no reasoning_effort.
+        let resolvedModelInfo = modelRegistry.model(id: resolvedModelId)
         let reasoning: String? = resolvedModelInfo?.supportsReasoning == true ? "high" : nil
 
         // Inject API key + base URL from the provider config. The runtime's
