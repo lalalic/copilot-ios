@@ -163,13 +163,14 @@ public struct ModelPickerView: View {
                     ForEach(groups, id: \.id) { group in
                         Section(group.name) {
                             ForEach(group.models) { model in
+                                let compositeId = "\(group.id)/\(model.id)"
                                 ModelRowView(
                                     model: model,
-                                    isSelected: model.id == selectedModelId,
+                                    isSelected: compositeId == selectedModelId,
                                     isDisabled: false
                                 ) {
-                                    selectedModelId = model.id
-                                    onModelChanged?(model.id)
+                                    selectedModelId = compositeId
+                                    onModelChanged?(compositeId)
                                 }
                             }
                         }

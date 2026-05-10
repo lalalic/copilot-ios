@@ -115,8 +115,10 @@ open class BaseCoordinator: ObservableObject {
         }
     }
 
-    /// Friendly display name for the currently selected model id. Returns
-    /// the bare model id (e.g. "deepseek-v4-pro").
+    /// Friendly display name for the currently selected `<providerId>/<modelId>`
+    /// composite. Returns just the bare model id (e.g. "deepseek-v4-pro").
+    /// The provider name is shown elsewhere via the Providers section so we
+    /// don't repeat it here.
     public var selectedModelDisplayName: String {
         let (_, modelId) = resolveProviderAndModel(from: selectedModel)
         return modelId
@@ -726,26 +728,26 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Direct Provider ChatViewModel
 
-    /// Resolve `selectedModel` (a bare model id) to `(providerId, modelId)`
-    /// by first-match-wins on `ProviderRegistry.providers[].enabledModelIds`.
-    /// If two providers expose the same model id, the one earlier in
-    /// `providers[]` wins (built-ins are inserted first).
+    /// Parse `selectedModel` into `(providerId, modelId)`.
     ///
-    /// Tolerates legacy `"<providerId>/<modelId>"` composite values that may
-    /// still be in UserDefaults from earlier builds: strips the prefix and
-    /// proceeds with the bare id.
+    /// Modern format is `"<providerId>/<modelId>"` (written by the picker).
+    /// Legacy values (plain model id stored before composite ids were
+    /// introduced) are resolved by looking up the first enabled provider in
+    /// `ProviderRegistry` that owns this model. If no owner is found, falls
+    /// back to the first enabled provider's first enabled model so the user
+    /// can always reach a working configuration.
     private func resolveProviderAndModel(from raw: String) -> (providerId: String, modelId: String) {
-        // Legacy composite migration: drop the providerId prefix if present.
-        let bare: String = {
-            if let slash = raw.firstIndex(of: "/") {
-                return String(raw[raw.index(after: slash)...])
+        if let slash = raw.firstIndex(of: "/") {
+            let providerId = String(raw[..<slash])
+            let modelId = String(raw[raw.index(after: slash)...])
+            if !providerId.isEmpty, !modelId.isEmpty {
+                return (providerId, modelId)
             }
-            return raw
-        }()
+        }
 
-        // First-match: walk providers in order, return first that has it enabled.
-        for p in providerRegistry.providers where p.enabledModelIds.contains(bare) {
-            return (p.id, bare)
+        // Legacy migration: find the first enabled provider that has `raw`.
+        for p in providerRegistry.providers where p.enabledModelIds.contains(raw) {
+            return (p.id, raw)
         }
 
         // Last-resort fallback: first enabled model of first enabled provider.
@@ -789,17 +791,18 @@ open class BaseCoordinator: ObservableObject {
         let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
         instructions += "\n\n" + mobileTone
 
-        // Resolve model + provider via ProviderRegistry by first-match-wins.
-        // The picker stores a bare model id; the runtime infers which
-        // provider owns it.
+        // Resolve model + provider via ProviderRegistry. The picker stores
+        // a composite "<providerId>/<modelId>" so the same model id offered
+        // by different providers can be disambiguated.
         let (resolvedProviderId, resolvedModelId) = resolveProviderAndModel(from: selectedModel)
         let providerConfig = providerRegistry.providers.first { $0.id == resolvedProviderId }
 
-        // Migrate legacy composite values (or fix mismatched stored ids)
-        // back to the bare model id.
-        if selectedModel != resolvedModelId {
-            self.selectedModel = resolvedModelId
-            UserDefaults.standard.set(resolvedModelId, forKey: NeoxCoreSettings.selectedModelKey)
+        // Persist the (possibly migrated) composite id back to settings
+        // so subsequent launches use the same value.
+        let composite = "\(resolvedProviderId)/\(resolvedModelId)"
+        if selectedModel != composite {
+            self.selectedModel = composite
+            UserDefaults.standard.set(composite, forKey: NeoxCoreSettings.selectedModelKey)
         }
 
         // For custom (user-added) OpenAI-compatible providers, dynamically
