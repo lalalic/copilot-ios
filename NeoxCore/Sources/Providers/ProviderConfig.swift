@@ -99,25 +99,31 @@ public final class ProviderRegistry: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Make sure the two built-in providers always exist.
+    /// Make sure the built-in providers always exist, and clean up any
+    /// stale built-ins that have since been removed (e.g. the legacy
+    /// `deepseek` built-in is no longer offered out of the box — users
+    /// who want DeepSeek can add it as a custom OpenAI-compatible provider).
     private func ensureBuiltins() {
         var changed = false
 
+        // Drop legacy deepseek built-in if it was previously persisted as a
+        // built-in. Preserve user-added custom DeepSeek configs (source=user).
+        let legacyBuiltinIds: Set<String> = ["deepseek"]
+        let before = providers.count
+        providers.removeAll { p in
+            legacyBuiltinIds.contains(p.id) && p.source == .builtin
+        }
+        if providers.count != before { changed = true }
+
         if !providers.contains(where: { $0.id == "relay" }) {
             providers.insert(Self.defaultRelay(), at: 0)
-            changed = true
-        }
-        if !providers.contains(where: { $0.id == "deepseek" }) {
-            // Insert deepseek after relay
-            let idx = providers.firstIndex(where: { $0.id == "relay" }).map { $0 + 1 } ?? providers.count
-            providers.insert(Self.defaultDeepseek(), at: idx)
             changed = true
         }
 
         // Force-fix source field on built-ins in case older persisted state
         // still labels them as user-added.
         for i in providers.indices {
-            if providers[i].id == "relay" || providers[i].id == "deepseek" {
+            if providers[i].id == "relay" {
                 if providers[i].source != .builtin {
                     providers[i].source = .builtin
                     changed = true

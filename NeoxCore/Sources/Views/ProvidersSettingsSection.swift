@@ -10,8 +10,6 @@ import CopilotSDK
 
 public struct ProvidersSettingsSection: View {
     @ObservedObject var coordinator: BaseCoordinator
-    @State private var showingAddSheet = false
-    @State private var newProvider: ProviderConfig? = nil
 
     public init(coordinator: BaseCoordinator) {
         self.coordinator = coordinator
@@ -27,15 +25,19 @@ public struct ProvidersSettingsSection: View {
                 }
             }
 
-            Button {
-                newProvider = ProviderConfig(
-                    id: UUID().uuidString,
-                    name: "",
-                    type: .openaiCompatible,
-                    baseUrl: "",
-                    models: [],
-                    enabledModelIds: [],
-                    source: .user
+            NavigationLink {
+                ProviderEditView(
+                    coordinator: coordinator,
+                    provider: ProviderConfig(
+                        id: UUID().uuidString,
+                        name: "",
+                        type: .openaiCompatible,
+                        baseUrl: "",
+                        models: [],
+                        enabledModelIds: [],
+                        source: .user
+                    ),
+                    isNew: true
                 )
             } label: {
                 Label("Add Provider", systemImage: "plus")
@@ -43,13 +45,8 @@ public struct ProvidersSettingsSection: View {
         } header: {
             Text("Providers")
         } footer: {
-            Text("Built-in providers can't be removed. Relay uses your platform credit and needs no API key.")
+            Text("Relay is built-in and uses your platform credit. Add custom OpenAI-compatible providers (e.g. DeepSeek, OpenRouter) with your own API key.")
                 .font(.caption)
-        }
-        .sheet(item: $newProvider) { p in
-            NavigationView {
-                ProviderEditView(coordinator: coordinator, provider: p)
-            }
         }
     }
 
@@ -111,12 +108,15 @@ public struct ProviderEditView: View {
     @State private var apiKey: String = ""
     @State private var fetching = false
     @State private var fetchError: String? = nil
+    @State private var didAutoFetch = false
 
     private let original: ProviderConfig
+    private let isNew: Bool
 
-    public init(coordinator: BaseCoordinator, provider: ProviderConfig) {
+    public init(coordinator: BaseCoordinator, provider: ProviderConfig, isNew: Bool = false) {
         self.coordinator = coordinator
         self.original = provider
+        self.isNew = isNew
         _draft = State(initialValue: provider)
         _apiKey = State(initialValue:
             coordinator.credentialStore.getAPIKey(forProviderKey: provider.id) ?? "")
@@ -229,6 +229,17 @@ public struct ProviderEditView: View {
             }
         }
         #endif
+        .task {
+            // Auto-populate the model list on first appear when we have
+            // enough info to call /v1/models. Skip for relay (models are
+            // baked-in) and skip if the user has zero credentials yet.
+            guard !didAutoFetch else { return }
+            didAutoFetch = true
+            if draft.type == .relay { return }
+            if (draft.baseUrl ?? "").isEmpty { return }
+            if draft.requiresApiKey, apiKey.isEmpty { return }
+            await fetchModels()
+        }
     }
 
     private var canSave: Bool {
