@@ -10,8 +10,8 @@ import CopilotSDK
 
 public struct ProvidersSettingsSection: View {
     @ObservedObject var coordinator: BaseCoordinator
-    @State private var editingProvider: ProviderConfig? = nil
     @State private var showingAddSheet = false
+    @State private var newProvider: ProviderConfig? = nil
 
     public init(coordinator: BaseCoordinator) {
         self.coordinator = coordinator
@@ -20,15 +20,23 @@ public struct ProvidersSettingsSection: View {
     public var body: some View {
         Section {
             ForEach(coordinator.providerRegistry.providers) { p in
-                Button { editingProvider = p } label: {
-                    ProviderRow(provider: p,
-                                hasApiKey: hasApiKey(for: p))
+                NavigationLink {
+                    ProviderEditView(coordinator: coordinator, provider: p)
+                } label: {
+                    ProviderRow(provider: p, hasApiKey: hasApiKey(for: p))
                 }
-                .buttonStyle(.plain)
             }
 
             Button {
-                showingAddSheet = true
+                newProvider = ProviderConfig(
+                    id: UUID().uuidString,
+                    name: "",
+                    type: .openaiCompatible,
+                    baseUrl: "",
+                    models: [],
+                    enabledModelIds: [],
+                    source: .user
+                )
             } label: {
                 Label("Add Provider", systemImage: "plus")
             }
@@ -38,25 +46,9 @@ public struct ProvidersSettingsSection: View {
             Text("Built-in providers can't be removed. Relay uses your platform credit and needs no API key.")
                 .font(.caption)
         }
-        .sheet(item: $editingProvider) { p in
+        .sheet(item: $newProvider) { p in
             NavigationView {
                 ProviderEditView(coordinator: coordinator, provider: p)
-            }
-        }
-        .sheet(isPresented: $showingAddSheet) {
-            NavigationView {
-                ProviderEditView(
-                    coordinator: coordinator,
-                    provider: ProviderConfig(
-                        id: UUID().uuidString,
-                        name: "",
-                        type: .openaiCompatible,
-                        baseUrl: "",
-                        models: [],
-                        enabledModelIds: [],
-                        source: .user
-                    )
-                )
             }
         }
     }
@@ -232,9 +224,6 @@ public struct ProviderEditView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }.disabled(!canSave)
             }
