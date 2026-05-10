@@ -115,6 +115,21 @@ open class BaseCoordinator: ObservableObject {
         }
     }
 
+    /// Friendly display name for the currently selected `<providerId>/<modelId>`
+    /// composite, e.g. "DeepSeek · DeepSeek V4 Flash". Falls back to the raw
+    /// model id when the provider or model can't be found.
+    public var selectedModelDisplayName: String {
+        let (providerId, modelId) = resolveProviderAndModel(from: selectedModel)
+        let provider = providerRegistry.providers.first { $0.id == providerId }
+        let providerName = provider?.name ?? providerId
+        let modelName: String = {
+            if let m = provider?.models.first(where: { $0.id == modelId }) { return m.name }
+            if let known = ModelCatalog.model(for: modelId) { return known.name }
+            return modelId
+        }()
+        return "\(providerName) · \(modelName)"
+    }
+
     // MARK: - Tool Providers
 
     private var webToolProvider: WebAgentToolProvider?
