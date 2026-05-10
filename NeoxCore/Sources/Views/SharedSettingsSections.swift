@@ -164,10 +164,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
     public var body: some View {
         #if DEBUG
         Section("Developer") {
-            TextField("Model", text: selectedModelBinding)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-
             Toggle("Show Usage in Chat", isOn: showUsageInChatBinding)
             Toggle("Show Progress in Chat", isOn: showProgressInChatBinding)
             Toggle("Show Build in Chat", isOn: showBuildInChatBinding)
@@ -193,16 +189,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
             }
         }
         #endif
-    }
-
-    private var selectedModelBinding: Binding<String> {
-        Binding(
-            get: { coordinator.selectedModel },
-            set: { newValue in
-                coordinator.selectedModel = newValue
-                coordinator.saveSharedSettings()
-            }
-        )
     }
 
     private var showUsageInChatBinding: Binding<Bool> {
