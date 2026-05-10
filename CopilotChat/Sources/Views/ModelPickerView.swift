@@ -109,7 +109,11 @@ public struct ModelPickerView: View {
     /// When set, the picker uses these explicit groups (one section per
     /// provider) instead of grouping `models` by tier. Each tuple's `models`
     /// is rendered in order; outer order wins for sections.
-    var providerGroups: [(name: String, models: [ModelInfo])]?
+    ///
+    /// Selection uses a composite id of the form `"<providerId>/<modelId>"`
+    /// so the runtime can disambiguate the same model id offered by multiple
+    /// providers (e.g. built-in DeepSeek vs. a user-added custom DeepSeek).
+    var providerGroups: [(id: String, name: String, models: [ModelInfo])]?
 
     public init(selectedModelId: Binding<String>,
                 models: [ModelInfo] = ModelCatalog.allModels,
@@ -123,9 +127,10 @@ public struct ModelPickerView: View {
     }
 
     /// Provider-grouped variant — used by Neox to render only the user's
-    /// enabled models, sectioned by provider.
+    /// enabled models, sectioned by provider. The binding stores the
+    /// composite id `"<providerId>/<modelId>"`.
     public init(selectedModelId: Binding<String>,
-                providerGroups: [(name: String, models: [ModelInfo])],
+                providerGroups: [(id: String, name: String, models: [ModelInfo])],
                 onModelChanged: ((String) -> Void)? = nil) {
         self._selectedModelId = selectedModelId
         self.models = providerGroups.flatMap(\.models)
@@ -155,16 +160,17 @@ public struct ModelPickerView: View {
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 } else {
-                    ForEach(groups, id: \.name) { group in
+                    ForEach(groups, id: \.id) { group in
                         Section(group.name) {
                             ForEach(group.models) { model in
+                                let compositeId = "\(group.id)/\(model.id)"
                                 ModelRowView(
                                     model: model,
-                                    isSelected: model.id == selectedModelId,
+                                    isSelected: compositeId == selectedModelId,
                                     isDisabled: false
                                 ) {
-                                    selectedModelId = model.id
-                                    onModelChanged?(model.id)
+                                    selectedModelId = compositeId
+                                    onModelChanged?(compositeId)
                                 }
                             }
                         }

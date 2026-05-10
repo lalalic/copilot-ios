@@ -99,7 +99,7 @@ open class BaseCoordinator: ObservableObject {
     /// metadata; falls back to a synthetic `ModelInfo` so unknown ids still
     /// appear (e.g. custom OpenAI-compatible providers fetched from
     /// `/v1/models`).
-    public var pickerProviderGroups: [(name: String, models: [CopilotChat.ModelInfo])] {
+    public var pickerProviderGroups: [(id: String, name: String, models: [CopilotChat.ModelInfo])] {
         providerRegistry.enabledModelsByProvider.map { (provider, models) in
             let infos: [CopilotChat.ModelInfo] = models.map { m in
                 if let known = ModelCatalog.model(for: m.id) { return known }
@@ -111,7 +111,7 @@ open class BaseCoordinator: ObservableObject {
                     description: ""
                 )
             }
-            return (provider.name, infos)
+            return (provider.id, provider.name, infos)
         }
     }
 
@@ -719,6 +719,39 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Direct Provider ChatViewModel
 
+    /// Parse `selectedModel` into `(providerId, modelId)`.
+    ///
+    /// Modern format is `"<providerId>/<modelId>"` (written by the picker).
+    /// Legacy values (plain model id stored before composite ids were
+    /// introduced) are resolved by looking up the first enabled provider in
+    /// `ProviderRegistry` that owns this model. If no owner is found, falls
+    /// back to the first enabled provider's first enabled model so the user
+    /// can always reach a working configuration.
+    private func resolveProviderAndModel(from raw: String) -> (providerId: String, modelId: String) {
+        if let slash = raw.firstIndex(of: "/") {
+            let providerId = String(raw[..<slash])
+            let modelId = String(raw[raw.index(after: slash)...])
+            if !providerId.isEmpty, !modelId.isEmpty {
+                return (providerId, modelId)
+            }
+        }
+
+        // Legacy migration: find the first enabled provider that has `raw`.
+        for p in providerRegistry.providers where p.enabledModelIds.contains(raw) {
+            return (p.id, raw)
+        }
+
+        // Last-resort fallback: first enabled model of first enabled provider.
+        if let first = providerRegistry.enabledModelsByProvider.first,
+           let firstModel = first.models.first {
+            return (first.provider.id, firstModel.id)
+        }
+
+        // Nothing configured — return the relay default so error messages are
+        // meaningful instead of crashing.
+        return ("relay", "relay-deepseek-v4-flash")
+    }
+
     /// Create a ChatViewModel backed by DirectProviderRuntime.
     /// Bypasses relay entirely — sends API requests directly to providers.
     private func createDirectProviderChatViewModel() -> ChatViewModel {
@@ -749,33 +782,58 @@ open class BaseCoordinator: ObservableObject {
         let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
         instructions += "\n\n" + mobileTone
 
-        // Resolve model + provider, falling back to defaults if model unknown or no credentials
-        var resolvedModel = selectedModel
-        var resolvedProvider = modelRegistry.model(id: resolvedModel)?.provider ?? NeoxCoreSettings.defaultProvider
+        // Resolve model + provider via ProviderRegistry. The picker stores
+        // a composite "<providerId>/<modelId>" so the same model id offered
+        // by different providers can be disambiguated.
+        let (resolvedProviderId, resolvedModelId) = resolveProviderAndModel(from: selectedModel)
+        let providerConfig = providerRegistry.providers.first { $0.id == resolvedProviderId }
 
-        // Fall back if model not in registry or provider key not configured
-        if modelRegistry.model(id: resolvedModel) == nil ||
-           credentialStore.getAPIKey(for: CredentialStore.Provider(rawValue: resolvedProvider) ?? .deepseek) == nil {
-            resolvedModel = modelRegistry.defaultModelId
-            resolvedProvider = modelRegistry.defaultProviderId
-            // Update the UI to reflect the actual model
-            self.selectedModel = resolvedModel
-            UserDefaults.standard.set(resolvedModel, forKey: NeoxCoreSettings.selectedModelKey)
+        // Persist the (possibly migrated) composite id back to settings
+        // so subsequent launches use the same value.
+        let composite = "\(resolvedProviderId)/\(resolvedModelId)"
+        if selectedModel != composite {
+            self.selectedModel = composite
+            UserDefaults.standard.set(composite, forKey: NeoxCoreSettings.selectedModelKey)
         }
 
-        // Only send reasoning_effort for models that support reasoning
-        let resolvedModelInfo = modelRegistry.model(provider: resolvedProvider, id: resolvedModel)
+        // For custom (user-added) OpenAI-compatible providers, dynamically
+        // register an adapter under the provider's UUID id with its baseUrl.
+        // Built-in providers (relay, deepseek, openai, anthropic, xai) are
+        // already registered by DirectProviderRuntime.init.
+        if let p = providerConfig, p.source == .user, let baseUrl = p.baseUrl, !baseUrl.isEmpty {
+            runtime.registerAdapter(OpenAIAdapter(
+                providerId: p.id,
+                displayName: p.name,
+                defaultBaseURL: baseUrl
+            ))
+        }
+
+        // Only send reasoning_effort for models that support reasoning.
+        // Falls back to the static catalog for lookup; unknown models default
+        // to no reasoning_effort.
+        let resolvedModelInfo = ModelCatalog.model(for: resolvedModelId)
         let reasoning: String? = resolvedModelInfo?.supportsReasoning == true ? "high" : nil
+
+        // Inject API key + base URL from the provider config. The runtime's
+        // send() falls back to credentialStore.getAPIKey(forProviderKey:) when
+        // providerConfig.apiKey is nil, but passing it explicitly keeps the
+        // lookup symmetric for both built-in and user-added providers.
+        let apiKey = credentialStore.getAPIKey(forProviderKey: resolvedProviderId)
+        let runtimeProviderConfig = RuntimeProviderConfig(
+            baseURL: providerConfig?.baseUrl,
+            apiKey: apiKey
+        )
 
         let config = RuntimeSessionConfig(
             sessionName: "\(appId)-\(neoxUserId)",
-            model: resolvedModel,
-            provider: resolvedProvider,
+            model: resolvedModelId,
+            provider: resolvedProviderId,
             systemMessage: instructions,
             tools: tools,
             workingDirectory: workspaceURL.path,
             streaming: true,
-            reasoningEffort: reasoning
+            reasoningEffort: reasoning,
+            providerConfig: runtimeProviderConfig
         )
 
         let vm = ChatViewModel(

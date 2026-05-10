@@ -62,6 +62,9 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
     /// Active provider ID.
     private var activeProviderId: String?
 
+    /// Active provider config (base URL, api key, headers). Set in createSession.
+    private var activeProviderConfig: RuntimeProviderConfig?
+
     /// Current reasoning effort level.
     private var reasoningEffort: String?
 
@@ -150,6 +153,7 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
         activeAdapter = adapter
         activeProviderId = providerId
         activeModelId = resolvedModel
+        activeProviderConfig = config.providerConfig
         systemMessage = config.systemMessage
         reasoningEffort = config.reasoningEffort
         tools = config.tools ?? []
@@ -219,7 +223,11 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
             throw DirectProviderError.noActiveSession
         }
 
-        guard let apiKey = credentialStore.getAPIKey(forProviderKey: providerId) else {
+        // Prefer the API key injected via providerConfig (e.g. from a custom
+        // user-added provider keyed by UUID); fall back to the credential
+        // store under the providerId.
+        guard let apiKey = activeProviderConfig?.apiKey
+            ?? credentialStore.getAPIKey(forProviderKey: providerId) else {
             Self.logger.error("[SEND] no credentials for \(providerId)")
             throw DirectProviderError.noCredentials(providerId)
         }
@@ -239,8 +247,10 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
         conversationMessages.append(userMessage)
         runtimeMessages.append(RuntimeMessage(role: .user, content: prompt))
 
-        // Build provider config
-        let baseURL = credentialStore.getBaseURL(for: CredentialStore.Provider(rawValue: providerId) ?? .custom)
+        // Build provider config — providerConfig.baseURL wins, then the
+        // credential store, then the adapter's own default.
+        let baseURL = activeProviderConfig?.baseURL
+            ?? credentialStore.getBaseURL(for: CredentialStore.Provider(rawValue: providerId) ?? .custom)
         let requestConfig = ProviderRequestConfig(
             apiKey: apiKey,
             baseURL: baseURL,
