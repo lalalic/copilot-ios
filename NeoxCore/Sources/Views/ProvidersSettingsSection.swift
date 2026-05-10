@@ -10,14 +10,20 @@ import CopilotSDK
 
 public struct ProvidersSettingsSection: View {
     @ObservedObject var coordinator: BaseCoordinator
+    // Observe the registry directly so per-row mutations (toggles, upserts,
+    // deletes) immediately re-render this section. Without this, only the
+    // outer BaseCoordinator's @Published properties would trigger updates,
+    // and nested ObservableObject changes wouldn't propagate.
+    @ObservedObject var registry: ProviderRegistry
 
     public init(coordinator: BaseCoordinator) {
         self.coordinator = coordinator
+        self.registry = coordinator.providerRegistry
     }
 
     public var body: some View {
         Section {
-            ForEach(coordinator.providerRegistry.providers) { p in
+            ForEach(registry.providers) { p in
                 NavigationLink {
                     ProviderEditView(coordinator: coordinator, provider: p)
                 } label: {
@@ -43,7 +49,7 @@ public struct ProvidersSettingsSection: View {
                 Label("Add Provider", systemImage: "plus")
             }
         } header: {
-            Text("Providers")
+            Text("Providers (\(registry.providers.count))")
         } footer: {
             Text("Relay is built-in and uses your platform credit. Add custom OpenAI-compatible providers (e.g. DeepSeek, OpenRouter) with your own API key.")
                 .font(.caption)
@@ -261,6 +267,9 @@ public struct ProviderEditView: View {
             }
         }
         coordinator.providerRegistry.upsert(draft)
+        // Force-flush UserDefaults synchronously so a quick sheet dismissal
+        // can't outrun the write.
+        UserDefaults.standard.synchronize()
         dismiss()
     }
 
