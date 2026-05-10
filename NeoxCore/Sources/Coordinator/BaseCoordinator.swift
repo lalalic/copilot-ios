@@ -75,41 +75,6 @@ open class BaseCoordinator: ObservableObject {
 
     @Published public var selectedModel: String = UserDefaults.standard.string(forKey: NeoxCoreSettings.selectedModelKey) ?? NeoxCoreSettings.defaultModel
 
-    /// User-curated set of model IDs that should appear in the picker.
-    /// Defaults to all CCM-relay variants on first launch (no API key needed).
-    /// Persisted as JSON-encoded `[String]` under `enabledModelIdsKey`.
-    @Published public var enabledModelIds: Set<String> = BaseCoordinator.loadEnabledModelIds()
-
-    private static func loadEnabledModelIds() -> Set<String> {
-        guard let data = UserDefaults.standard.data(forKey: NeoxCoreSettings.enabledModelIdsKey),
-              let array = try? JSONDecoder().decode([String].self, from: data) else {
-            return NeoxCoreSettings.defaultEnabledModelIds
-        }
-        return Set(array)
-    }
-
-    private func persistEnabledModelIds() {
-        if let data = try? JSONEncoder().encode(Array(enabledModelIds).sorted()) {
-            UserDefaults.standard.set(data, forKey: NeoxCoreSettings.enabledModelIdsKey)
-        }
-    }
-
-    /// Toggle a single model in the enabled set and persist immediately.
-    public func setModelEnabled(_ id: String, enabled: Bool) {
-        if enabled {
-            enabledModelIds.insert(id)
-        } else {
-            enabledModelIds.remove(id)
-            // If the user disabled the currently-selected model, promote
-            // the first remaining enabled model so the chat keeps working.
-            if selectedModel == id, let next = availableModels.first(where: { enabledModelIds.contains($0.id) })?.id {
-                selectedModel = next
-                UserDefaults.standard.set(next, forKey: NeoxCoreSettings.selectedModelKey)
-            }
-        }
-        persistEnabledModelIds()
-    }
-
     // MARK: - Per-app Model Catalog (loaded from relay)
 
     /// Per-app model list, populated by `loadAvailableModels()` from
@@ -123,12 +88,6 @@ open class BaseCoordinator: ObservableObject {
             return ModelCatalog.allModels
         }
         return availableModelsStore.models
-    }
-
-    /// Subset of `availableModels` that the user has enabled in Settings.
-    /// Used by the model picker so disabled models don't appear there.
-    public var enabledAvailableModels: [CopilotChat.ModelInfo] {
-        availableModels.filter { enabledModelIds.contains($0.id) }
     }
 
     // MARK: - Tool Providers
