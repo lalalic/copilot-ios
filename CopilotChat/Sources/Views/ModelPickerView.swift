@@ -67,6 +67,21 @@ public enum ModelCatalog {
                   description: "Compact reasoning model."),
         ModelInfo(id: "o3", name: "o3", family: "OpenAI", tier: .reasoning,
                   description: "Most powerful reasoning. Deep analysis."),
+
+        // CCM Relay (multiplexed via relay.ai.qili2.com — billed through the
+        // platform credit account instead of a per-provider API key).
+        ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", family: "ccm-relay", tier: .fast,
+                  description: "Routed via CCM relay. Fast, cheap."),
+        ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", family: "ccm-relay", tier: .balanced,
+                  description: "Routed via CCM relay. Capable & balanced."),
+        ModelInfo(id: "relay-gpt-4.1", name: "GPT-4.1 (Relay)", family: "ccm-relay", tier: .balanced,
+                  description: "Routed via CCM relay. Strong all-around."),
+        ModelInfo(id: "relay-claude-sonnet-4", name: "Claude Sonnet 4 (Relay)", family: "ccm-relay", tier: .powerful,
+                  description: "Routed via CCM relay. Anthropic flagship."),
+        ModelInfo(id: "relay-claude-sonnet-4.5", name: "Claude Sonnet 4.5 (Relay)", family: "ccm-relay", tier: .powerful,
+                  description: "Routed via CCM relay. Latest Sonnet."),
+        ModelInfo(id: "relay-claude-sonnet-4.6", name: "Claude Sonnet 4.6 (Relay)", family: "ccm-relay", tier: .powerful,
+                  description: "Routed via CCM relay. Latest Sonnet."),
     ]
     
     /// Find a model by ID.

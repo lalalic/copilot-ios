@@ -51,9 +51,12 @@ public final class RelayProviderAdapter: ProviderAdapter, @unchecked Sendable {
         config: ProviderRequestConfig,
         onEvent: @escaping @Sendable (RuntimeEvent) -> Void
     ) async throws {
+        // Strip the `relay-` registry prefix so the upstream relay receives
+        // the canonical upstream model name (e.g. `deepseek-v4-flash`).
+        let upstreamModel = model.hasPrefix("relay-") ? String(model.dropFirst("relay-".count)) : model
         try await inner.streamCompletion(
             messages: messages,
-            model: model,
+            model: upstreamModel,
             systemMessage: systemMessage,
             tools: tools,
             config: config,
