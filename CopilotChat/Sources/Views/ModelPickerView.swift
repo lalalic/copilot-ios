@@ -156,7 +156,7 @@ public struct ModelPickerView: View {
                     }
                 } else {
                     ForEach(groups, id: \.name) { group in
-                        Section(group.name) {
+                        Section("\(group.name) — \(group.models.count)") {
                             ForEach(group.models) { model in
                                 ModelRowView(
                                     model: model,
@@ -168,6 +168,9 @@ public struct ModelPickerView: View {
                                 }
                             }
                         }
+                    }
+                    Section {
+                        Text("DEBUG: \(groups.count) providers in picker").font(.caption)
                     }
                 }
             } else {
