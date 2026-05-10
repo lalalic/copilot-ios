@@ -52,12 +52,6 @@ open class BaseCoordinator: ObservableObject {
         return saved == 0 ? NeoxCoreSettings.defaultDevServerPort : saved
     }()
 
-    // MARK: - Chat Input Modes
-
-    @Published public var enableTextInput: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.enableTextInputKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.enableTextInputKey)
-    @Published public var enableSpeechInput: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.enableSpeechInputKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.enableSpeechInputKey)
-    @Published public var enableAttachmentInput: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.enableAttachmentInputKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.enableAttachmentInputKey)
-
     // MARK: - Notification Visibility
 
     @Published public var showUsageInChat: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.showUsageInChatKey) == nil ? false : UserDefaults.standard.bool(forKey: NeoxCoreSettings.showUsageInChatKey)
@@ -619,11 +613,7 @@ open class BaseCoordinator: ObservableObject {
     // MARK: - Chat Input Modes
 
     public var chatInputModes: InputMode {
-        var modes: InputMode = []
-        if enableTextInput { modes.insert(.text) }
-        if enableSpeechInput { modes.insert(.speech) }
-        if enableAttachmentInput { modes.insert(.attachment) }
-        return modes.isEmpty ? .textAndSpeech : modes
+        [.text, .speech, .attachment]
     }
 
     // MARK: - Chat ViewModel
@@ -632,8 +622,6 @@ open class BaseCoordinator: ObservableObject {
     /// When `useDirectProvider` is true, creates a runtime-backed view model.
     /// Subclasses can override `configureChat(vm:)` to do additional wiring (e.g., Discord).
     public func createChatViewModel() -> ChatViewModel {
-        normalizeInputSettings()
-
         if useDirectProvider {
             return createDirectProviderChatViewModel()
         }
@@ -959,12 +947,6 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Settings
 
-    public func normalizeInputSettings() {
-        if !enableTextInput && !enableSpeechInput && !enableAttachmentInput {
-            enableTextInput = true
-        }
-    }
-
     open func saveRelaySettings() {
         NeoxCoreSettings.saveRelaySettings(
             relayHost: relayHost,
@@ -976,9 +958,6 @@ open class BaseCoordinator: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(useDevServer, forKey: NeoxCoreSettings.useDevServerKey)
         defaults.set(devServerPort, forKey: NeoxCoreSettings.devServerPortKey)
-        defaults.set(enableTextInput, forKey: NeoxCoreSettings.enableTextInputKey)
-        defaults.set(enableSpeechInput, forKey: NeoxCoreSettings.enableSpeechInputKey)
-        defaults.set(enableAttachmentInput, forKey: NeoxCoreSettings.enableAttachmentInputKey)
         defaults.set(selectedModel, forKey: NeoxCoreSettings.selectedModelKey)
         defaults.set(showUsageInChat, forKey: NeoxCoreSettings.showUsageInChatKey)
         defaults.set(showProgressInChat, forKey: NeoxCoreSettings.showProgressInChatKey)
