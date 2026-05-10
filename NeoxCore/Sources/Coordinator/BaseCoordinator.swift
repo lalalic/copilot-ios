@@ -31,6 +31,17 @@ open class BaseCoordinator: ObservableObject {
     @Published public var relayHost: String = UserDefaults.standard.string(forKey: NeoxCoreSettings.relayHostKey) ?? NeoxCoreSettings.defaultRelayHost
     @Published public var relayPort: UInt16 = UInt16(UserDefaults.standard.integer(forKey: NeoxCoreSettings.relayPortKey)) == 0 ? NeoxCoreSettings.defaultRelayPort : UInt16(UserDefaults.standard.integer(forKey: NeoxCoreSettings.relayPortKey))
 
+    // MARK: - Direct Provider Settings
+
+    /// Direct provider is always enabled — relay mode is deprecated.
+    @Published public var useDirectProvider: Bool = true
+
+    /// Shared credential store for BYOK API keys.
+    public let credentialStore = CredentialStore()
+
+    /// Shared model registry for available models.
+    public let modelRegistry = ModelRegistry()
+
     // MARK: - Dev Server Settings
 
     @Published public var useDevServer: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useDevServerKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useDevServerKey)
@@ -70,9 +81,14 @@ open class BaseCoordinator: ObservableObject {
     /// `GET /apps/{appId}/models`. Falls back to `ModelCatalog.allModels`
     /// before first load or on failure.
     public let availableModelsStore = RemoteModelCatalog()
-    /// Convenience accessor for views: prefer the live store value, then
-    /// fall back to the static catalog.
-    public var availableModels: [ModelInfo] { availableModelsStore.models }
+    /// Convenience accessor for views: when using direct provider, show the
+    /// static catalog (all known models); otherwise use the relay-loaded list.
+    public var availableModels: [CopilotChat.ModelInfo] {
+        if useDirectProvider {
+            return ModelCatalog.allModels
+        }
+        return availableModelsStore.models
+    }
 
     // MARK: - Tool Providers
 
@@ -204,8 +220,46 @@ open class BaseCoordinator: ObservableObject {
         subAgentToolProvider.appId = appId
         syncStripePaymentLink()
 
+        // Seed default DeepSeek credentials if none configured.
+        seedDefaultCredentials()
+
         // Load per-app supported model list from relay (best-effort, async).
         Task { await self.loadAvailableModels() }
+    }
+
+    // MARK: - Credential Management
+
+    /// Seed default credentials on first launch.
+    /// Checks UserDefaults `directProviderAPIKey` first, then falls back to built-in default.
+    private func seedDefaultCredentials() {
+        if credentialStore.hasAnyCredentials() { return }
+
+        let defaults = UserDefaults.standard
+        let key: String
+        let providerStr: String
+
+        if let userKey = defaults.string(forKey: "directProviderAPIKey"), !userKey.isEmpty {
+            key = userKey
+            providerStr = defaults.string(forKey: "directProviderKeyProvider") ?? NeoxCoreSettings.defaultProvider
+        } else {
+            // Built-in default: DeepSeek
+            key = "sk-cc9f936c2cc74b3f87059e2a43ff25a9"
+            providerStr = "deepseek"
+        }
+
+        if let provider = CredentialStore.Provider(rawValue: providerStr) {
+            try? credentialStore.setAPIKey(key, for: provider)
+        }
+    }
+
+    /// Store an API key for a provider. Called from settings UI or app setup.
+    public func configureCredentials(providerKey: String, apiKey: String, baseURL: String? = nil) {
+        if let provider = CredentialStore.Provider(rawValue: providerKey) {
+            try? credentialStore.setAPIKey(apiKey, for: provider)
+            if let baseURL {
+                credentialStore.setBaseURL(baseURL, for: provider)
+            }
+        }
     }
 
     /// Fetch the per-app supported model list from
@@ -215,6 +269,8 @@ open class BaseCoordinator: ObservableObject {
     /// `selectedModel` to the server-advertised default when the current
     /// selection is no longer available.
     public func loadAvailableModels() async {
+        // Skip relay model loading when using direct provider
+        guard !useDirectProvider else { return }
         let base: String
         if useLocalRelay, !localRelayURL.isEmpty {
             base = localRelayURL
@@ -547,9 +603,15 @@ open class BaseCoordinator: ObservableObject {
     // MARK: - Chat ViewModel
 
     /// Create the shared CopilotChat view model configured for agent mode.
+    /// When `useDirectProvider` is true, creates a runtime-backed view model.
     /// Subclasses can override `configureChat(vm:)` to do additional wiring (e.g., Discord).
     public func createChatViewModel() -> ChatViewModel {
         normalizeInputSettings()
+
+        if useDirectProvider {
+            return createDirectProviderChatViewModel()
+        }
+
         var tools = buildTools()
         tools.append(contentsOf: additionalTools())
         var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -629,6 +691,90 @@ open class BaseCoordinator: ObservableObject {
     /// Override point: called after ChatViewModel is created, before connect.
     /// Use to wire channels (Discord, WeChat, etc.)
     open func configureChat(vm: ChatViewModel) {}
+
+    // MARK: - Direct Provider ChatViewModel
+
+    /// Create a ChatViewModel backed by DirectProviderRuntime.
+    /// Bypasses relay entirely — sends API requests directly to providers.
+    private func createDirectProviderChatViewModel() -> ChatViewModel {
+        let sessionStore = SessionStore()
+        let runtime = DirectProviderRuntime(
+            credentialStore: credentialStore,
+            modelRegistry: modelRegistry,
+            sessionStore: sessionStore,
+            sessionId: "\(appId)-\(neoxUserId)"
+        )
+
+        var tools = buildTools()
+        tools.append(contentsOf: additionalTools())
+        var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let tree = buildWorkspaceTree()
+        if !tree.isEmpty {
+            instructions += "\n\n## current workspace files\n```\n\(tree)```"
+        }
+        let templateInfo = buildTemplateInfo()
+        if !templateInfo.isEmpty {
+            instructions += "\n\n\(templateInfo)"
+        }
+        if let skills = agentProfile?.skills,
+           let skillSection = SkillDiscovery.buildPromptSection(from: skills) {
+            instructions += "\n\n\(skillSection)"
+        }
+        let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
+        instructions += "\n\n" + mobileTone
+
+        // Resolve model + provider, falling back to defaults if model unknown or no credentials
+        var resolvedModel = selectedModel
+        var resolvedProvider = modelRegistry.model(id: resolvedModel)?.provider ?? NeoxCoreSettings.defaultProvider
+
+        // Fall back if model not in registry or provider key not configured
+        if modelRegistry.model(id: resolvedModel) == nil ||
+           credentialStore.getAPIKey(for: CredentialStore.Provider(rawValue: resolvedProvider) ?? .deepseek) == nil {
+            resolvedModel = modelRegistry.defaultModelId
+            resolvedProvider = modelRegistry.defaultProviderId
+            // Update the UI to reflect the actual model
+            self.selectedModel = resolvedModel
+            UserDefaults.standard.set(resolvedModel, forKey: NeoxCoreSettings.selectedModelKey)
+        }
+
+        // Only send reasoning_effort for models that support reasoning
+        let resolvedModelInfo = modelRegistry.model(provider: resolvedProvider, id: resolvedModel)
+        let reasoning: String? = resolvedModelInfo?.supportsReasoning == true ? "high" : nil
+
+        let config = RuntimeSessionConfig(
+            sessionName: "\(appId)-\(neoxUserId)",
+            model: resolvedModel,
+            provider: resolvedProvider,
+            systemMessage: instructions,
+            tools: tools,
+            workingDirectory: workspaceURL.path,
+            streaming: true,
+            reasoningEffort: reasoning
+        )
+
+        let vm = ChatViewModel(
+            runtime: runtime,
+            runtimeConfig: config,
+            inputModes: chatInputModes,
+            usageTracker: usageTracker,
+            workspaceURL: workspaceURL,
+            notificationFilter: { [weak self] type in
+                guard let self else { return true }
+                switch type {
+                case "usage": return self.showUsageInChat
+                case "agent_progress": return self.showProgressInChat
+                case "build_complete", "build_failed": return self.showBuildInChat
+                default: return true
+                }
+            }
+        )
+
+        self.chatViewModel = vm
+        configureChat(vm: vm)
+        Task { await vm.connect() }
+        return vm
+    }
 
     // MARK: - Reconnect
 
@@ -772,6 +918,7 @@ open class BaseCoordinator: ObservableObject {
         defaults.set(showUsageInChat, forKey: NeoxCoreSettings.showUsageInChatKey)
         defaults.set(showProgressInChat, forKey: NeoxCoreSettings.showProgressInChatKey)
         defaults.set(showBuildInChat, forKey: NeoxCoreSettings.showBuildInChatKey)
+        defaults.set(useDirectProvider, forKey: NeoxCoreSettings.useDirectProviderKey)
     }
 
     public func parseLocalRelayURL() -> (host: String, port: UInt16) {

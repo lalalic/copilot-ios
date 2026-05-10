@@ -118,6 +118,13 @@ public final class ChatViewModel: ObservableObject {
     private var session: CopilotSession?
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Error>?
+
+    // MARK: - Direct Provider Runtime
+
+    /// When set, the view model uses the provider-neutral runtime instead of relay/Copilot.
+    private var runtime: AgentSessionRuntime?
+    private var runtimeSubscription: RuntimeSubscription?
+    private var runtimeConfig: RuntimeSessionConfig?
     /// Continuation for ask_questions — resumed when user replies.
     private var askUserContinuation: CheckedContinuation<String, Never>?
     /// Continuation for ask_questions — resumed when user submits structured replies.
@@ -198,6 +205,31 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Create a chat view model backed by a direct provider runtime.
+    /// Uses AgentSessionRuntime instead of relay transport.
+    public init(
+        runtime: AgentSessionRuntime,
+        runtimeConfig: RuntimeSessionConfig,
+        inputModes: InputMode = .textAndSpeech,
+        usageTracker: UsageTracker = UsageTracker(),
+        workspaceURL: URL? = nil,
+        notificationFilter: @escaping (String) -> Bool = { _ in true }
+    ) {
+        // Runtime mode doesn't need transport/mode — use dummy values
+        self.transport = DummyTransport()
+        self.mode = .session(SessionConfig(model: runtimeConfig.model ?? ""))
+        self.inputModes = inputModes
+        self.usageTracker = usageTracker
+        self.workspaceURL = workspaceURL
+        self.notificationFilter = notificationFilter
+        self.runtime = runtime
+        self.runtimeConfig = runtimeConfig
+
+        if let workspaceURL {
+            self.sessionLogger = ChatSessionLogger(workspaceURL: workspaceURL)
+        }
+    }
+
     deinit {
         agentTask?.cancel()
     }
@@ -261,10 +293,22 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Connection
 
     /// Connect to the relay and create a session or agent.
+    /// When a runtime is set, connects via the direct provider runtime instead.
     public func connect() async {
         guard chatState == .disconnected || chatState == .error("") || isErrorState else { return }
         chatState = .connecting
 
+        // Direct provider runtime path
+        if let runtime, let config = runtimeConfig {
+            do {
+                try await connectRuntime(runtime: runtime, config: config)
+            } catch {
+                chatState = .error(error.localizedDescription)
+            }
+            return
+        }
+
+        // Legacy relay path
         do {
             let client = CopilotClient(transport: transport)
             self.client = client
@@ -334,6 +378,10 @@ public final class ChatViewModel: ObservableObject {
 
     /// Disconnect and clean up.
     public func disconnect() {
+        if let sub = runtimeSubscription, let rt = runtime {
+            rt.unsubscribe(sub)
+            runtimeSubscription = nil
+        }
         agentTask?.cancel()
         agentTask = nil
         agent?.stop()
@@ -345,6 +393,13 @@ public final class ChatViewModel: ObservableObject {
 
     /// Destroy session on relay (frees Copilot seat) and clean up.
     public func destroy() {
+        if let sub = runtimeSubscription, let rt = runtime {
+            rt.unsubscribe(sub)
+            runtimeSubscription = nil
+        }
+        if let runtime {
+            Task { await runtime.destroy() }
+        }
         let session = self.session
         agentTask?.cancel()
         agentTask = nil
@@ -356,6 +411,102 @@ public final class ChatViewModel: ObservableObject {
         // Send destroy to relay in background
         if let session {
             Task { try? await session.destroy() }
+        }
+    }
+
+    // MARK: - Direct Provider Runtime
+
+    private func connectRuntime(runtime: AgentSessionRuntime, config: RuntimeSessionConfig) async throws {
+        subscribeToRuntimeEvents(runtime: runtime)
+        try await runtime.createSession(config: config)
+        usageTracker.resetSession()
+        loadChatHistory()
+        chatState = .idle
+    }
+
+    private func subscribeToRuntimeEvents(runtime: AgentSessionRuntime) {
+        let sub = runtime.subscribe { [weak self] event in
+            Task { @MainActor in
+                self?.handleRuntimeEvent(event)
+            }
+        }
+        runtimeSubscription = sub
+    }
+
+    @MainActor
+    private func handleRuntimeEvent(_ event: RuntimeEvent) {
+        switch event {
+        case .assistantTextDelta(let delta):
+            appendOrUpdateAssistantDelta(delta.text)
+
+        case .assistantMessageComplete(let complete):
+            finalizeAssistantMessage(complete.content)
+
+        case .turnStart:
+            chatState = .working
+
+        case .turnEnd:
+            // Only go idle if not waiting for user input
+            if case .waitingForUser = chatState { return }
+            if case .waitingForQuestions = chatState { return }
+            chatState = .idle
+
+        case .toolStart(let info):
+            toolCalls.append(ToolCallInfo(id: info.toolCallId, name: info.toolName, arguments: info.arguments))
+            if toolCalls.count > 5 {
+                toolCalls.removeFirst(toolCalls.count - 5)
+            }
+
+        case .toolComplete(let info):
+            if let idx = toolCalls.firstIndex(where: { $0.id == info.toolCallId }) {
+                toolCalls[idx].status = .completed
+                toolCalls[idx].result = info.result
+                let name = toolCalls[idx].name
+                let args = toolCalls[idx].arguments ?? ""
+                let truncated = String((info.result ?? "").prefix(500))
+                var parts = "[\(name)]"
+                if !args.isEmpty { parts += " \(args)" }
+                if !truncated.isEmpty { parts += "\n\(truncated)" }
+                sessionLogger?.log(role: "tool_result", text: parts, project: projectScope)
+            }
+
+        case .toolUpdate:
+            break // Not currently used in UI
+
+        case .usageUpdate(let usage):
+            usageTracker.record(
+                model: usage.model,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                cost: usage.cost
+            )
+
+        case .error(let runtimeError):
+            chatState = .error(runtimeError.message)
+
+        case .sessionIdle:
+            if case .waitingForUser = chatState { return }
+            if case .waitingForQuestions = chatState { return }
+            chatState = .idle
+
+        case .compactionStart:
+            chatState = .compacting
+
+        case .compactionComplete:
+            if case .compacting = chatState {
+                chatState = .working
+            }
+
+        case .userInputRequested(let request):
+            let prompt = request.questions.map { $0.text }.joined(separator: "\n")
+            chatState = .waitingForUser(question: prompt)
+            if !prompt.isEmpty {
+                let blocks = parseContentBlocks(prompt)
+                messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
+            }
+
+        case .reasoningDelta, .reasoningComplete, .queueStateUpdate, .sessionRestored:
+            break // Not surfaced in current UI
         }
     }
 
@@ -745,7 +896,11 @@ public final class ChatViewModel: ObservableObject {
         case .working:
             // Steer — inject immediate message
             do {
-                try await session?.steer(prompt: promptText)
+                if let runtime {
+                    try await runtime.steer(message: promptText)
+                } else {
+                    try await session?.steer(prompt: promptText)
+                }
             } catch {
                 appendSystemMessage("Steer failed: \(error.localizedDescription)")
                 chatState = .idle
@@ -789,7 +944,19 @@ public final class ChatViewModel: ObservableObject {
             inputText = ""
             messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
             chatState = .working
-            if let agent {
+            if let runtime {
+                // Direct provider runtime path
+                Task { [weak self] in
+                    do {
+                        try await runtime.send(prompt: trimmed, attachments: nil)
+                    } catch {
+                        await MainActor.run {
+                            self?.appendSystemMessage("Send failed: \(error.localizedDescription)")
+                            self?.chatState = .idle
+                        }
+                    }
+                }
+            } else if let agent {
                 if !agent.isRunning {
                     // Start agent loop in background Task — agent.start() blocks until loop ends
                     agentTask = Task { [weak self] in
@@ -976,6 +1143,17 @@ public final class ChatViewModel: ObservableObject {
             effectiveText = "[Project: \(project)] \(text)"
         } else {
             effectiveText = text
+        }
+
+        // Direct provider runtime path
+        if let runtime {
+            do {
+                try await runtime.send(prompt: effectiveText, attachments: nil)
+            } catch {
+                appendSystemMessage("Send failed: \(error.localizedDescription)")
+                chatState = .idle
+            }
+            return
         }
 
         switch mode {
@@ -1878,4 +2056,14 @@ extension ChatMessage {
             }
         }.joined(separator: "\n\n")
     }
+}
+
+// MARK: - DummyTransport
+
+/// Placeholder transport used when ChatViewModel is backed by AgentSessionRuntime.
+private final class DummyTransport: Transport, @unchecked Sendable {
+    func connect() async throws {}
+    func disconnect() {}
+    func send(_ data: Data) async throws {}
+    func receive() -> AsyncStream<Data> { AsyncStream { $0.finish() } }
 }

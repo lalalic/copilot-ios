@@ -67,16 +67,14 @@ public actor RemoteModelCatalogService {
 
         let merged: [ModelInfo] = env.models.map { entry in
             if let known = ModelCatalog.model(for: entry.id) {
-                // Trust server-side multiplier when present.
                 return ModelInfo(
                     id: known.id, name: known.name, family: known.family,
                     tier: known.tier,
-                    multiplier: entry.multiplier ?? known.multiplier,
                     description: known.description)
             }
             return ModelInfo(
                 id: entry.id, name: entry.id, family: "Other",
-                tier: .balanced, multiplier: entry.multiplier ?? 0,
+                tier: .balanced,
                 description: "")
         }
         let defId = env.models.first(where: { $0.default == true })?.id

@@ -4,34 +4,20 @@ import CopilotSDK
 // MARK: - Model Info
 
 /// A selectable LLM model with pricing information.
-/// Multiplier values match `relay/lib/models.json` (billing.multiplier from GitHub Copilot API).
 public struct ModelInfo: Identifiable, Hashable, Sendable {
     public let id: String          // e.g., "gpt-4.1"
     public let name: String        // Display name
     public let family: String      // "OpenAI", "Anthropic", "xAI", "DeepSeek"
     public let tier: ModelTier
-    public let multiplier: Double  // Premium request multiplier (0 = free/included)
     public let description: String
     
     public init(id: String, name: String, family: String, tier: ModelTier,
-                multiplier: Double, description: String) {
+                description: String) {
         self.id = id
         self.name = name
         self.family = family
         self.tier = tier
-        self.multiplier = multiplier
         self.description = description
-    }
-    
-    /// Display string for the multiplier, e.g. "1x", "3x", or "Free".
-    public var multiplierLabel: String {
-        if multiplier <= 0 {
-            return "Free"
-        } else if multiplier < 1.0 {
-            return String(format: "%.2fx", multiplier)
-        } else {
-            return String(format: "%.0fx", multiplier)
-        }
     }
 }
 
@@ -45,40 +31,42 @@ public enum ModelTier: String, CaseIterable, Hashable, Sendable {
 
 // MARK: - Model Catalog (Static)
 
-/// Hardcoded model catalog. Multipliers from relay/lib/models.json (GitHub Copilot billing).
+/// Hardcoded model catalog. IDs match ModelRegistry for consistent lookup.
 public enum ModelCatalog {
     public static let allModels: [ModelInfo] = [
-        // Fast & Cheap (multiplier 0 = free/included)
+        // Fast & Cheap
         ModelInfo(id: "gpt-4.1-nano", name: "GPT-4.1 Nano", family: "OpenAI", tier: .fast,
-                  multiplier: 0, description: "Fastest, cheapest. Good for simple tasks."),
+                  description: "Fastest, cheapest. Good for simple tasks."),
         ModelInfo(id: "gpt-4o-mini", name: "GPT-4o Mini", family: "OpenAI", tier: .fast,
-                  multiplier: 0, description: "Fast multimodal model, great for quick tasks."),
+                  description: "Fast multimodal model, great for quick tasks."),
         ModelInfo(id: "gpt-4.1-mini", name: "GPT-4.1 Mini", family: "OpenAI", tier: .fast,
-                  multiplier: 0, description: "Cost-effective for coding and analysis."),
+                  description: "Cost-effective for coding and analysis."),
+        ModelInfo(id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", family: "DeepSeek", tier: .fast,
+                  description: "Fast and capable. Default model."),
         
         // Balanced
         ModelInfo(id: "gpt-4.1", name: "GPT-4.1", family: "OpenAI", tier: .balanced,
-                  multiplier: 0, description: "Best all-around model. Great for coding."),
+                  description: "Best all-around model. Great for coding."),
         ModelInfo(id: "gpt-4o", name: "GPT-4o", family: "OpenAI", tier: .balanced,
-                  multiplier: 0, description: "Strong multimodal with vision capabilities."),
-        ModelInfo(id: "DeepSeek-R1", name: "DeepSeek R1", family: "DeepSeek", tier: .balanced,
-                  multiplier: 0.33, description: "Open-source reasoning model."),
+                  description: "Strong multimodal with vision capabilities."),
+        ModelInfo(id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", family: "DeepSeek", tier: .balanced,
+                  description: "DeepSeek's most capable model."),
         
         // Powerful
-        ModelInfo(id: "Claude-Sonnet-4", name: "Claude Sonnet 4", family: "Anthropic", tier: .powerful,
-                  multiplier: 1, description: "Excellent writing and analysis."),
-        ModelInfo(id: "Grok-3", name: "Grok 3", family: "xAI", tier: .powerful,
-                  multiplier: 1, description: "xAI's flagship model."),
-        ModelInfo(id: "Claude-Opus-4", name: "Claude Opus 4", family: "Anthropic", tier: .powerful,
-                  multiplier: 3, description: "Most capable Claude. Premium quality."),
+        ModelInfo(id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", family: "Anthropic", tier: .powerful,
+                  description: "Excellent writing and analysis."),
+        ModelInfo(id: "grok-3", name: "Grok 3", family: "xAI", tier: .powerful,
+                  description: "xAI's flagship model."),
+        ModelInfo(id: "claude-opus-4-20250514", name: "Claude Opus 4", family: "Anthropic", tier: .powerful,
+                  description: "Most capable Claude. Premium quality."),
         
         // Reasoning
         ModelInfo(id: "o4-mini", name: "o4-mini", family: "OpenAI", tier: .reasoning,
-                  multiplier: 0.33, description: "Fast reasoning with chain-of-thought."),
+                  description: "Fast reasoning with chain-of-thought."),
         ModelInfo(id: "o3-mini", name: "o3-mini", family: "OpenAI", tier: .reasoning,
-                  multiplier: 0.33, description: "Compact reasoning model."),
+                  description: "Compact reasoning model."),
         ModelInfo(id: "o3", name: "o3", family: "OpenAI", tier: .reasoning,
-                  multiplier: 1, description: "Most powerful reasoning. Deep analysis."),
+                  description: "Most powerful reasoning. Deep analysis."),
     ]
     
     /// Find a model by ID.
@@ -101,16 +89,22 @@ public enum ModelCatalog {
 ///
 /// Pass `models:` to display a per-app dynamic list (typically loaded by
 /// `RemoteModelCatalog`). When omitted, falls back to `ModelCatalog.allModels`.
+///
+/// When `configuredProviders` is set (BYOK / direct mode), only models whose
+/// provider has a stored API key are selectable; others are greyed out.
 public struct ModelPickerView: View {
     @Binding var selectedModelId: String
     var models: [ModelInfo]
+    var configuredProviders: Set<String>?
     var onModelChanged: ((String) -> Void)?
 
     public init(selectedModelId: Binding<String>,
                 models: [ModelInfo] = ModelCatalog.allModels,
+                configuredProviders: Set<String>? = nil,
                 onModelChanged: ((String) -> Void)? = nil) {
         self._selectedModelId = selectedModelId
         self.models = models
+        self.configuredProviders = configuredProviders
         self.onModelChanged = onModelChanged
     }
 
@@ -121,29 +115,49 @@ public struct ModelPickerView: View {
         }
     }
 
+    private func isAvailable(_ model: ModelInfo) -> Bool {
+        guard let providers = configuredProviders else { return true }
+        return providers.contains(model.family.lowercased())
+    }
+
     public var body: some View {
         List {
             ForEach(byTier, id: \.tier) { group in
                 Section(group.tier.rawValue) {
                     ForEach(group.models) { model in
+                        let available = isAvailable(model)
                         ModelRowView(
                             model: model,
-                            isSelected: model.id == selectedModelId
+                            isSelected: model.id == selectedModelId,
+                            isDisabled: !available
                         ) {
+                            guard available else { return }
                             selectedModelId = model.id
                             onModelChanged?(model.id)
                         }
                     }
                 }
             }
-            
-            Section {
-                HStack {
-                    Spacer()
-                    Text("Higher multiplier = more capable, more expensive")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+
+            if configuredProviders != nil {
+                Section {
+                    HStack {
+                        Spacer()
+                        Text("Bring your own API key")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
+            } else {
+                Section {
+                    HStack {
+                        Spacer()
+                        Text("")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
                 }
             }
         }
@@ -157,6 +171,7 @@ public struct ModelPickerView: View {
 private struct ModelRowView: View {
     let model: ModelInfo
     let isSelected: Bool
+    var isDisabled: Bool = false
     let onTap: () -> Void
     
     var body: some View {
@@ -165,15 +180,17 @@ private struct ModelRowView: View {
                 Text(model.name)
                     .font(.body)
                     .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isDisabled ? .tertiary : .primary)
                 
                 Spacer()
+
+                if isDisabled {
+                    Text("Add key")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 
-                Text(model.multiplierLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                
-                if isSelected {
+                if isSelected && !isDisabled {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.blue)
                 }
@@ -181,6 +198,7 @@ private struct ModelRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
     }
 }
 
@@ -202,9 +220,6 @@ public struct ModelBadgeView: View {
                 Text(displayName)
                     .font(.caption2)
                     .fontWeight(.medium)
-                Text(model?.multiplierLabel ?? "")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             .foregroundStyle(.primary)
             .padding(.horizontal, 8)
