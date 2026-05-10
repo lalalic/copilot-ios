@@ -20,6 +20,7 @@ public enum NeoxCoreSettings {
     public static let showProgressInChatKey = "showProgressInChat"
     public static let showBuildInChatKey = "showBuildInChat"
     public static let useDirectProviderKey = "useDirectProvider"
+    public static let enabledModelIdsKey = "enabledModelIds"
 
     // Feedback (Send Feedback + auto crash report) — see Feedback target
     public static let feedbackEndpointKey = "feedbackEndpoint"
@@ -30,9 +31,21 @@ public enum NeoxCoreSettings {
     public static let defaultRelayHost = "relay.ai.qili2.com"
     public static let defaultRelayPort: UInt16 = 443
     public static let defaultLocalRelayURL = "http://10.0.0.111:8765"
-    public static let defaultModel = "deepseek-v4-flash"
+    public static let defaultModel = "relay-deepseek-v4-flash"
     public static let defaultDevServerPort = 9223
-    public static let defaultProvider = "deepseek"
+    public static let defaultProvider = "ccm-relay"
+
+    /// Default set of enabled model IDs on first launch — all CCM-relay
+    /// variants. Direct-provider models stay opt-in until the user supplies
+    /// an API key for that provider.
+    public static let defaultEnabledModelIds: Set<String> = [
+        "relay-deepseek-v4-flash",
+        "relay-deepseek-v4-pro",
+        "relay-claude-sonnet-4",
+        "relay-claude-sonnet-4.5",
+        "relay-claude-sonnet-4.6",
+        "relay-gpt-4.1",
+    ]
 
     /// Default Feedback endpoint. Empty unless set per-app via the bootstrap
     /// helper. Apps should ship their own endpoint as a build-time constant

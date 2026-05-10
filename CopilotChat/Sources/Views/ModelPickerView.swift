@@ -100,6 +100,38 @@ public enum ModelCatalog {
 
 // MARK: - Model Picker View
 
+/// Grouping mode for the picker.
+public enum ModelGrouping: Sendable {
+    /// Group by capability tier (Fast / Balanced / Powerful / Reasoning).
+    case tier
+    /// Group by provider family (CCM Relay, OpenAI, Anthropic, ...).
+    case family
+}
+
+/// Pretty-print + subtitle helpers shared between the picker and the Settings
+/// providers section.
+public enum ProviderDisplay {
+    public static func name(for family: String) -> String {
+        switch family.lowercased() {
+        case "ccm-relay": return "CCM Relay"
+        case "openai": return "OpenAI"
+        case "anthropic": return "Anthropic"
+        case "deepseek": return "DeepSeek"
+        case "xai": return "xAI"
+        default: return family.capitalized
+        }
+    }
+
+    public static func subtitle(for family: String) -> String? {
+        switch family.lowercased() {
+        case "ccm-relay":
+            return "Built-in. Routed through relay.ai.qili2.com using your platform credit. No API key needed."
+        default:
+            return nil
+        }
+    }
+}
+
 /// A settings view for selecting the LLM model.
 ///
 /// Pass `models:` to display a per-app dynamic list (typically loaded by
@@ -107,38 +139,78 @@ public enum ModelCatalog {
 ///
 /// When `configuredProviders` is set (BYOK / direct mode), only models whose
 /// provider has a stored API key are selectable; others are greyed out.
+///
+/// When `enabledIds` is set, only models whose `id` is in the set are listed
+/// at all (used to honour the user's per-model toggles in Settings).
 public struct ModelPickerView: View {
     @Binding var selectedModelId: String
     var models: [ModelInfo]
     var configuredProviders: Set<String>?
+    var enabledIds: Set<String>?
+    var grouping: ModelGrouping
     var onModelChanged: ((String) -> Void)?
 
     public init(selectedModelId: Binding<String>,
                 models: [ModelInfo] = ModelCatalog.allModels,
                 configuredProviders: Set<String>? = nil,
+                enabledIds: Set<String>? = nil,
+                grouping: ModelGrouping = .family,
                 onModelChanged: ((String) -> Void)? = nil) {
         self._selectedModelId = selectedModelId
         self.models = models
         self.configuredProviders = configuredProviders
+        self.enabledIds = enabledIds
+        self.grouping = grouping
         self.onModelChanged = onModelChanged
     }
 
-    private var byTier: [(tier: ModelTier, models: [ModelInfo])] {
+    private var visibleModels: [ModelInfo] {
+        guard let enabled = enabledIds else { return models }
+        return models.filter { enabled.contains($0.id) }
+    }
+
+    private var byTier: [(title: String, subtitle: String?, models: [ModelInfo])] {
         ModelTier.allCases.compactMap { tier in
-            let group = models.filter { $0.tier == tier }
-            return group.isEmpty ? nil : (tier, group)
+            let group = visibleModels.filter { $0.tier == tier }
+            return group.isEmpty ? nil : (tier.rawValue, nil, group)
         }
     }
 
+    private var byFamily: [(title: String, subtitle: String?, models: [ModelInfo])] {
+        // Preserve catalog declaration order rather than alphabetising —
+        // CCM Relay typically comes last in the catalog but should appear
+        // first in the picker because it's the default provider.
+        var families: [String] = []
+        var seen = Set<String>()
+        // Push ccm-relay to the front, followed by the rest in catalog order.
+        for m in visibleModels where m.family.lowercased() == "ccm-relay" && !seen.contains(m.family) {
+            families.append(m.family); seen.insert(m.family)
+        }
+        for m in visibleModels where !seen.contains(m.family) {
+            families.append(m.family); seen.insert(m.family)
+        }
+        return families.compactMap { fam in
+            let group = visibleModels.filter { $0.family == fam }
+            return group.isEmpty ? nil : (ProviderDisplay.name(for: fam), ProviderDisplay.subtitle(for: fam), group)
+        }
+    }
+
+    private var groups: [(title: String, subtitle: String?, models: [ModelInfo])] {
+        grouping == .tier ? byTier : byFamily
+    }
+
     private func isAvailable(_ model: ModelInfo) -> Bool {
+        // ccm-relay is built-in: always selectable regardless of configured
+        // direct-provider keys.
+        if model.family.lowercased() == "ccm-relay" { return true }
         guard let providers = configuredProviders else { return true }
         return providers.contains(model.family.lowercased())
     }
 
     public var body: some View {
         List {
-            ForEach(byTier, id: \.tier) { group in
-                Section(group.tier.rawValue) {
+            ForEach(groups, id: \.title) { group in
+                Section {
                     ForEach(group.models) { model in
                         let available = isAvailable(model)
                         ModelRowView(
@@ -151,28 +223,24 @@ public struct ModelPickerView: View {
                             onModelChanged?(model.id)
                         }
                     }
+                } header: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(group.title)
+                        if let sub = group.subtitle {
+                            Text(sub)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textCase(nil)
+                        }
+                    }
                 }
             }
 
-            if configuredProviders != nil {
+            if visibleModels.isEmpty {
                 Section {
-                    HStack {
-                        Spacer()
-                        Text("Bring your own API key")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                }
-            } else {
-                Section {
-                    HStack {
-                        Spacer()
-                        Text("")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
+                    Text("No models enabled. Visit Settings → Providers to enable models.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
