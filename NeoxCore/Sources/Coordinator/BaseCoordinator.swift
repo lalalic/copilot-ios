@@ -108,7 +108,7 @@ open class BaseCoordinator: ObservableObject {
                     name: m.name,
                     family: provider.id,
                     tier: .balanced,
-                    description: nil
+                    description: ""
                 )
             }
             return (provider.name, infos)
