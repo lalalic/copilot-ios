@@ -164,31 +164,20 @@ public final class ModelRegistry: @unchecked Sendable {
                       supportsReasoning: true, supportsImages: true, contextWindow: 128_000, maxOutputTokens: 32_768,
                       pricing: .init(inputPerMillion: 0.27, outputPerMillion: 1.10)),
 
-            // CCM Relay (multiplexed OpenAI-compatible endpoint at relay.ai.qili2.com).
-            // Upstream pricing is mirrored; the relay multiplies usage server-side
-            // for its own metering, so these per-million numbers reflect the
-            // upstream provider's posted rate, not the relay's effective charge.
-            // IDs prefixed with `relay-` so they don't collide with the
-            // matching direct-provider entries above. `RelayProviderAdapter`
-            // strips the prefix before forwarding the model name upstream.
-            ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", provider: "ccm-relay",
+            // Relay (zero-config OpenAI-compatible endpoint at relay.ai.qili2.com).
+            // The relay only exposes DeepSeek today (flash + pro). IDs prefixed
+            // with `relay-` so they don't collide with the matching direct-
+            // provider entries above. `RelayProviderAdapter` strips the prefix
+            // before forwarding the model name upstream. Upstream pricing is
+            // mirrored; the relay multiplies usage server-side for its own
+            // metering, so these per-million numbers reflect the upstream
+            // posted rate, not the relay's effective charge.
+            ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", provider: "relay",
                       supportsReasoning: true, supportsImages: true, contextWindow: 128_000, maxOutputTokens: 32_768,
                       pricing: .init(inputPerMillion: 0.27, outputPerMillion: 1.10)),
-            ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", provider: "ccm-relay",
+            ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", provider: "relay",
                       supportsReasoning: true, contextWindow: 128_000, maxOutputTokens: 32_768,
                       pricing: .init(inputPerMillion: 0.55, outputPerMillion: 2.19)),
-            ModelInfo(id: "relay-claude-sonnet-4", name: "Claude Sonnet 4 (Relay)", provider: "ccm-relay",
-                      supportsReasoning: true, supportsImages: true, contextWindow: 200_000, maxOutputTokens: 64_000,
-                      pricing: .init(inputPerMillion: 3.00, outputPerMillion: 15.00)),
-            ModelInfo(id: "relay-claude-sonnet-4.5", name: "Claude Sonnet 4.5 (Relay)", provider: "ccm-relay",
-                      supportsReasoning: true, supportsImages: true, contextWindow: 200_000, maxOutputTokens: 64_000,
-                      pricing: .init(inputPerMillion: 3.00, outputPerMillion: 15.00)),
-            ModelInfo(id: "relay-claude-sonnet-4.6", name: "Claude Sonnet 4.6 (Relay)", provider: "ccm-relay",
-                      supportsReasoning: true, supportsImages: true, contextWindow: 200_000, maxOutputTokens: 64_000,
-                      pricing: .init(inputPerMillion: 3.00, outputPerMillion: 15.00)),
-            ModelInfo(id: "relay-gpt-4.1", name: "GPT-4.1 (Relay)", provider: "ccm-relay",
-                      supportsImages: true, contextWindow: 1_047_576, maxOutputTokens: 32_768,
-                      pricing: .init(inputPerMillion: 2.00, outputPerMillion: 8.00)),
         ]
 
         register(defaults)

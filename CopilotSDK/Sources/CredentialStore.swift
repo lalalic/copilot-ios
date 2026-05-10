@@ -17,7 +17,7 @@ public final class CredentialStore: @unchecked Sendable {
         case xai = "xai"
         case deepseek = "deepseek"
         case copilot = "copilot"
-        case ccmRelay = "ccm-relay"
+        case relay = "relay"
         case custom = "custom"
     }
 

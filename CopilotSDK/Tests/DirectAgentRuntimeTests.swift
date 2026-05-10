@@ -163,8 +163,8 @@ struct RuntimeEventTests {
 @Suite("DirectProviderRuntime defaults")
 struct DirectProviderRuntimeDefaultsTests {
 
-    @Test("registers ccm-relay adapter alongside built-ins")
-    func registersCcmRelayAdapter() {
+    @Test("registers relay adapter alongside built-ins")
+    func registersRelayAdapter() {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("dpr-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -183,7 +183,7 @@ struct DirectProviderRuntimeDefaultsTests {
         #expect(ids.contains("anthropic"))
         #expect(ids.contains("deepseek"))
         #expect(ids.contains("xai"))
-        #expect(ids.contains("ccm-relay"))
+        #expect(ids.contains("relay"))
     }
 }
 

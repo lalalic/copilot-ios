@@ -42,6 +42,10 @@ open class BaseCoordinator: ObservableObject {
     /// Shared model registry for available models.
     public let modelRegistry = ModelRegistry()
 
+    /// User-managed providers (built-ins + custom OpenAI-compatible endpoints).
+    /// Single source of truth for which models are visible in the picker.
+    public let providerRegistry = ProviderRegistry()
+
     // MARK: - Dev Server Settings
 
     @Published public var useDevServer: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useDevServerKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useDevServerKey)
@@ -88,6 +92,27 @@ open class BaseCoordinator: ObservableObject {
             return ModelCatalog.allModels
         }
         return availableModelsStore.models
+    }
+
+    /// Provider-grouped, enabled-only model list for the picker. Looks up
+    /// each `ProviderModel` against `ModelCatalog` for nice display
+    /// metadata; falls back to a synthetic `ModelInfo` so unknown ids still
+    /// appear (e.g. custom OpenAI-compatible providers fetched from
+    /// `/v1/models`).
+    public var pickerProviderGroups: [(name: String, models: [CopilotChat.ModelInfo])] {
+        providerRegistry.enabledModelsByProvider.map { (provider, models) in
+            let infos: [CopilotChat.ModelInfo] = models.map { m in
+                if let known = ModelCatalog.model(for: m.id) { return known }
+                return CopilotChat.ModelInfo(
+                    id: m.id,
+                    name: m.name,
+                    family: provider.id,
+                    tier: .balanced,
+                    description: nil
+                )
+            }
+            return (provider.name, infos)
+        }
     }
 
     // MARK: - Tool Providers

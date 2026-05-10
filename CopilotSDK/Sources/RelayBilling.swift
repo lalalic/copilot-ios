@@ -4,7 +4,7 @@ import CryptoKit
 /// iOS mirror of co-harness `core/relay-billing.ts`.
 ///
 /// Decrypts the per-request `x-llm-trace-id` header sent by the upstream
-/// ccm-relay so we can debit the **real** USD cost (relay-defined prices
+/// the relay so we can debit the **real** USD cost (relay-defined prices
 /// per 1M tokens) against the local balance instead of trusting whatever
 /// model id the client requested.
 ///
@@ -52,9 +52,9 @@ public struct RelayBilling {
         (Double(inputTokens) * prices.input + Double(outputTokens) * prices.output) / 1_000_000.0
     }
 
-    /// True when the model id resolves through the ccm-relay provider.
+    /// True when the model id resolves through the relay provider.
     public static func isRelayModel(_ providerId: String) -> Bool {
-        providerId == "ccm-relay"
+        providerId == "relay"
     }
 
     private static func base64URLDecode(_ s: String) -> Data? {

@@ -150,7 +150,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
     @ObservedObject private var coordinator: BaseCoordinator
     private let reconnectAction: (() -> Void)?
     private let extraContent: () -> ExtraContent
-    @State private var showingAPIKeySheet = false
 
     public init(
         coordinator: BaseCoordinator,
@@ -218,41 +217,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
                 coordinator.saveRelaySettings()
                 (reconnectAction ?? coordinator.reconnect)()
             }
-        }
-
-        Section("Direct Provider (BYOK)") {
-            Toggle("Use Direct Provider", isOn: useDirectProviderBinding)
-
-            if coordinator.useDirectProvider {
-                ForEach(CredentialStore.Provider.allCases.filter({ $0 != .copilot && $0 != .custom }), id: \.rawValue) { provider in
-                    HStack {
-                        Text(provider.rawValue.capitalized)
-                            .frame(width: 80, alignment: .leading)
-                        if coordinator.credentialStore.getAPIKey(for: provider) != nil {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                            Spacer()
-                            Button("Remove", role: .destructive) {
-                                try? coordinator.credentialStore.removeAPIKey(for: provider)
-                            }
-                            .font(.caption)
-                        } else {
-                            Text("Not configured")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                    }
-                }
-
-                Button("Add API Key") {
-                    showingAPIKeySheet = true
-                }
-            }
-        }
-        .sheet(isPresented: $showingAPIKeySheet) {
-            APIKeyEntrySheet(coordinator: coordinator, isPresented: $showingAPIKeySheet)
         }
         #endif
     }
@@ -388,68 +352,12 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
             }
         )
     }
-
-    private var useDirectProviderBinding: Binding<Bool> {
-        Binding(
-            get: { coordinator.useDirectProvider },
-            set: { newValue in
-                coordinator.useDirectProvider = newValue
-                coordinator.saveSharedSettings()
-            }
-        )
-    }
 }
 
 public extension SharedDeveloperSettingsSection where ExtraContent == EmptyView {
     init(coordinator: BaseCoordinator, reconnectAction: (() -> Void)? = nil) {
         self.init(coordinator: coordinator, reconnectAction: reconnectAction) {
             EmptyView()
-        }
-    }
-}
-
-// MARK: - API Key Entry Sheet
-
-private struct APIKeyEntrySheet: View {
-    @ObservedObject var coordinator: BaseCoordinator
-    @Binding var isPresented: Bool
-    @State private var selectedProvider: CredentialStore.Provider = .deepseek
-    @State private var apiKey = ""
-
-    private let providers: [CredentialStore.Provider] = [.openai, .anthropic, .google, .xai, .deepseek]
-
-    var body: some View {
-        NavigationView {
-            Form {
-                Picker("Provider", selection: $selectedProvider) {
-                    ForEach(providers, id: \.rawValue) { provider in
-                        Text(provider.rawValue.capitalized).tag(provider)
-                    }
-                }
-
-                SecureField("API Key", text: $apiKey)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            }
-            .navigationTitle("Add API Key")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { isPresented = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            try? coordinator.credentialStore.setAPIKey(trimmed, for: selectedProvider)
-                        }
-                        isPresented = false
-                    }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            #endif
         }
     }
 }

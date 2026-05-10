@@ -3,21 +3,22 @@ import Foundation
 // MARK: - RelayProviderAdapter
 //
 // Thin convenience wrapper over OpenAIAdapter pre-configured to talk to the
-// CCM-style LLM relay (or any deployment that exposes the same shape):
+// LLM relay (or any deployment that exposes the same shape):
 //
 //     POST {baseURL}/chat/completions    (OpenAI-compatible)
 //
-// The relay multiplexes upstream providers (DeepSeek, Anthropic via OpenAI
-// chat-completions shim, Qwen/DashScope, etc.) behind a single bearer-token
-// authenticated endpoint, and is the path co-harness/ccm-harness already use
-// for production billing.
+// The relay multiplexes upstream providers (DeepSeek today; more later)
+// behind a single bearer-token authenticated endpoint and is the path
+// co-harness/ccm-harness already use for production billing.
 //
 // Auth:
-//   - bearer token is supplied via `ProviderRequestConfig.apiKey` per call
-//   - clients should store it in CredentialStore under provider id "ccm-relay"
+//   - bearer token is supplied via `ProviderRequestConfig.apiKey` per call;
+//     when the platform-default relay endpoint is used, no key is required
+//     and the relay debits the user's platform credit
+//   - clients should store it in CredentialStore under provider id "relay"
 //
-// Default base URL points at the CCM relay deployment; pass a different value
-// to target a self-hosted relay.
+// Default base URL points at the platform relay deployment; pass a different
+// value to target a self-hosted relay.
 
 public final class RelayProviderAdapter: ProviderAdapter, @unchecked Sendable {
     private let inner: OpenAIAdapter
@@ -26,8 +27,8 @@ public final class RelayProviderAdapter: ProviderAdapter, @unchecked Sendable {
     public var displayName: String { inner.displayName }
 
     public init(
-        providerId: String = "ccm-relay",
-        displayName: String = "CCM Relay",
+        providerId: String = "relay",
+        displayName: String = "Relay",
         defaultBaseURL: String = "https://relay.ai.qili2.com/llm/v1",
         usageCalculator: UsageCalculator? = nil
     ) {

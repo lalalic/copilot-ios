@@ -110,15 +110,15 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
             defaultBaseURL: "https://api.x.ai/v1",
             usageCalculator: usageCalculator
         )
-        // CCM relay (multiplexed OpenAI-compatible endpoint backed by
-        // DeepSeek/Anthropic/Qwen behind a single bearer token). See design
-        // doc `docs/direct-agent-runtime-design.md` Phase 2.
-        let ccmRelay = RelayProviderAdapter(usageCalculator: usageCalculator)
+        // Platform relay (zero-config OpenAI-compatible endpoint backed by
+        // DeepSeek behind a single bearer token; billed via platform credit).
+        // See design doc `docs/direct-agent-runtime-design.md` Phase 2.
+        let relay = RelayProviderAdapter(usageCalculator: usageCalculator)
         adapters["openai"] = openai
         adapters["anthropic"] = anthropic
         adapters["deepseek"] = deepseek
         adapters["xai"] = xai
-        adapters[ccmRelay.providerId] = ccmRelay
+        adapters[relay.providerId] = relay
     }
 
     /// Register a custom provider adapter.

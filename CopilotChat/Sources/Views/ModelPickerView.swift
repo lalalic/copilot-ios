@@ -68,20 +68,13 @@ public enum ModelCatalog {
         ModelInfo(id: "o3", name: "o3", family: "OpenAI", tier: .reasoning,
                   description: "Most powerful reasoning. Deep analysis."),
 
-        // CCM Relay (multiplexed via relay.ai.qili2.com — billed through the
-        // platform credit account instead of a per-provider API key).
-        ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", family: "ccm-relay", tier: .fast,
-                  description: "Routed via CCM relay. Fast, cheap."),
-        ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", family: "ccm-relay", tier: .balanced,
-                  description: "Routed via CCM relay. Capable & balanced."),
-        ModelInfo(id: "relay-gpt-4.1", name: "GPT-4.1 (Relay)", family: "ccm-relay", tier: .balanced,
-                  description: "Routed via CCM relay. Strong all-around."),
-        ModelInfo(id: "relay-claude-sonnet-4", name: "Claude Sonnet 4 (Relay)", family: "ccm-relay", tier: .powerful,
-                  description: "Routed via CCM relay. Anthropic flagship."),
-        ModelInfo(id: "relay-claude-sonnet-4.5", name: "Claude Sonnet 4.5 (Relay)", family: "ccm-relay", tier: .powerful,
-                  description: "Routed via CCM relay. Latest Sonnet."),
-        ModelInfo(id: "relay-claude-sonnet-4.6", name: "Claude Sonnet 4.6 (Relay)", family: "ccm-relay", tier: .powerful,
-                  description: "Routed via CCM relay. Latest Sonnet."),
+        // Relay (zero-config OpenAI-compatible endpoint at relay.ai.qili2.com,
+        // billed through the platform credit account instead of a per-provider
+        // API key). Currently only DeepSeek is exposed.
+        ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", family: "relay", tier: .fast,
+                  description: "Routed via Relay. Fast, cheap."),
+        ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", family: "relay", tier: .balanced,
+                  description: "Routed via Relay. Capable & balanced."),
     ]
     
     /// Find a model by ID.
@@ -113,6 +106,11 @@ public struct ModelPickerView: View {
     var configuredProviders: Set<String>?
     var onModelChanged: ((String) -> Void)?
 
+    /// When set, the picker uses these explicit groups (one section per
+    /// provider) instead of grouping `models` by tier. Each tuple's `models`
+    /// is rendered in order; outer order wins for sections.
+    var providerGroups: [(name: String, models: [ModelInfo])]?
+
     public init(selectedModelId: Binding<String>,
                 models: [ModelInfo] = ModelCatalog.allModels,
                 configuredProviders: Set<String>? = nil,
@@ -121,6 +119,19 @@ public struct ModelPickerView: View {
         self.models = models
         self.configuredProviders = configuredProviders
         self.onModelChanged = onModelChanged
+        self.providerGroups = nil
+    }
+
+    /// Provider-grouped variant — used by Neox to render only the user's
+    /// enabled models, sectioned by provider.
+    public init(selectedModelId: Binding<String>,
+                providerGroups: [(name: String, models: [ModelInfo])],
+                onModelChanged: ((String) -> Void)? = nil) {
+        self._selectedModelId = selectedModelId
+        self.models = providerGroups.flatMap(\.models)
+        self.configuredProviders = nil
+        self.onModelChanged = onModelChanged
+        self.providerGroups = providerGroups
     }
 
     private var byTier: [(tier: ModelTier, models: [ModelInfo])] {
@@ -137,41 +148,55 @@ public struct ModelPickerView: View {
 
     public var body: some View {
         List {
-            ForEach(byTier, id: \.tier) { group in
-                Section(group.tier.rawValue) {
-                    ForEach(group.models) { model in
-                        let available = isAvailable(model)
-                        ModelRowView(
-                            model: model,
-                            isSelected: model.id == selectedModelId,
-                            isDisabled: !available
-                        ) {
-                            guard available else { return }
-                            selectedModelId = model.id
-                            onModelChanged?(model.id)
+            if let groups = providerGroups {
+                if groups.isEmpty {
+                    Section {
+                        Text("No models enabled. Open Settings → Providers and enable at least one model.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(groups, id: \.name) { group in
+                        Section(group.name) {
+                            ForEach(group.models) { model in
+                                ModelRowView(
+                                    model: model,
+                                    isSelected: model.id == selectedModelId,
+                                    isDisabled: false
+                                ) {
+                                    selectedModelId = model.id
+                                    onModelChanged?(model.id)
+                                }
+                            }
                         }
                     }
                 }
-            }
-
-            if configuredProviders != nil {
-                Section {
-                    HStack {
-                        Spacer()
-                        Text("Bring your own API key")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+            } else {
+                ForEach(byTier, id: \.tier) { group in
+                    Section(group.tier.rawValue) {
+                        ForEach(group.models) { model in
+                            let available = isAvailable(model)
+                            ModelRowView(
+                                model: model,
+                                isSelected: model.id == selectedModelId,
+                                isDisabled: !available
+                            ) {
+                                guard available else { return }
+                                selectedModelId = model.id
+                                onModelChanged?(model.id)
+                            }
+                        }
                     }
                 }
-            } else {
-                Section {
-                    HStack {
-                        Spacer()
-                        Text("")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+
+                if configuredProviders != nil {
+                    Section {
+                        HStack {
+                            Spacer()
+                            Text("Bring your own API key")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
                     }
                 }
             }
