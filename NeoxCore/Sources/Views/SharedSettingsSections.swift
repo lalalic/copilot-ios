@@ -164,35 +164,22 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
     public var body: some View {
         #if DEBUG
         Section("Developer") {
-            Toggle("Use local relay", isOn: useLocalRelayBinding)
+            TextField("Relay Host", text: relayHostBinding)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
 
-            if coordinator.useLocalRelay {
-                TextField("http://10.0.0.111:8765", text: localRelayURLBinding)
-                    .textContentType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            } else {
-                TextField("Relay Host", text: relayHostBinding)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-
-                HStack {
-                    Text("Relay Port")
-                    Spacer()
-                    TextField("443", value: relayPortBinding, format: .number)
-                        .multilineTextAlignment(.trailing)
-                        .keyboardType(.numberPad)
-                        .frame(width: 100)
-                }
+            HStack {
+                Text("Relay Port")
+                Spacer()
+                TextField("443", value: relayPortBinding, format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .keyboardType(.numberPad)
+                    .frame(width: 100)
             }
 
             TextField("Model", text: selectedModelBinding)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-
-            Toggle("Text Input", isOn: enableTextInputBinding)
-            Toggle("Speech Input", isOn: enableSpeechInputBinding)
-            Toggle("Attachment Input", isOn: enableAttachmentInputBinding)
 
             Toggle("Show Usage in Chat", isOn: showUsageInChatBinding)
             Toggle("Show Progress in Chat", isOn: showProgressInChatBinding)
@@ -221,28 +208,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
         #endif
     }
 
-    private var useLocalRelayBinding: Binding<Bool> {
-        Binding(
-            get: { coordinator.useLocalRelay },
-            set: { newValue in
-                coordinator.useLocalRelay = newValue
-                coordinator.applyRelaySelection()
-                coordinator.saveRelaySettings()
-            }
-        )
-    }
-
-    private var localRelayURLBinding: Binding<String> {
-        Binding(
-            get: { coordinator.localRelayURL },
-            set: { newValue in
-                coordinator.localRelayURL = newValue
-                coordinator.applyRelaySelection()
-                coordinator.saveRelaySettings()
-            }
-        )
-    }
-
     private var relayHostBinding: Binding<String> {
         Binding(
             get: { coordinator.relayHost },
@@ -268,36 +233,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
             get: { coordinator.selectedModel },
             set: { newValue in
                 coordinator.selectedModel = newValue
-                coordinator.saveSharedSettings()
-            }
-        )
-    }
-
-    private var enableTextInputBinding: Binding<Bool> {
-        Binding(
-            get: { coordinator.enableTextInput },
-            set: { newValue in
-                coordinator.enableTextInput = newValue
-                coordinator.saveSharedSettings()
-            }
-        )
-    }
-
-    private var enableSpeechInputBinding: Binding<Bool> {
-        Binding(
-            get: { coordinator.enableSpeechInput },
-            set: { newValue in
-                coordinator.enableSpeechInput = newValue
-                coordinator.saveSharedSettings()
-            }
-        )
-    }
-
-    private var enableAttachmentInputBinding: Binding<Bool> {
-        Binding(
-            get: { coordinator.enableAttachmentInput },
-            set: { newValue in
-                coordinator.enableAttachmentInput = newValue
                 coordinator.saveSharedSettings()
             }
         )

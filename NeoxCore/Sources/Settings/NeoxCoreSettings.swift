@@ -5,8 +5,6 @@ import Foundation
 public enum NeoxCoreSettings {
     // MARK: - UserDefaults Keys
 
-    public static let useLocalRelayKey = "useLocalRelay"
-    public static let localRelayURLKey = "localRelayURL"
     public static let relayHostKey = "relayHost"
     public static let relayPortKey = "relayPort"
     public static let useDevServerKey = "useDevServer"
@@ -29,7 +27,6 @@ public enum NeoxCoreSettings {
 
     public static let defaultRelayHost = "relay.ai.qili2.com"
     public static let defaultRelayPort: UInt16 = 443
-    public static let defaultLocalRelayURL = "http://10.0.0.111:8765"
     public static let defaultModel = "deepseek-v4-flash"
     public static let defaultDevServerPort = 9223
     public static let defaultProvider = "deepseek"
@@ -41,20 +38,9 @@ public enum NeoxCoreSettings {
 
     // MARK: - Helpers
 
-    /// Parse a relay URL string into host/port. Returns nil if unparseable.
-    public static func parseRelayURL(_ raw: String) -> (host: String, port: UInt16)? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let withScheme = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
-        guard let url = URL(string: withScheme), let host = url.host else { return nil }
-        let port = UInt16(url.port ?? 8765)
-        return (host, port)
-    }
-
     /// Save relay settings to UserDefaults.
-    public static func saveRelaySettings(useLocalRelay: Bool, localRelayURL: String, relayHost: String, relayPort: UInt16) {
+    public static func saveRelaySettings(relayHost: String, relayPort: UInt16) {
         let defaults = UserDefaults.standard
-        defaults.set(useLocalRelay, forKey: useLocalRelayKey)
-        defaults.set(localRelayURL, forKey: localRelayURLKey)
         defaults.set(relayHost, forKey: relayHostKey)
         defaults.set(Int(relayPort), forKey: relayPortKey)
     }

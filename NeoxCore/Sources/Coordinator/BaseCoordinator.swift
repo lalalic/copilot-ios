@@ -26,8 +26,6 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Relay Settings
 
-    @Published public var useLocalRelay: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useLocalRelayKey) == nil ? false : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useLocalRelayKey)
-    @Published public var localRelayURL: String = UserDefaults.standard.string(forKey: NeoxCoreSettings.localRelayURLKey) ?? NeoxCoreSettings.defaultLocalRelayURL
     @Published public var relayHost: String = UserDefaults.standard.string(forKey: NeoxCoreSettings.relayHostKey) ?? NeoxCoreSettings.defaultRelayHost
     @Published public var relayPort: UInt16 = UInt16(UserDefaults.standard.integer(forKey: NeoxCoreSettings.relayPortKey)) == 0 ? NeoxCoreSettings.defaultRelayPort : UInt16(UserDefaults.standard.integer(forKey: NeoxCoreSettings.relayPortKey))
 
@@ -249,7 +247,6 @@ open class BaseCoordinator: ObservableObject {
             clientID: UIDevice.current.identifierForVendor?.uuidString
         )
 
-        applyRelaySelection()
         registerDefaultTools()
         subAgentToolProvider.appId = appId
         syncStripePaymentLink()
@@ -305,13 +302,8 @@ open class BaseCoordinator: ObservableObject {
     public func loadAvailableModels() async {
         // Skip relay model loading when using direct provider
         guard !useDirectProvider else { return }
-        let base: String
-        if useLocalRelay, !localRelayURL.isEmpty {
-            base = localRelayURL
-        } else {
-            // Match WebSocketTransport default: "https://<relayHost>".
-            base = "https://\(relayHost)"
-        }
+        // Match WebSocketTransport default: "https://<relayHost>".
+        let base = "https://\(relayHost)"
         await availableModelsStore.load(appId: appId, relayBase: base)
         let ids = Set(availableModelsStore.models.map(\.id))
         if !ids.contains(selectedModel),
@@ -871,7 +863,6 @@ open class BaseCoordinator: ObservableObject {
     // MARK: - Reconnect
 
     open func reconnect() {
-        applyRelaySelection()
         saveRelaySettings()
         saveSharedSettings()
         syncStripePaymentLink()
@@ -974,26 +965,8 @@ open class BaseCoordinator: ObservableObject {
         }
     }
 
-    public func applyRelaySelection() {
-        if useLocalRelay {
-            if let parsed = NeoxCoreSettings.parseRelayURL(localRelayURL) {
-                relayHost = parsed.host
-                relayPort = parsed.port
-            } else {
-                relayHost = "10.0.0.111"
-                relayPort = 8765
-                localRelayURL = "http://10.0.0.111:8765"
-            }
-        } else {
-            relayHost = NeoxCoreSettings.defaultRelayHost
-            relayPort = NeoxCoreSettings.defaultRelayPort
-        }
-    }
-
     open func saveRelaySettings() {
         NeoxCoreSettings.saveRelaySettings(
-            useLocalRelay: useLocalRelay,
-            localRelayURL: localRelayURL,
             relayHost: relayHost,
             relayPort: relayPort
         )
@@ -1011,9 +984,5 @@ open class BaseCoordinator: ObservableObject {
         defaults.set(showProgressInChat, forKey: NeoxCoreSettings.showProgressInChatKey)
         defaults.set(showBuildInChat, forKey: NeoxCoreSettings.showBuildInChatKey)
         defaults.set(useDirectProvider, forKey: NeoxCoreSettings.useDirectProviderKey)
-    }
-
-    public func parseLocalRelayURL() -> (host: String, port: UInt16) {
-        NeoxCoreSettings.parseRelayURL(localRelayURL) ?? ("10.0.0.111", 8765)
     }
 }
