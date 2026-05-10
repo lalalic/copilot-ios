@@ -164,19 +164,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
     public var body: some View {
         #if DEBUG
         Section("Developer") {
-            TextField("Relay Host", text: relayHostBinding)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-
-            HStack {
-                Text("Relay Port")
-                Spacer()
-                TextField("443", value: relayPortBinding, format: .number)
-                    .multilineTextAlignment(.trailing)
-                    .keyboardType(.numberPad)
-                    .frame(width: 100)
-            }
-
             TextField("Model", text: selectedModelBinding)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
@@ -206,26 +193,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
             }
         }
         #endif
-    }
-
-    private var relayHostBinding: Binding<String> {
-        Binding(
-            get: { coordinator.relayHost },
-            set: { newValue in
-                coordinator.relayHost = newValue
-                coordinator.saveRelaySettings()
-            }
-        )
-    }
-
-    private var relayPortBinding: Binding<Int> {
-        Binding(
-            get: { Int(coordinator.relayPort) },
-            set: { newValue in
-                coordinator.relayPort = UInt16(max(0, min(newValue, Int(UInt16.max))))
-                coordinator.saveRelaySettings()
-            }
-        )
     }
 
     private var selectedModelBinding: Binding<String> {
