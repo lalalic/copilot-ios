@@ -28,8 +28,8 @@ import Foundation
 
 public enum Feedback {
 
-    public enum Kind: String { case bug, suggestion }
-    public enum Source: String { case user, agent, auto }
+    public enum Kind: String, Sendable { case bug, suggestion }
+    public enum Source: String, Sendable { case user, agent, auto }
 
     public struct Result {
         public let ok: Bool
@@ -158,7 +158,7 @@ public enum Feedback {
 
 // MARK: – Internal
 
-private final class SharedCrashState {
+private final class SharedCrashState: @unchecked Sendable {
     static let shared = SharedCrashState()
     private let lock = NSLock()
     private var recent: [String: Date] = [:]
