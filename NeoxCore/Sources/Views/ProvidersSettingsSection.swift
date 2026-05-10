@@ -29,6 +29,15 @@ public struct ProvidersSettingsSection: View {
                 } label: {
                     ProviderRow(provider: p, hasApiKey: hasApiKey(for: p))
                 }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if p.source != .builtin {
+                        Button(role: .destructive) {
+                            registry.delete(id: p.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
             }
 
             NavigationLink {
@@ -115,6 +124,13 @@ public struct ProviderEditView: View {
     @State private var fetching = false
     @State private var fetchError: String? = nil
     @State private var didAutoFetch = false
+    @State private var testing = false
+    @State private var testResult: TestResult? = nil
+
+    private enum TestResult: Equatable {
+        case success(modelCount: Int)
+        case failure(message: String)
+    }
 
     private let original: ProviderConfig
     private let isNew: Bool
@@ -188,6 +204,29 @@ public struct ProviderEditView: View {
 
                 if let err = fetchError {
                     Text(err).font(.caption).foregroundStyle(.red)
+                }
+
+                if draft.type != .relay {
+                    Button {
+                        Task { await testConnection() }
+                    } label: {
+                        HStack {
+                            if testing { ProgressView().scaleEffect(0.8) }
+                            Text(testing ? "Testing…" : "Test Connection")
+                        }
+                    }
+                    .disabled(testing || (draft.requiresApiKey && apiKey.isEmpty) || (draft.baseUrl ?? "").isEmpty)
+
+                    switch testResult {
+                    case .success(let n):
+                        Text("✓ Reached endpoint, \(n) model\(n == 1 ? "" : "s") available")
+                            .font(.caption).foregroundStyle(.green)
+                    case .failure(let msg):
+                        Text("✗ \(msg)")
+                            .font(.caption).foregroundStyle(.red)
+                    case .none:
+                        EmptyView()
+                    }
                 }
             }
 
@@ -311,6 +350,49 @@ public struct ProviderEditView: View {
             }
         } catch {
             fetchError = "Fetch failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Hit `{baseUrl}/models` with the current API key (if any) and report
+    /// success/failure without modifying the draft. Quick way for the user
+    /// to confirm the URL + key combination is valid before saving.
+    private func testConnection() async {
+        testResult = nil
+        testing = true
+        defer { testing = false }
+
+        guard let baseUrlStr = draft.baseUrl,
+              let url = URL(string: baseUrlStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .appending("/models")) else {
+            testResult = .failure(message: "Invalid base URL")
+            return
+        }
+        var req = URLRequest(url: url)
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKey.isEmpty {
+            req.addValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
+        }
+        req.timeoutInterval = 15
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else {
+                testResult = .failure(message: "No HTTP response")
+                return
+            }
+            if http.statusCode == 200 {
+                struct Env: Decodable { let data: [Item] }
+                struct Item: Decodable { let id: String }
+                if let env = try? JSONDecoder().decode(Env.self, from: data) {
+                    testResult = .success(modelCount: env.data.count)
+                } else {
+                    testResult = .success(modelCount: 0)
+                }
+            } else {
+                let body = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
+                testResult = .failure(message: "HTTP \(http.statusCode) \(body)")
+            }
+        } catch {
+            testResult = .failure(message: error.localizedDescription)
         }
     }
 }
