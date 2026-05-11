@@ -62,21 +62,31 @@ public struct SharedTopUpSettingsSection: View {
 public struct SharedAboutSettingsSection: View {
     @ObservedObject private var coordinator: BaseCoordinator
 
+    @AppStorage(NeoxCoreSettings.feedbackEndpointKey) private var feedbackEndpoint: String = NeoxCoreSettings.defaultFeedbackEndpoint
+    @State private var showFeedbackSheet = false
+
     public init(coordinator: BaseCoordinator) {
         self.coordinator = coordinator
     }
 
     public var body: some View {
         Section("About") {
+            if let url = URL(string: feedbackEndpoint), !feedbackEndpoint.isEmpty {
+                Button("Send Feedback") {
+                    showFeedbackSheet = true
+                }
+                .sheet(isPresented: $showFeedbackSheet) {
+                    FeedbackView(
+                        endpoint: url,
+                        app: coordinator.appRuntimeConfig.appId,
+                        appVersion: coordinator.appVersionString
+                    )
+                }
+            }
+
             ForEach(coordinator.aboutLinks, id: \.self) { link in
                 if let url = link.url {
-                    Link(destination: url) {
-                        if let systemImage = link.systemImage, !systemImage.isEmpty {
-                            Label(link.title, systemImage: systemImage)
-                        } else {
-                            Text(link.title)
-                        }
-                    }
+                    Link(link.title, destination: url)
                 }
             }
 
