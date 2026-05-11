@@ -148,26 +148,25 @@ public struct SharedFeedbackSettingsSection: View {
 
 public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
     @ObservedObject private var coordinator: BaseCoordinator
-    private let reconnectAction: (() -> Void)?
     private let extraContent: () -> ExtraContent
 
     public init(
         coordinator: BaseCoordinator,
-        reconnectAction: (() -> Void)? = nil,
         @ViewBuilder extraContent: @escaping () -> ExtraContent
     ) {
         self.coordinator = coordinator
-        self.reconnectAction = reconnectAction
         self.extraContent = extraContent
     }
 
     public var body: some View {
         #if DEBUG
-        Section("Developer") {
-            Toggle("Show Usage in Chat", isOn: showUsageInChatBinding)
-            Toggle("Show Progress in Chat", isOn: showProgressInChatBinding)
-            Toggle("Show Build in Chat", isOn: showBuildInChatBinding)
+        Section("Chat") {
+            Toggle("Show Usage", isOn: showUsageInChatBinding)
+            Toggle("Show Progress", isOn: showProgressInChatBinding)
+            Toggle("Show Build", isOn: showBuildInChatBinding)
+        }
 
+        Section("Developer") {
             Toggle("Use Dev Server", isOn: useDevServerBinding)
 
             HStack {
@@ -181,12 +180,6 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
             }
 
             extraContent()
-
-            Button("Reconnect") {
-                coordinator.saveSharedSettings()
-                coordinator.saveRelaySettings()
-                (reconnectAction ?? coordinator.reconnect)()
-            }
         }
         #endif
     }
@@ -243,8 +236,8 @@ public struct SharedDeveloperSettingsSection<ExtraContent: View>: View {
 }
 
 public extension SharedDeveloperSettingsSection where ExtraContent == EmptyView {
-    init(coordinator: BaseCoordinator, reconnectAction: (() -> Void)? = nil) {
-        self.init(coordinator: coordinator, reconnectAction: reconnectAction) {
+    init(coordinator: BaseCoordinator) {
+        self.init(coordinator: coordinator) {
             EmptyView()
         }
     }
