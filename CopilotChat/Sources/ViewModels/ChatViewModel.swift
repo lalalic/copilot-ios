@@ -107,7 +107,7 @@ public final class ChatViewModel: ObservableObject {
     private var runtimeSubscription: RuntimeSubscription?
     private var runtimeConfig: RuntimeSessionConfig?
     /// Continuation for ask_questions — resumed when user replies.
-    private var askUserContinuation: CheckedContinuation<String, Never>?
+    private var askQuestionsTextContinuation: CheckedContinuation<String, Never>?
     /// Continuation for ask_questions — resumed when user submits structured replies.
     private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
     @Published public var activeQuestions: [AskQuestionItem] = []
@@ -522,16 +522,16 @@ public final class ChatViewModel: ObservableObject {
 
         switch chatState {
         case .waitingForUser:
-            if let continuation = askUserContinuation {
+            if let continuation = askQuestionsTextContinuation {
                 // Local session path — resume the async continuation
                 continuation.resume(returning: promptText)
-                askUserContinuation = nil
+                askQuestionsTextContinuation = nil
             } else if let runtime {
                 // Remote runtime path (e.g. NeoDesktopRuntime) — POST answer via relay
                 Task {
                     try? await runtime.respondToUserInput(
-                        requestId: "ask_user",
-                        responses: ["ask_user": promptText]
+                        requestId: "ask_questions",
+                        responses: ["ask_questions": promptText]
                     )
                 }
             }
@@ -662,8 +662,8 @@ public final class ChatViewModel: ObservableObject {
             ])
             needsSend = false
         case .waitingForUser:
-            askUserContinuation?.resume(returning: trimmed)
-            askUserContinuation = nil
+            askQuestionsTextContinuation?.resume(returning: trimmed)
+            askQuestionsTextContinuation = nil
             chatState = .working
             needsSend = false
         default:
