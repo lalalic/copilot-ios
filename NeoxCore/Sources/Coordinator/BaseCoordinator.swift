@@ -346,7 +346,6 @@ open class BaseCoordinator: ObservableObject {
             RegisteredTool(name: "create_project", description: "Scaffold a new project from .templates/projects/"),
             RegisteredTool(name: "run_in_terminal", description: "Execute shell commands on device (ls, grep, curl, etc.)"),
             RegisteredTool(name: "run_script", description: "Execute JavaScript code on device (loops, JSON, data processing)"),
-            RegisteredTool(name: "start_coding_task", description: "Start coding task: create GitHub repo, issue, assign coding agent"),
             RegisteredTool(name: "send_response", description: "Send a response message to the user"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Open external payment checkout for credits when requested"),

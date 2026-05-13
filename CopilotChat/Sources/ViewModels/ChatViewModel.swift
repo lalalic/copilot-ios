@@ -111,8 +111,6 @@ public final class ChatViewModel: ObservableObject {
     /// Continuation for ask_questions — resumed when user submits structured replies.
     private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
     @Published public var activeQuestions: [AskQuestionItem] = []
-    /// Handles create_project_request delegation (lazy-initialized on first use).
-    private var projectTaskHandler: ProjectTaskHandler?
     
     /// Workspace directory on device for reading templates.
     public let workspaceURL: URL?
@@ -167,50 +165,12 @@ public final class ChatViewModel: ObservableObject {
         // No longer needed — push notifications handled separately
     }
 
-    /// Archive a project's GitHub repo.
-    public func archiveRepo(_ repo: String) async {
-        nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
-        await handler.archiveRepo(repo)
-    }
-
-    private func getOrCreateProjectTaskHandler() -> ProjectTaskHandler {
-        if let handler = projectTaskHandler { return handler }
-
-        let proxyURL = URL(string: "https://relay.ai.qili2.com")!
-
-        let handler = ProjectTaskHandler(
-            proxyBaseURL: proxyURL,
-            workspaceURL: workspaceURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
-            sendNotification: { _, _ in }
-        )
-        projectTaskHandler = handler
-        return handler
-    }
-
     /// Add a push notification as a system message in the chat.
-    /// Coding agent notifications (type: "coding_agent") are handled by CodingAgentNotificationHandler.
     @MainActor
     public func addNotification(title: String, body: String, data: [String: Any] = [:]) {
         // Honor literal \n in body text
         let displayBody = body.replacingOccurrences(of: "\\n", with: "\n")
 
-        // Try coding agent handler first
-        if let notification = CodingAgentNotificationHandler.parse(title: title, body: displayBody, userInfo: data) {
-            CodingAgentNotificationHandler.apply(
-                notification,
-                addMessage: { msgTitle, msgBody, repo in
-                    let text = "**\(msgTitle)**\n\(msgBody)"
-                    let blocks: [ChatMessage.ContentBlock] = [.text(text)]
-                    let msg = ChatMessage(role: .system, content: blocks, project: repo)
-                    self.messages.append(msg)
-                    self.sessionLogger?.log(role: "system", text: text, project: repo)
-                },
-                usageTracker: usageTracker
-            )
-            return
-        }
-        
-        // Non-coding-agent notifications: build, testflight, etc.
         var blocks: [ChatMessage.ContentBlock] = []
         let text = "**\(title)**\n\(displayBody)"
         blocks.append(.text(text))
@@ -1461,51 +1421,6 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Start Coding Task Tool
-
-    private func makeStartCodingTaskTool() -> ToolDefinition {
-        ToolDefinition(
-            name: "start_coding_task",
-            description: "Start a coding task for a project. Creates a GitHub repo, creates an issue with the task spec, assigns the coding agent, and activates the CI/CD pipeline. Returns the repo URL and issue URL.",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "appName": .object([
-                        "type": .string("string"),
-                        "description": .string("Display name for the app (e.g., \"Weather App\")")
-                    ]),
-                    "taskDescription": .object([
-                        "type": .string("string"),
-                        "description": .string("Detailed description of what the app should do. Will be used as the issue body for the coding agent.")
-                    ]),
-                    "model": .object([
-                        "type": .string("string"),
-                        "description": .string("AI model for the coding agent. Supported: \"claude-sonnet-4.5\", \"claude-opus-4.5\", \"claude-opus-4.6\", \"gpt-5.2-codex\", or \"\" for Auto.")
-                    ])
-                ]),
-                "required": .array([.string("appName"), .string("taskDescription")])
-            ]),
-            skipPermission: true,
-            handler: { [weak self] args in
-                guard let self else { return "Error: view model deallocated" }
-                return await self.handleStartCodingTask(args)
-            }
-        )
-    }
-
-    private func handleStartCodingTask(_ args: JSONValue) async -> String {
-        guard case .object(let dict) = args,
-              case .string(let appName) = dict["appName"],
-              case .string(let taskDescription) = dict["taskDescription"] else {
-            return "Error: 'appName' and 'taskDescription' are required"
-        }
-        let model: String
-        if case .string(let m) = dict["model"] { model = m } else { model = "" }
-        let userId = "default"
-
-        nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
-        return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model, userId: userId)
-    }
 }
 
 // MARK: - ChatMessage Helpers
