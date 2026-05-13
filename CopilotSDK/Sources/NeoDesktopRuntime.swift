@@ -220,11 +220,19 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
     fileprivate func handleSSEEvent(event: String, data: String) {
         switch event {
         case "delta":
+            // If we were waiting for user input but got a delta, the question was answered elsewhere
+            if _state == .waitingForUser {
+                updateState(.working)
+            }
             // Raw text delta from assistant (data is JSON-encoded string)
             let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? String) ?? data
             emit(.assistantTextDelta(.init(text: text)))
 
         case "thinking":
+            // If we were waiting for user input but got thinking, the question was answered elsewhere
+            if _state == .waitingForUser {
+                updateState(.working)
+            }
             // Reasoning delta (data is JSON-encoded string)
             let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? String) ?? data
             emit(.reasoningDelta(.init(text: text)))
