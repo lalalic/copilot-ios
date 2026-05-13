@@ -738,7 +738,7 @@ public final class ChatViewModel: ObservableObject {
         messages.append(ChatMessage(role: .user, content: blocks, project: projectScope))
 
         chatState = .working
-        let attachment = RuntimeAttachment(data: imageData, mimeType: mimeType)
+        let attachment = RuntimeAttachment(name: "image.\(mimeType.hasSuffix("png") ? "png" : "jpg")", data: imageData, mimeType: mimeType)
         do {
             try await runtime.send(prompt: text, attachments: [attachment])
         } catch {

@@ -147,7 +147,7 @@ public class PlanExecutor: @unchecked Sendable {
             let provider = modelRegistry.model(id: model)?.provider
 
             let config = RuntimeSessionConfig(
-                sessionName: "plan-\(plan.id.uuidString.prefix(8))",
+                sessionName: "plan-\(plan.id.prefix(8))",
                 model: model,
                 provider: provider,
                 tools: planTools.isEmpty ? nil : planTools
@@ -155,18 +155,26 @@ public class PlanExecutor: @unchecked Sendable {
             try await runtime.createSession(config: config)
             
             // 3. Send plan prompt and collect response via events
-            var resultText = ""
+            final class ResultBox: @unchecked Sendable {
+                var text = ""
+                let lock = NSLock()
+                func append(_ s: String) { lock.lock(); text += s; lock.unlock() }
+                func set(_ s: String) { lock.lock(); text = s; lock.unlock() }
+                func get() -> String { lock.lock(); defer { lock.unlock() }; return text }
+            }
+            let box = ResultBox()
             let sub = runtime.subscribe { event in
                 if case .assistantTextDelta(let delta) = event {
-                    resultText += delta.text
+                    box.append(delta.text)
                 } else if case .assistantMessageComplete(let complete) = event {
-                    resultText = complete.content
+                    box.set(complete.content)
                 }
             }
 
             try await runtime.send(prompt: plan.prompt, attachments: nil)
             runtime.unsubscribe(sub)
 
+            let resultText = box.get()
             let finalResult = resultText.isEmpty ? "No output" : resultText
             
             // 4. Record result

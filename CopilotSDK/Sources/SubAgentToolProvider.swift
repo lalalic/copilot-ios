@@ -294,18 +294,26 @@ public final class SubAgentToolProvider: @unchecked Sendable {
             logger.info("[SubAgent] session created, sending prompt...")
 
             // Collect response via event subscription
-            var resultText = ""
+            final class ResultBox: @unchecked Sendable {
+                var text = ""
+                let lock = NSLock()
+                func append(_ s: String) { lock.lock(); text += s; lock.unlock() }
+                func set(_ s: String) { lock.lock(); text = s; lock.unlock() }
+                func get() -> String { lock.lock(); defer { lock.unlock() }; return text }
+            }
+            let box = ResultBox()
             let sub = runtime.subscribe { event in
                 if case .assistantTextDelta(let delta) = event {
-                    resultText += delta.text
+                    box.append(delta.text)
                 } else if case .assistantMessageComplete(let complete) = event {
-                    resultText = complete.content
+                    box.set(complete.content)
                 }
             }
 
             try await runtime.send(prompt: task, attachments: nil)
 
             runtime.unsubscribe(sub)
+            let resultText = box.get()
             let result = resultText.isEmpty ? "Sub-agent completed with no output" : resultText
 
             logger.info("[SubAgent] result: \(result.prefix(200))")
