@@ -103,6 +103,18 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
         updateState(.idle)
     }
 
+    /// Set the askChannel preference on the Neo desktop.
+    /// - Parameter channel: "neox", "auto", "ui", "discord", "wechat"
+    public func setAskChannel(_ channel: String) async throws {
+        let _ = try await proxyPOST("/api/neo/proxy/api/settings", body: ["askChannel": channel])
+    }
+
+    /// Get the current askChannel preference from the Neo desktop.
+    public func getAskChannel() async throws -> String {
+        let settings = try await proxyGET("/api/neo/proxy/api/settings")
+        return settings["askChannel"] as? String ?? "auto"
+    }
+
     public func destroy() async {
         sseTask?.cancel()
         sseTask = nil
@@ -129,10 +141,12 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
     // MARK: - User Input
 
     public func respondToUserInput(requestId: String, responses: [String: String]) async throws {
-        let body: [String: Any] = [
-            "requestId": requestId,
-            "responses": responses
-        ]
+        // Neo's /api/chat/answer-questions expects { answers: { header: { selected: [], freeText: "..." } } }
+        var answers: [String: Any] = [:]
+        for (key, value) in responses {
+            answers[key] = ["selected": [String](), "freeText": value]
+        }
+        let body: [String: Any] = ["answers": answers]
         let _ = try await proxyPOST("/api/neo/proxy/api/chat/answer-questions", body: body)
     }
 

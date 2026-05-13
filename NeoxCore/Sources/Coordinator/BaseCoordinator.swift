@@ -56,6 +56,12 @@ open class BaseCoordinator: ObservableObject {
     /// Whether to use the Neo desktop as the chat backend (vs direct provider).
     @Published public var useNeoDesktop: Bool = UserDefaults.standard.bool(forKey: "neox.neoDesktop.enabled")
 
+    /// Whether this phone is taking questions from Neo's agent (askChannel = "neox").
+    @Published public var neoDesktopTakeQuestions: Bool = false
+
+    /// Reference to the current NeoDesktopRuntime, if active.
+    public private(set) var neoDesktopRuntime: NeoDesktopRuntime?
+
     // MARK: - Dev Server Settings
 
     @Published public var useDevServer: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useDevServerKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useDevServerKey)
@@ -765,6 +771,7 @@ open class BaseCoordinator: ObservableObject {
             relayBaseURL: "https://relay.ai.qili2.com",
             pairingSecret: pairingSecret
         )
+        self.neoDesktopRuntime = runtime
 
         let config = RuntimeSessionConfig(
             sessionName: "neo-desktop",

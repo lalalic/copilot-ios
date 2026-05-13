@@ -882,9 +882,19 @@ public final class ChatViewModel: ObservableObject {
 
         switch chatState {
         case .waitingForUser:
-            // Resume ask_questions continuation
-            askUserContinuation?.resume(returning: promptText)
-            askUserContinuation = nil
+            if let continuation = askUserContinuation {
+                // Local session path — resume the async continuation
+                continuation.resume(returning: promptText)
+                askUserContinuation = nil
+            } else if let runtime {
+                // Remote runtime path (e.g. NeoDesktopRuntime) — POST answer via relay
+                Task {
+                    try? await runtime.respondToUserInput(
+                        requestId: "ask_user",
+                        responses: ["ask_user": promptText]
+                    )
+                }
+            }
             chatState = .working
 
         case .waitingForQuestions(let questions):
