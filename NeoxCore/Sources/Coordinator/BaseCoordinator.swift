@@ -44,6 +44,18 @@ open class BaseCoordinator: ObservableObject {
     /// Single source of truth for which models are visible in the picker.
     public let providerRegistry = ProviderRegistry()
 
+    // MARK: - Neo Desktop (Remote) Settings
+
+    /// Pairing secret for connecting to a Neo desktop instance via relay.
+    /// When set, chat messages are proxied through the relay to the paired Neo.
+    @Published public var neoDesktopPairingSecret: String? = UserDefaults.standard.string(forKey: "neox.neoDesktop.pairingSecret")
+
+    /// Name of the paired Neo desktop instance.
+    @Published public var neoDesktopName: String? = UserDefaults.standard.string(forKey: "neox.neoDesktop.name")
+
+    /// Whether to use the Neo desktop as the chat backend (vs direct provider).
+    @Published public var useNeoDesktop: Bool = UserDefaults.standard.bool(forKey: "neox.neoDesktop.enabled")
+
     // MARK: - Dev Server Settings
 
     @Published public var useDevServer: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useDevServerKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useDevServerKey)
@@ -622,6 +634,11 @@ open class BaseCoordinator: ObservableObject {
     /// When `useDirectProvider` is true, creates a runtime-backed view model.
     /// Subclasses can override `configureChat(vm:)` to do additional wiring (e.g., Discord).
     public func createChatViewModel() -> ChatViewModel {
+        // Neo Desktop remote mode — proxy through relay to a paired desktop
+        if useNeoDesktop, let secret = neoDesktopPairingSecret, !secret.isEmpty {
+            return createNeoDesktopChatViewModel(pairingSecret: secret)
+        }
+
         if useDirectProvider {
             return createDirectProviderChatViewModel()
         }
@@ -739,6 +756,42 @@ open class BaseCoordinator: ObservableObject {
         // Nothing configured — return the relay default so error messages are
         // meaningful instead of crashing.
         return ("relay", "relay-deepseek-v4-flash")
+    }
+
+    /// Create a ChatViewModel backed by NeoDesktopRuntime.
+    /// Proxies all requests through the relay to a paired Neo desktop.
+    private func createNeoDesktopChatViewModel(pairingSecret: String) -> ChatViewModel {
+        let runtime = NeoDesktopRuntime(
+            relayBaseURL: "https://relay.ai.qili2.com",
+            pairingSecret: pairingSecret
+        )
+
+        let config = RuntimeSessionConfig(
+            sessionName: "neo-desktop",
+            streaming: true
+        )
+
+        let vm = ChatViewModel(
+            runtime: runtime,
+            runtimeConfig: config,
+            inputModes: chatInputModes,
+            usageTracker: usageTracker,
+            workspaceURL: workspaceURL,
+            notificationFilter: { [weak self] type in
+                guard let self else { return true }
+                switch type {
+                case "usage": return self.showUsageInChat
+                case "agent_progress": return self.showProgressInChat
+                case "build_complete", "build_failed": return self.showBuildInChat
+                default: return true
+                }
+            }
+        )
+
+        self.chatViewModel = vm
+        configureChat(vm: vm)
+        Task { await vm.connect() }
+        return vm
     }
 
     /// Create a ChatViewModel backed by DirectProviderRuntime.
@@ -963,5 +1016,73 @@ open class BaseCoordinator: ObservableObject {
         defaults.set(showProgressInChat, forKey: NeoxCoreSettings.showProgressInChatKey)
         defaults.set(showBuildInChat, forKey: NeoxCoreSettings.showBuildInChatKey)
         defaults.set(useDirectProvider, forKey: NeoxCoreSettings.useDirectProviderKey)
+        // Neo Desktop
+        defaults.set(useNeoDesktop, forKey: "neox.neoDesktop.enabled")
+        if let secret = neoDesktopPairingSecret {
+            defaults.set(secret, forKey: "neox.neoDesktop.pairingSecret")
+        }
+        if let name = neoDesktopName {
+            defaults.set(name, forKey: "neox.neoDesktop.name")
+        }
+    }
+
+    // MARK: - Neo Desktop Pairing
+
+    /// Pair with a Neo desktop instance by entering its 6-digit code.
+    /// Calls the relay's /api/pair/confirm endpoint.
+    /// Returns the desktop name on success, throws on failure.
+    @discardableResult
+    public func pairWithNeoDesktop(code: String) async throws -> String {
+        let url = URL(string: "https://relay.ai.qili2.com/api/pair/confirm")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "code": code,
+            "phoneId": "\(appId)-\(neoxUserId)"
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NeoDesktopError.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let msg = json?["error"] as? String ?? "Pairing failed (HTTP \(http.statusCode))"
+            throw NeoDesktopError.serverError(msg)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let secret = json["secret"] as? String else {
+            throw NeoDesktopError.invalidResponse
+        }
+
+        let desktopName = json["desktopName"] as? String ?? "Neo Desktop"
+
+        // Save pairing
+        neoDesktopPairingSecret = secret
+        neoDesktopName = desktopName
+        useNeoDesktop = true
+
+        let defaults = UserDefaults.standard
+        defaults.set(secret, forKey: "neox.neoDesktop.pairingSecret")
+        defaults.set(desktopName, forKey: "neox.neoDesktop.name")
+        defaults.set(true, forKey: "neox.neoDesktop.enabled")
+
+        return desktopName
+    }
+
+    /// Unpair from the Neo desktop and revert to direct provider mode.
+    public func unpairNeoDesktop() {
+        neoDesktopPairingSecret = nil
+        neoDesktopName = nil
+        useNeoDesktop = false
+
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "neox.neoDesktop.pairingSecret")
+        defaults.removeObject(forKey: "neox.neoDesktop.name")
+        defaults.set(false, forKey: "neox.neoDesktop.enabled")
     }
 }
