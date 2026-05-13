@@ -11,11 +11,10 @@ import MediaKit
 /// Base coordinator providing generic app infrastructure.
 /// Apps subclass this to add their own channels, project types, and UI.
 ///
-/// Provides: relay connection, session management, tool registration,
+/// Provides: session management, tool registration,
 /// settings persistence, project sessions, workspace bootstrapping.
 @MainActor
 open class BaseCoordinator: ObservableObject {
-    public let connectionManager = ConnectionManager()
     @Published public var currentSession: String? = nil
     public var isConnected: Bool {
         guard let state = chatViewModel?.chatState else { return false }
@@ -31,7 +30,7 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Direct Provider Settings
 
-    /// Direct provider is always enabled — relay mode is deprecated.
+    /// Direct provider is always enabled — relay session mode is removed.
     @Published public var useDirectProvider: Bool = true
 
     /// Shared credential store for BYOK API keys.
@@ -156,8 +155,6 @@ open class BaseCoordinator: ObservableObject {
 
     public let agentProfile: AgentRuntimeProfile?
     private let profileLoader: AgentProfileLoader
-    private var agent: CopilotAgent?
-    private var agentTask: Task<Void, Never>?
     @Published public private(set) var chatViewModel: ChatViewModel?
     @Published public private(set) var paymentManager: PaymentManager?
     
@@ -225,16 +222,14 @@ open class BaseCoordinator: ObservableObject {
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
         let memProvider = self.memoryToolProvider
         let fileProvider = self.fileToolProvider
-        let savedPort = UserDefaults.standard.integer(forKey: NeoxCoreSettings.relayPortKey)
-        let savedHost = UserDefaults.standard.string(forKey: NeoxCoreSettings.relayHostKey) ?? NeoxCoreSettings.defaultRelayHost
-        let resolvedPort: UInt16 = savedPort > 0 ? UInt16(savedPort) : NeoxCoreSettings.defaultRelayPort
         let terminalProvider = TerminalToolProvider(workspaceURL: resolvedWorkspace)
         self.terminalToolProvider = terminalProvider
+        let credStore = self.credentialStore
+        let modRegistry = self.modelRegistry
         self.subAgentToolProvider = SubAgentToolProvider(
             workspaceURL: resolvedWorkspace,
-            relayHost: savedHost,
-            relayPort: resolvedPort,
-            userId: UserDefaults.standard.string(forKey: NeoxCoreSettings.userIdKey),
+            credentialStore: credStore,
+            modelRegistry: modRegistry,
             toolsBuilder: {
                 var tools: [CopilotSDK.ToolDefinition] = []
                 tools.append(contentsOf: fileProvider.tools)
@@ -314,7 +309,6 @@ open class BaseCoordinator: ObservableObject {
     public func loadAvailableModels() async {
         // Skip relay model loading when using direct provider
         guard !useDirectProvider else { return }
-        // Match WebSocketTransport default: "https://<relayHost>".
         let base = "https://\(relayHost)"
         await availableModelsStore.load(appId: appId, relayBase: base)
         let ids = Set(availableModelsStore.models.map(\.id))
@@ -636,8 +630,7 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Chat ViewModel
 
-    /// Create the shared CopilotChat view model configured for agent mode.
-    /// When `useDirectProvider` is true, creates a runtime-backed view model.
+    /// Create the shared CopilotChat view model.
     /// Subclasses can override `configureChat(vm:)` to do additional wiring (e.g., Discord).
     public func createChatViewModel() -> ChatViewModel {
         // Neo Desktop remote mode — proxy through relay to a paired desktop
@@ -645,84 +638,7 @@ open class BaseCoordinator: ObservableObject {
             return createNeoDesktopChatViewModel(pairingSecret: secret)
         }
 
-        if useDirectProvider {
-            return createDirectProviderChatViewModel()
-        }
-
-        var tools = buildTools()
-        tools.append(contentsOf: additionalTools())
-        var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        let tree = buildWorkspaceTree()
-        if !tree.isEmpty {
-            instructions += "\n\n## current workspace files\n```\n\(tree)```"
-        }
-        let templateInfo = buildTemplateInfo()
-        if !templateInfo.isEmpty {
-            instructions += "\n\n\(templateInfo)"
-        }
-        if let skills = agentProfile?.skills,
-           let skillSection = SkillDiscovery.buildPromptSection(from: skills) {
-            instructions += "\n\n\(skillSection)"
-        }
-        var sections = agentProfile?.sections ?? [:]
-        sections["environment_context"] = .replace(content: buildDeviceContext())
-        let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
-        if let existing = sections["tone"] {
-            if case .replace(content: let content) = existing {
-                sections["tone"] = .replace(content: content + "\n" + mobileTone)
-            } else {
-                sections["tone"] = .append(content: mobileTone)
-            }
-        } else {
-            sections["tone"] = .append(content: mobileTone)
-        }
-        let finalSections: [String: SystemMessageSectionAction]? = sections.isEmpty ? nil : sections
-        let model = selectedModel
-
-        let transport = WebSocketTransport(host: relayHost, port: relayPort)
-
-        let vm = ChatViewModel(
-            transport: transport,
-            mode: .agent(AgentConfig(
-                model: model,
-                sessionId: "\(appId)-\(neoxUserId ?? "anon")",
-                instructions: instructions,
-                sections: finalSections,
-                tools: tools,
-                appId: appId,
-                deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
-                apnsEnv: {
-                    #if DEBUG
-                    return "sandbox"
-                    #else
-                    return "production"
-                    #endif
-                }(),
-                userId: neoxUserId,
-                onResponse: { _ in }
-            )),
-            inputModes: chatInputModes,
-            usageTracker: usageTracker,
-            workspaceURL: workspaceURL,
-            notificationFilter: { [weak self] type in
-                guard let self else { return true }
-                switch type {
-                case "usage": return self.showUsageInChat
-                case "agent_progress": return self.showProgressInChat
-                case "build_complete", "build_failed": return self.showBuildInChat
-                default: return true
-                }
-            }
-        )
-
-        self.chatViewModel = vm
-
-        // Allow subclasses to do additional wiring (e.g., Discord)
-        configureChat(vm: vm)
-
-        Task { await vm.connect() }
-        return vm
+        return createDirectProviderChatViewModel()
     }
 
     /// Override point: called after ChatViewModel is created, before connect.
@@ -739,7 +655,7 @@ open class BaseCoordinator: ObservableObject {
     /// `ProviderRegistry` that owns this model. If no owner is found, falls
     /// back to the first enabled provider's first enabled model so the user
     /// can always reach a working configuration.
-    private func resolveProviderAndModel(from raw: String) -> (providerId: String, modelId: String) {
+    public func resolveProviderAndModel(from raw: String) -> (providerId: String, modelId: String) {
         if let slash = raw.firstIndex(of: "/") {
             let providerId = String(raw[..<slash])
             let modelId = String(raw[raw.index(after: slash)...])
@@ -926,13 +842,11 @@ open class BaseCoordinator: ObservableObject {
 
     // MARK: - Project Sessions
 
-    /// Create a dedicated agent session for a project.
+    /// Create a dedicated agent session for a project using DirectProviderRuntime.
     /// Override `configureProjectSession` for app-specific wiring (e.g., guardrails).
     public func createProjectSession(projectId: String, onResponse: @escaping @Sendable (String) async -> Void) -> ChatViewModel {
         projectResponseHandlers[projectId] = onResponse
         if let existing = projectSessions[projectId] { return existing }
-
-        let transport = WebSocketTransport(host: relayHost, port: relayPort)
 
         var projectContext = ProjectDiscovery.loadProjectContext(projectId: projectId, workspaceURL: workspaceURL)
         projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
@@ -947,38 +861,43 @@ open class BaseCoordinator: ObservableObject {
         var tools = buildTools()
         tools.append(contentsOf: extraTools)
 
-        let model = selectedModel
-        let appIdStr = appId
+        let (resolvedProviderId, resolvedModelId) = resolveProviderAndModel(from: selectedModel)
+        let sessionStore = SessionStore()
+        let runtime = DirectProviderRuntime(
+            credentialStore: credentialStore,
+            modelRegistry: modelRegistry,
+            sessionStore: sessionStore,
+            sessionId: "\(appId)-\(projectId)-\(neoxUserId ?? "anon")"
+        )
+
+        let apiKey = credentialStore.getAPIKey(forProviderKey: resolvedProviderId)
+        let providerConfig = providerRegistry.providers.first { $0.id == resolvedProviderId }
+        let runtimeProviderConfig = RuntimeProviderConfig(
+            baseURL: providerConfig?.baseUrl,
+            apiKey: apiKey
+        )
+
+        let config = RuntimeSessionConfig(
+            sessionName: "\(appId)-\(projectId)-\(neoxUserId ?? "anon")",
+            model: resolvedModelId,
+            provider: resolvedProviderId,
+            systemMessage: projectContext,
+            tools: tools,
+            workingDirectory: workspaceURL.path,
+            streaming: true,
+            providerConfig: runtimeProviderConfig
+        )
 
         let vm = ChatViewModel(
-            transport: transport,
-            mode: .agent(AgentConfig(
-                model: model,
-                sessionId: "\(appIdStr)-\(projectId)-\(neoxUserId ?? "anon")",
-                instructions: projectContext,
-                tools: tools,
-                appId: appIdStr,
-                deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
-                apnsEnv: {
-                    #if DEBUG
-                    return "sandbox"
-                    #else
-                    return "production"
-                    #endif
-                }(),
-                userId: neoxUserId,
-                onResponse: { [weak self] response in
-                    let handler = await MainActor.run { self?.projectResponseHandlers[projectId] }
-                    await handler?(response)
-                }
-            )),
+            runtime: runtime,
+            runtimeConfig: config,
             workspaceURL: workspaceURL
         )
 
         projectSessions[projectId] = vm
         vm.skipPendingRestore = true
         Task { await vm.connect() }
-        NSLog("[BaseCoordinator] Created project session for '%@' (appId: %@)", projectId, appIdStr)
+        NSLog("[BaseCoordinator] Created project session for '%@'", projectId)
         return vm
     }
 

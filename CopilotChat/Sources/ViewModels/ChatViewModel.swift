@@ -6,16 +6,6 @@ import CopilotSDK
 import PDFKit
 #endif
 
-// MARK: - Chat Mode
-
-/// The operating mode for the chat — either interactive session or autonomous agent.
-public enum ChatMode: Sendable {
-    /// Interactive back-and-forth session.
-    case session(SessionConfig)
-    /// Autonomous agent with `ask_questions` tool (message + questions).
-    case agent(AgentConfig)
-}
-
 // MARK: - Chat State
 
 /// The chat's current interaction state.
@@ -106,22 +96,13 @@ public final class ChatViewModel: ObservableObject {
     // MARK: - Configuration
 
     public let inputModes: InputMode
-    private let transport: Transport
-    private let mode: ChatMode
     /// Filter deciding which notification types to show in chat.
     /// Returns true if the given type (e.g. "usage", "agent_progress", "build") should be displayed.
     public let notificationFilter: (String) -> Bool
 
-    // MARK: - Internal State
-
-    private var client: CopilotClient?
-    private var session: CopilotSession?
-    private var agent: CopilotAgent?
-    private var agentTask: Task<Void, Error>?
-
     // MARK: - Direct Provider Runtime
 
-    /// When set, the view model uses the provider-neutral runtime instead of relay/Copilot.
+    /// The provider-neutral runtime backing this chat.
     private var runtime: AgentSessionRuntime?
     private var runtimeSubscription: RuntimeSubscription?
     private var runtimeConfig: RuntimeSessionConfig?
@@ -130,7 +111,7 @@ public final class ChatViewModel: ObservableObject {
     /// Continuation for ask_questions — resumed when user submits structured replies.
     private var askQuestionsContinuation: CheckedContinuation<JSONValue, Never>?
     @Published public var activeQuestions: [AskQuestionItem] = []
-    /// Handles create_project_request delegation from relay (lazy-initialized on first use).
+    /// Handles create_project_request delegation (lazy-initialized on first use).
     private var projectTaskHandler: ProjectTaskHandler?
     
     /// Workspace directory on device for reading templates.
@@ -143,34 +124,14 @@ public final class ChatViewModel: ObservableObject {
     /// Logs chat messages to .neo/reports/sessions/ as JSONL.
     private var sessionLogger: ChatSessionLogger?
 
-    /// Diagnostic: whether agent is non-nil (for testing tools).
-    public var hasAgentForDiag: Bool { agent != nil }
-    /// Diagnostic: whether session is non-nil (for testing tools).
-    public var hasSessionForDiag: Bool { session != nil }
-
-    /// Handler for custom JSON-RPC notifications that aren't session.event or relay notifications.
-    /// Used by DiscordService to receive discord_message notifications via the shared WS.
-    public var onCustomNotification: ((_ method: String, _ params: [String: JSONValue]?) -> Void)?
+    /// Diagnostic: whether runtime is non-nil (for testing tools).
+    public var hasRuntimeForDiag: Bool { runtime != nil }
 
     /// Callback for channel-forwarded ask_questions in headless sessions.
     /// When set, questions are dispatched through this handler (e.g., to Discord/WeChat)
     /// instead of being auto-answered. The handler receives the question text for display.
     /// The session enters `.waitingForQuestions` and the next `channelSend` resumes the continuation.
     public var onChannelQuestions: ((_ questionText: String) async -> Void)?
-
-    /// Send a raw JSON-RPC request via the session's connection.
-    /// Returns the result value. Throws if not connected or on RPC error.
-    public func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
-        guard let session = session ?? agent?.session else {
-            throw ChatViewModelError.notConnected
-        }
-        return try await session.sendRPC(method: method, params: params)
-    }
-
-    enum ChatViewModelError: LocalizedError {
-        case notConnected
-        var errorDescription: String? { "Not connected to relay" }
-    }
 
     /// Clear all session history (JSONL files).
     public func clearSessionHistory() {
@@ -179,34 +140,8 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: - Init
 
-    /// Create a chat view model.
-    /// - Parameters:
-    ///   - transport: WebSocket transport to connect to the relay.
-    ///   - mode: `.session(config)` or `.agent(config)`.
-    ///   - inputModes: Which input modes are available (.text, .speech, .attachment).
-    ///   - notificationFilter: Returns true if a notification type should show in chat.
-    public init(
-        transport: Transport,
-        mode: ChatMode,
-        inputModes: InputMode = .textAndSpeech,
-        usageTracker: UsageTracker = UsageTracker(),
-        workspaceURL: URL? = nil,
-        notificationFilter: @escaping (String) -> Bool = { _ in true }
-    ) {
-        self.transport = transport
-        self.mode = mode
-        self.inputModes = inputModes
-        self.usageTracker = usageTracker
-        self.workspaceURL = workspaceURL
-        self.notificationFilter = notificationFilter
-
-        if let workspaceURL {
-            self.sessionLogger = ChatSessionLogger(workspaceURL: workspaceURL)
-        }
-    }
-
-    /// Create a chat view model backed by a direct provider runtime.
-    /// Uses AgentSessionRuntime instead of relay transport.
+    /// Create a chat view model backed by a provider runtime.
+    /// Uses AgentSessionRuntime for all chat functionality.
     public init(
         runtime: AgentSessionRuntime,
         runtimeConfig: RuntimeSessionConfig,
@@ -215,9 +150,6 @@ public final class ChatViewModel: ObservableObject {
         workspaceURL: URL? = nil,
         notificationFilter: @escaping (String) -> Bool = { _ in true }
     ) {
-        // Runtime mode doesn't need transport/mode — use dummy values
-        self.transport = DummyTransport()
-        self.mode = .session(SessionConfig(model: runtimeConfig.model ?? ""))
         self.inputModes = inputModes
         self.usageTracker = usageTracker
         self.workspaceURL = workspaceURL
@@ -230,19 +162,29 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    deinit {
-        agentTask?.cancel()
-    }
-
     /// Send APNs device token to relay for push notifications.
     public func setDeviceToken(_ token: String, apnsEnv: String? = nil, userId: String? = nil) async {
-        await client?.setDeviceToken(token, apnsEnv: apnsEnv, userId: userId)
+        // No longer needed — push notifications handled separately
     }
 
-    /// Archive a project's GitHub repo via the relay's GitHub proxy.
+    /// Archive a project's GitHub repo.
     public func archiveRepo(_ repo: String) async {
         nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
         await handler.archiveRepo(repo)
+    }
+
+    private func getOrCreateProjectTaskHandler() -> ProjectTaskHandler {
+        if let handler = projectTaskHandler { return handler }
+
+        let proxyURL = URL(string: "https://relay.ai.qili2.com")!
+
+        let handler = ProjectTaskHandler(
+            proxyBaseURL: proxyURL,
+            workspaceURL: workspaceURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
+            sendNotification: { _, _ in }
+        )
+        projectTaskHandler = handler
+        return handler
     }
 
     /// Add a push notification as a system message in the chat.
@@ -282,45 +224,24 @@ public final class ChatViewModel: ObservableObject {
 
     /// Diagnostic string exposing private state for automation/testing.
     public var debugInfo: String {
-        let m = String(describing: mode)
-        let hasAgent = agent != nil
-        let agentRunning = agent?.isRunning ?? false
-        let hasSession = session != nil
-        let hasClient = client != nil
-        return "mode=\(m) agent=\(hasAgent) agentRunning=\(agentRunning) session=\(hasSession) client=\(hasClient) chatState=\(chatState)"
+        let hasRuntime = runtime != nil
+        return "runtime=\(hasRuntime) chatState=\(chatState)"
     }
 
     // MARK: - Connection
 
-    /// Connect to the relay and create a session or agent.
-    /// When a runtime is set, connects via the direct provider runtime instead.
+    /// Connect to the runtime and create a session.
     public func connect() async {
         guard chatState == .disconnected || chatState == .error("") || isErrorState else { return }
         chatState = .connecting
 
-        // Direct provider runtime path
-        if let runtime, let config = runtimeConfig {
-            do {
-                try await connectRuntime(runtime: runtime, config: config)
-            } catch {
-                chatState = .error(error.localizedDescription)
-            }
+        guard let runtime, let config = runtimeConfig else {
+            chatState = .error("No runtime configured")
             return
         }
 
-        // Legacy relay path
         do {
-            let client = CopilotClient(transport: transport)
-            self.client = client
-            try await client.start()
-
-            switch mode {
-            case .session(let config):
-                try await connectSession(config: config)
-
-            case .agent(var config):
-                try await connectAgent(config: &config)
-            }
+            try await connectRuntime(runtime: runtime, config: config)
         } catch {
             chatState = .error(error.localizedDescription)
         }
@@ -382,16 +303,10 @@ public final class ChatViewModel: ObservableObject {
             rt.unsubscribe(sub)
             runtimeSubscription = nil
         }
-        agentTask?.cancel()
-        agentTask = nil
-        agent?.stop()
-        agent = nil
-        session = nil
-        client = nil
         chatState = .disconnected
     }
 
-    /// Destroy session on relay (frees Copilot seat) and clean up.
+    /// Destroy session and clean up.
     public func destroy() {
         if let sub = runtimeSubscription, let rt = runtime {
             rt.unsubscribe(sub)
@@ -400,18 +315,7 @@ public final class ChatViewModel: ObservableObject {
         if let runtime {
             Task { await runtime.destroy() }
         }
-        let session = self.session
-        agentTask?.cancel()
-        agentTask = nil
-        agent?.stop()
-        agent = nil
-        self.session = nil
-        client = nil
         chatState = .disconnected
-        // Send destroy to relay in background
-        if let session {
-            Task { try? await session.destroy() }
-        }
     }
 
     // MARK: - Direct Provider Runtime
@@ -510,139 +414,6 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Session Mode
-
-    private func connectSession(config: SessionConfig) async throws {
-        guard let client else { return }
-
-        // Inject manage_todo_list and view tools
-        var config = config
-        config.tools = (config.tools ?? []) + [makeTodoTool(), makeViewTool(), makeConvertToMarkdownTool(), makeCreatePlanTool(), makeStripeCheckoutTool(), makeStartCodingTaskTool()]
-
-        let session = try await client.createSession(config: config)
-        self.session = session
-
-        // Subscribe to events
-        await subscribeToEvents(session: session)
-
-        // Handle relay server notifications (usage, progress, build status, delegation)
-        session.onRelayNotification = { [weak self] type, params in
-            self?.handleRelayNotification(type: type, params: params)
-        }
-
-        // Forward custom notifications (e.g., discord_message)
-        session.onCustomNotification = { [weak self] method, params in
-            self?.onCustomNotification?(method, params)
-        }
-
-        usageTracker.resetSession()
-        loadChatHistory()
-        chatState = .idle
-    }
-
-    // MARK: - Agent Mode
-
-    private func connectAgent(config: inout AgentConfig) async throws {
-        guard let client else { return }
-
-        // Inject manage_todo_list and view tools
-        config.tools.append(makeTodoTool())
-        config.tools.append(makeViewTool())
-        config.tools.append(makeConvertToMarkdownTool())
-        config.tools.append(makeCreatePlanTool())
-        config.tools.append(makeStripeCheckoutTool())
-        config.tools.append(makeStartCodingTaskTool())
-
-        // Wrap onResponse to update UI
-        let originalOnResponse = config.onResponse
-        config.onResponse = { [weak self] message in
-            await self?.handleAgentResponse(message)
-            await originalOnResponse(message)
-        }
-
-        let originalOnAskQuestions = config.onAskQuestions
-        _ = originalOnAskQuestions
-        config.onAskQuestions = { [weak self] payload in
-            guard let self else { return .object([:]) }
-            let answer = await self.handleAgentAskQuestions(payload)
-            return answer
-        }
-
-        let agent = try await client.createAgent(config: config)
-        self.agent = agent
-
-        // Subscribe to events on the underlying session
-        await subscribeToEvents(session: agent.session)
-
-        // Handle relay server notifications (usage, progress, build status, delegation)
-        agent.session.onRelayNotification = { [weak self] type, params in
-            self?.handleRelayNotification(type: type, params: params)
-        }
-
-        // Forward custom notifications (e.g., discord_message)
-        agent.session.onCustomNotification = { [weak self] method, params in
-            self?.onCustomNotification?(method, params)
-        }
-
-        loadChatHistory()
-        chatState = .idle
-
-        // Restore pending questions from previous session (if app restarted while waiting)
-        restorePendingQuestions()
-    }
-
-    // MARK: - Relay Notification Handling
-
-    private func handleRelayNotification(type: String, params: [String: JSONValue]) {
-        NSLog("[ChatViewModel] handleRelayNotification: type=%@", type)
-
-        // Generic notification display
-        guard notificationFilter(type) else { return }
-        let title: String
-        if case .string(let t) = params["title"] { title = t } else { title = type }
-        let body: String
-        if case .string(let b) = params["body"] { body = b } else { body = "" }
-
-        // Convert JSONValue params to [String: Any] for addNotification
-        var data: [String: Any] = ["type": type]
-        for (key, value) in params {
-            switch value {
-            case .string(let s): data[key] = s
-            case .int(let n): data[key] = n
-            case .double(let n): data[key] = n
-            case .bool(let b): data[key] = b
-            default: break
-            }
-        }
-
-        Task { @MainActor in
-            self.addNotification(title: title, body: body, data: data)
-        }
-    }
-
-    private func getOrCreateProjectTaskHandler() -> ProjectTaskHandler {
-        if let handler = projectTaskHandler { return handler }
-
-        // Derive HTTP proxy URL from the transport
-        let proxyURL: URL
-        if let wsTransport = transport as? WebSocketTransport {
-            proxyURL = ProjectTaskHandler.httpURL(from: wsTransport.url)
-        } else {
-            proxyURL = URL(string: "http://localhost:8766")!
-        }
-
-        let client = self.client
-        let handler = ProjectTaskHandler(
-            proxyBaseURL: proxyURL,
-            workspaceURL: workspaceURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0],
-            sendNotification: { [weak client] method, params in
-                await client?.sendNotification(method: method, params: params)
-            }
-        )
-        projectTaskHandler = handler
-        return handler
-    }
-
     // MARK: - Chat History
 
     private func loadChatHistory() {
@@ -667,137 +438,6 @@ public final class ChatViewModel: ObservableObject {
             )
         }
         messages.insert(contentsOf: restored, at: 0)
-    }
-
-    // MARK: - Event Subscription
-
-    private func subscribeToEvents(session: CopilotSession) async {
-        // Delta streaming — accumulate into the current assistant message
-        await session.on(.assistantMessageDelta) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data,
-               case .string(let delta) = data["delta"] {
-                Task { @MainActor in
-                    self.appendOrUpdateAssistantDelta(delta)
-                }
-            }
-        }
-
-        // Full assistant message (non-streaming or final)
-        await session.on(.assistantMessage) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data,
-               case .string(let content) = data["content"] {
-                Task { @MainActor in
-                    self.finalizeAssistantMessage(content)
-                }
-            }
-        }
-
-        await session.on(.assistantTurnStart) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.chatState = .working
-            }
-        }
-
-        await session.on(.sessionIdle) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                // Only go idle if not waiting for user (ask_questions sets its own state)
-                if case .waitingForUser = self.chatState { return }
-                if case .waitingForQuestions = self.chatState { return }
-                self.chatState = .idle
-            }
-        }
-
-        // Context compaction tracking
-        await session.on(.sessionCompactionStart) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.chatState = .compacting
-            }
-        }
-
-        await session.on(.sessionCompactionComplete) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                if case .compacting = self.chatState {
-                    self.chatState = .working
-                }
-            }
-        }
-
-        // Tool execution tracking
-        await session.on(.toolExecutionStart) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data {
-                let toolName = data["toolName"].flatMap { if case .string(let s) = $0 { return s } else { return nil } } ?? "unknown"
-                let toolCallId = data["toolCallId"].flatMap { if case .string(let s) = $0 { return s } else { return nil } } ?? UUID().uuidString
-                let args = data["arguments"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
-                Task { @MainActor in
-                    self.toolCalls.append(ToolCallInfo(id: toolCallId, name: toolName, arguments: args))
-                    // Keep only the latest 5 tool calls visible in chat
-                    if self.toolCalls.count > 5 {
-                        self.toolCalls.removeFirst(self.toolCalls.count - 5)
-                    }
-                }
-            }
-        }
-
-        await session.on(.toolExecutionComplete) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data {
-                let toolCallId = data["toolCallId"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
-                let result = data["result"].flatMap { if case .string(let s) = $0 { return s } else { return nil } }
-                Task { @MainActor in
-                    if let toolCallId, let idx = self.toolCalls.firstIndex(where: { $0.id == toolCallId }) {
-                        self.toolCalls[idx].status = .completed
-                        self.toolCalls[idx].result = result
-                        let name = self.toolCalls[idx].name
-                        let args = self.toolCalls[idx].arguments ?? ""
-                        let truncated = String((result ?? "").prefix(500))
-                        var parts = "[\(name)]"
-                        if !args.isEmpty { parts += " \(args)" }
-                        if !truncated.isEmpty { parts += "\n\(truncated)" }
-                        self.sessionLogger?.log(role: "tool_result", text: parts, project: self.projectScope)
-                    }
-                }
-            }
-        }
-
-        // Session errors
-        await session.on(.sessionError) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data,
-               case .string(let message) = data["message"] {
-                Task { @MainActor in
-                    self.chatState = .error(message)
-                }
-            }
-        }
-
-        // Usage tracking — record token consumption and cost (server-calculated)
-        await session.on(.assistantUsage) { [weak self] event in
-            guard let self else { return }
-            if case .object(let data) = event.data,
-               let cost = data["cost"]?.doubleValue {
-                let model = data["model"]?.stringValue ?? "unknown"
-                let promptTokens = data["inputTokens"]?.intValue ?? data["prompt_tokens"]?.intValue ?? 0
-                let completionTokens = data["outputTokens"]?.intValue ?? data["completion_tokens"]?.intValue ?? 0
-                Task { @MainActor in
-                    self.usageTracker.record(
-                        model: model,
-                        promptTokens: promptTokens,
-                        completionTokens: completionTokens,
-                        cost: cost
-                    )
-                }
-            }
-        }
-
-        // Stripe credits are handled client-side via SFSafariViewController + relay /stripe/verify
-        // (see NeoxApp.onOpenURL → verifyStripeSession → usageTracker.addCredits)
     }
 
     // MARK: - Run Plan
@@ -906,11 +546,7 @@ public final class ChatViewModel: ObservableObject {
         case .working:
             // Steer — inject immediate message
             do {
-                if let runtime {
-                    try await runtime.steer(message: promptText)
-                } else {
-                    try await session?.steer(prompt: promptText)
-                }
+                try await runtime?.steer(message: promptText)
             } catch {
                 appendSystemMessage("Steer failed: \(error.localizedDescription)")
                 chatState = .idle
@@ -955,7 +591,6 @@ public final class ChatViewModel: ObservableObject {
             messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
             chatState = .working
             if let runtime {
-                // Direct provider runtime path
                 Task { [weak self] in
                     do {
                         try await runtime.send(prompt: trimmed, attachments: nil)
@@ -965,33 +600,6 @@ public final class ChatViewModel: ObservableObject {
                             self?.chatState = .idle
                         }
                     }
-                }
-            } else if let agent {
-                if !agent.isRunning {
-                    // Start agent loop in background Task — agent.start() blocks until loop ends
-                    agentTask = Task { [weak self] in
-                        do {
-                            try await agent.start(prompt: trimmed)
-                        } catch {
-                            await MainActor.run {
-                                self?.appendSystemMessage("Agent error: \(error.localizedDescription)")
-                                self?.chatState = .error(error.localizedDescription)
-                            }
-                        }
-                    }
-                } else {
-                    // Agent already running — steer its session with the new prompt
-                    do {
-                        _ = try await agent.session.steer(prompt: trimmed)
-                    } catch {
-                        appendSystemMessage("Steer failed: \(error.localizedDescription)")
-                    }
-                }
-            } else if let session {
-                do {
-                    try await session.steer(prompt: trimmed)
-                } catch {
-                    appendSystemMessage("Steer failed: \(error.localizedDescription)")
                 }
             }
         } else {
@@ -1041,9 +649,7 @@ public final class ChatViewModel: ObservableObject {
         let beforeCount = messages.count
         messages.append(ChatMessage(role: .user, content: [.text(trimmed)], project: projectScope, source: source))
 
-        // In loop mode, the model may be blocked waiting for ask_questions or ask_questions response.
-        // Answer the pending question with the user's text to unblock the model,
-        // rather than sending a new session.send (which would deadlock).
+        // Answer pending questions to unblock the model.
         let needsSend: Bool
         switch chatState {
         case .waitingForQuestions(let questions):
@@ -1066,16 +672,12 @@ public final class ChatViewModel: ObservableObject {
 
         if needsSend {
             chatState = .working
-
-            // Use the agent's session if in agent mode, otherwise the direct session
-            let targetSession = agent?.session ?? session
-            guard let targetSession else {
+            guard let runtime else {
                 chatState = .idle
-                return "no-session"
+                return "no-runtime"
             }
-            
             do {
-                _ = try await targetSession.send(prompt: trimmed)
+                try await runtime.send(prompt: trimmed, attachments: nil)
             } catch {
                 let msg = error.localizedDescription
                 appendSystemMessage("Error: \(msg)")
@@ -1085,7 +687,7 @@ public final class ChatViewModel: ObservableObject {
         }
 
         // Wait for chatState to leave .working (idle, waitingForUser, error, etc.)
-        // 180s timeout for operations that involve tool calls (start_coding_task, etc.)
+        // 180s timeout for operations that involve tool calls
         var stateObserver: AnyCancellable?
         let stateStream = AsyncStream<ChatState> { continuation in
             stateObserver = self.$chatState.sink { state in
@@ -1124,8 +726,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Send a message with an image attachment.
+    /// Send a message with an image attachment.
     public func sendWithImage(_ imageData: Data, mimeType: String, text: String) async {
-        guard let session else { return }
+        guard let runtime else { return }
 
         // Add user message
         var blocks: [ChatMessage.ContentBlock] = [.image(imageData, mimeType: mimeType)]
@@ -1135,9 +738,9 @@ public final class ChatViewModel: ObservableObject {
         messages.append(ChatMessage(role: .user, content: blocks, project: projectScope))
 
         chatState = .working
-        let base64 = imageData.base64EncodedString()
+        let attachment = RuntimeAttachment(data: imageData, mimeType: mimeType)
         do {
-            try await session.sendWithImage(base64, mimeType: mimeType, text: text)
+            try await runtime.send(prompt: text, attachments: [attachment])
         } catch {
             appendSystemMessage("Send failed: \(error.localizedDescription)")
             chatState = .idle
@@ -1155,155 +758,21 @@ public final class ChatViewModel: ObservableObject {
             effectiveText = text
         }
 
-        // Direct provider runtime path
-        if let runtime {
-            do {
-                try await runtime.send(prompt: effectiveText, attachments: nil)
-            } catch {
-                appendSystemMessage("Send failed: \(error.localizedDescription)")
-                chatState = .idle
-            }
+        guard let runtime else {
+            appendSystemMessage("No runtime configured")
+            chatState = .idle
             return
         }
 
-        switch mode {
-        case .session:
-            do {
-                try await session?.send(prompt: effectiveText)
-            } catch {
-                appendSystemMessage("Send failed: \(error.localizedDescription)")
-                chatState = .idle
-            }
-
-        case .agent:
-            if let agent, !agent.isRunning {
-                // Start agent loop with the initial prompt
-                agentTask = Task {
-                    do {
-                        try await agent.start(prompt: effectiveText)
-                    } catch {
-                        await MainActor.run {
-                            self.appendSystemMessage("Agent error: \(error.localizedDescription)")
-                            self.chatState = .error(error.localizedDescription)
-                        }
-                    }
-                }
-            } else {
-                // Agent is already running — this is a follow-up / steer
-                do {
-                    try await session?.steer(prompt: effectiveText)
-                } catch {
-                    appendSystemMessage("Steer failed: \(error.localizedDescription)")
-                    chatState = .idle
-                }
-            }
+        do {
+            try await runtime.send(prompt: effectiveText, attachments: nil)
+        } catch {
+            appendSystemMessage("Send failed: \(error.localizedDescription)")
+            chatState = .idle
         }
     }
 
-    // MARK: - Agent Callbacks
-
-    private func handleAgentResponse(_ message: String) {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        // Deduplicate: if the last assistant message already has this content
-        // (delivered via streaming), don't add it again.
-        if let lastIndex = messages.indices.last,
-           messages[lastIndex].role == .assistant {
-            let existing = messages[lastIndex].fullText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if existing == trimmed {
-                messages[lastIndex].isStreaming = false
-                return
-            }
-        }
-
-        // ask_questions message delivers a response — add as assistant message
-        let blocks = parseContentBlocks(trimmed)
-        let msg = ChatMessage(role: .assistant, content: blocks, project: projectScope)
-        messages.append(msg)
-    }
-
-    private func handleAgentAskUser(_ question: String) async -> String {
-        // Update state on main thread, then wait for user to reply
-        chatState = .waitingForUser(question: question)
-
-        // Add the question as an assistant message
-        let blocks = parseContentBlocks(question)
-        messages.append(ChatMessage(role: .assistant, content: blocks, project: projectScope))
-
-        // Wait for user reply via continuation
-        return await withCheckedContinuation { continuation in
-            self.askUserContinuation = continuation
-        }
-    }
-
-    private func handleAgentAskQuestions(_ payload: JSONValue) async -> JSONValue {
-        // Note: the 'message' field is already displayed by onResponse callback in Client.buildTools()
-        // — no need to add it again here.
-
-        let questions = parseAskQuestions(payload)
-        guard !questions.isEmpty else {
-            return .object([:])
-        }
-
-        // Headless/background sessions with channel forwarding:
-        // If onChannelQuestions is set, forward questions to the channel (Discord/WeChat)
-        // and wait for the next channelSend to resume the continuation.
-        if skipPendingRestore, let onChannelQuestions {
-            // Build a text representation of the questions for the channel
-            let questionText: String
-            if questions.count == 1 {
-                questionText = questions[0].question
-            } else {
-                questionText = questions.enumerated().map { i, q in "\(i + 1). \(q.question)" }.joined(separator: "\n")
-            }
-
-            chatState = .waitingForQuestions(questions)
-            activeQuestions = questions
-
-            // Dispatch to channel (Discord/WeChat) — non-blocking
-            await onChannelQuestions(questionText)
-
-            // Wait for answer via continuation (channelSend will call submitAskQuestions)
-            return await withCheckedContinuation { continuation in
-                self.askQuestionsContinuation = continuation
-            }
-        }
-
-        // Headless/background sessions without channel forwarding: auto-answer.
-        if skipPendingRestore {
-            return .object([
-                "answer": .string("Acknowledged. No follow-up needed right now.")
-            ])
-        }
-
-        // Single freeform question with no options: merge question into assistant bubble
-        if questions.count == 1, questions[0].options.isEmpty {
-            let questionText = questions[0].question
-            if let lastIndex = messages.lastIndex(where: { $0.role == .assistant }),
-               case .text(let existingText) = messages[lastIndex].content.last {
-                // Append question to existing assistant message
-                var content = messages[lastIndex].content
-                content[content.count - 1] = .text(existingText + "\n\n" + questionText)
-                messages[lastIndex] = ChatMessage(
-                    id: messages[lastIndex].id,
-                    role: .assistant,
-                    content: content,
-                    project: messages[lastIndex].project
-                )
-            }
-        }
-
-        chatState = .waitingForQuestions(questions)
-        activeQuestions = questions
-
-        // Persist questions + requestId for recovery after app restart
-        persistPendingQuestions(questions)
-
-        return await withCheckedContinuation { continuation in
-            self.askQuestionsContinuation = continuation
-        }
-    }
+    // MARK: - Ask Questions Support
 
     public func submitAskQuestions(_ answers: [String: AskQuestionAnswer]) {
         var result: [String: JSONValue] = [:]
@@ -1323,17 +792,8 @@ public final class ChatViewModel: ObservableObject {
         }
 
         if let continuation = askQuestionsContinuation {
-            // Normal path: continuation exists, resume it
             continuation.resume(returning: .object(result))
             askQuestionsContinuation = nil
-        } else if let requestId = UserDefaults.standard.string(forKey: "pendingAskQuestionsRequestId") {
-            // Recovery path: app restarted, send result directly to relay
-            let jsonResult = JSONValue.object(result)
-            if let data = try? JSONEncoder().encode(jsonResult), let text = String(data: data, encoding: .utf8) {
-                Task {
-                    await agent?.sendPendingToolResult(requestId: requestId, result: "User answered: \(text)")
-                }
-            }
         }
 
         activeQuestions = []
@@ -1370,9 +830,6 @@ public final class ChatViewModel: ObservableObject {
     private func persistPendingQuestions(_ questions: [AskQuestionItem]) {
         if let data = try? JSONEncoder().encode(questions) {
             UserDefaults.standard.set(data, forKey: "pendingAskQuestions")
-        }
-        if let requestId = agent?.session.pendingRequestId {
-            UserDefaults.standard.set(requestId, forKey: "pendingAskQuestionsRequestId")
         }
     }
 
@@ -2044,8 +1501,7 @@ public final class ChatViewModel: ObservableObject {
         }
         let model: String
         if case .string(let m) = dict["model"] { model = m } else { model = "" }
-        let userId: String
-        if case .agent(let config) = mode { userId = config.userId ?? "default" } else { userId = "default" }
+        let userId = "default"
 
         nonisolated(unsafe) let handler = getOrCreateProjectTaskHandler()
         return await handler.createProject(appName: appName, taskDescription: taskDescription, model: model, userId: userId)
@@ -2066,14 +1522,4 @@ extension ChatMessage {
             }
         }.joined(separator: "\n\n")
     }
-}
-
-// MARK: - DummyTransport
-
-/// Placeholder transport used when ChatViewModel is backed by AgentSessionRuntime.
-private final class DummyTransport: Transport, @unchecked Sendable {
-    func connect() async throws {}
-    func disconnect() {}
-    func send(_ data: Data) async throws {}
-    func receive() -> AsyncStream<Data> { AsyncStream { $0.finish() } }
 }

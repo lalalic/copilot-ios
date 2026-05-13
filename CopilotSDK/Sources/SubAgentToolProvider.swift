@@ -12,13 +12,12 @@ private struct AgentFrontmatter {
     var skills: [String]?
 }
 
-/// Provides the `task` tool that spawns a separate relay session
+/// Provides the `task` tool that spawns a separate direct provider session
 /// using a named agent's instructions, runs a task, and returns the result.
 public final class SubAgentToolProvider: @unchecked Sendable {
     private let workspaceURL: URL
-    private let relayHost: String
-    private let relayPort: UInt16
-    private let userId: String?
+    private let credentialStore: CredentialStore
+    private let modelRegistry: ModelRegistry
     public var appId: String?
     private let toolsBuilder: @Sendable () -> [ToolDefinition]
     /// Callback for progress reports from sub-agents.
@@ -26,22 +25,19 @@ public final class SubAgentToolProvider: @unchecked Sendable {
 
     /// - Parameters:
     ///   - workspaceURL: Root workspace directory (contains .github/agents/)
-    ///   - relayHost: Relay server hostname
-    ///   - relayPort: Relay server port
-    ///   - userId: User ID for session routing
+    ///   - credentialStore: Credential store for API keys
+    ///   - modelRegistry: Model registry for resolving models
     ///   - toolsBuilder: Closure that builds shared tools (memory, file, etc.) for the sub-agent.
     ///                   Should NOT include task tool itself to prevent recursion.
     public init(
         workspaceURL: URL,
-        relayHost: String,
-        relayPort: UInt16,
-        userId: String?,
+        credentialStore: CredentialStore,
+        modelRegistry: ModelRegistry,
         toolsBuilder: @escaping @Sendable () -> [ToolDefinition]
     ) {
         self.workspaceURL = workspaceURL
-        self.relayHost = relayHost
-        self.relayPort = relayPort
-        self.userId = userId
+        self.credentialStore = credentialStore
+        self.modelRegistry = modelRegistry
         self.toolsBuilder = toolsBuilder
     }
 
@@ -266,38 +262,54 @@ public final class SubAgentToolProvider: @unchecked Sendable {
     }
 
     /// Run sub-agent synchronously — blocks until complete.
-    /// Sub-agents always use direct sessions (no loop tools).
+    /// Creates a DirectProviderRuntime, sends the prompt, collects the response.
     private func runSync(agentName: String, task: String, model: String, frontmatter: AgentFrontmatter, body: String) async -> String {
         logger.info("Starting sub-agent '\(agentName)' sync (model: \(model)) with task: \(task.prefix(100))")
 
         do {
-            let transport = WebSocketTransport(host: relayHost, port: relayPort)
-            let client = CopilotClient(transport: transport)
-            try await client.start()
-            logger.info("[SubAgent] client started, creating session...")
+            let sessionStore = SessionStore()
+            let runtime = DirectProviderRuntime(
+                credentialStore: credentialStore,
+                modelRegistry: modelRegistry,
+                sessionStore: sessionStore
+            )
 
             var subAgentTools = filterTools(toolsBuilder(), allowedNames: frontmatter.tools)
             subAgentTools.append(buildReportProgressTool(agentName: agentName, taskId: nil))
 
             logger.info("[SubAgent] session tools: \(subAgentTools.map { $0.name }.joined(separator: ", "))")
 
-            let config = SessionConfig(
+            // Resolve provider from model
+            let provider = modelRegistry.model(id: model)?.provider
+
+            let config = RuntimeSessionConfig(
+                sessionName: "subagent-\(agentName)-\(UUID().uuidString.prefix(8))",
                 model: model,
-                tools: subAgentTools,
-                systemMessage: .replace(body),
-                appId: appId,
-                userId: userId
+                provider: provider,
+                systemMessage: body,
+                tools: subAgentTools
             )
 
-            let session = try await client.createSession(config: config)
-            logger.info("[SubAgent] session created (id=\(session.sessionId.prefix(8))), sending prompt...")
+            try await runtime.createSession(config: config)
+            logger.info("[SubAgent] session created, sending prompt...")
 
-            // Direct session: sendAndWait captures the assistant.message response directly
-            let result = try await session.sendAndWait(prompt: task, timeout: 60)
-                ?? "Sub-agent completed with no output"
+            // Collect response via event subscription
+            var resultText = ""
+            let sub = runtime.subscribe { event in
+                if case .assistantTextDelta(let delta) = event {
+                    resultText += delta.text
+                } else if case .assistantMessageComplete(let complete) = event {
+                    resultText = complete.content
+                }
+            }
+
+            try await runtime.send(prompt: task, attachments: nil)
+
+            runtime.unsubscribe(sub)
+            let result = resultText.isEmpty ? "Sub-agent completed with no output" : resultText
 
             logger.info("[SubAgent] result: \(result.prefix(200))")
-            try? await session.destroy()
+            await runtime.destroy()
 
             logger.info("Sub-agent '\(agentName)' completed: \(result.prefix(200))")
             return result

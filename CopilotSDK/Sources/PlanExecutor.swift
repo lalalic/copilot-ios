@@ -6,7 +6,7 @@ import UserNotifications
 // MARK: - PlanExecutor
 
 /// Executes plans via BGTaskScheduler or manual trigger.
-/// Connects to the relay, runs the plan prompt, collects results.
+/// Creates a DirectProviderRuntime, runs the plan prompt, collects results.
 public class PlanExecutor: @unchecked Sendable {
     
     public static let shared = PlanExecutor()
@@ -19,9 +19,8 @@ public class PlanExecutor: @unchecked Sendable {
     // MARK: - Dependencies
     
     private var planStore: PlanStore?
-    private var relayHost: String = "10.0.0.111"
-    private var relayPort: UInt16 = 8765
-    private var userId: String?
+    private var credentialStore: CredentialStore?
+    private var modelRegistry: ModelRegistry?
     private var toolsBuilder: (@Sendable () -> [ToolDefinition])?
     
     private init() {}
@@ -31,15 +30,13 @@ public class PlanExecutor: @unchecked Sendable {
     /// Configure the executor with dependencies.
     public func configure(
         planStore: PlanStore,
-        relayHost: String,
-        relayPort: UInt16,
-        userId: String? = nil,
+        credentialStore: CredentialStore,
+        modelRegistry: ModelRegistry,
         toolsBuilder: (@Sendable () -> [ToolDefinition])? = nil
     ) {
         self.planStore = planStore
-        self.relayHost = relayHost
-        self.relayPort = relayPort
-        self.userId = userId
+        self.credentialStore = credentialStore
+        self.modelRegistry = modelRegistry
         self.toolsBuilder = toolsBuilder
     }
     
@@ -119,21 +116,24 @@ public class PlanExecutor: @unchecked Sendable {
     
     // MARK: - Execute Plan
     
-    /// Execute a plan: connect to relay, run prompt, collect result.
+    /// Execute a plan: create a direct provider session, run prompt, collect result.
     /// Can be called from foreground (manual run) or background (BGTask).
     public func executePlan(_ plan: Plan) async {
-        guard let planStore else { return }
+        guard let planStore, let credentialStore, let modelRegistry else { return }
         
         var execution = PlanExecution(planId: plan.id)
         planStore.addExecution(execution)
         
         do {
-            // 1. Connect to relay
-            let transport = WebSocketTransport(host: relayHost, port: relayPort)
-            let client = CopilotClient(transport: transport)
-            try await client.start()
+            // 1. Create a DirectProviderRuntime
+            let sessionStore = SessionStore()
+            let runtime = DirectProviderRuntime(
+                credentialStore: credentialStore,
+                modelRegistry: modelRegistry,
+                sessionStore: sessionStore
+            )
             
-            // 2. Create session with tools if plan specifies them
+            // 2. Build tools if plan specifies them
             let planTools: [ToolDefinition]
             if !plan.tools.isEmpty, let builder = self.toolsBuilder {
                 let allTools = builder()
@@ -143,35 +143,45 @@ public class PlanExecutor: @unchecked Sendable {
                 planTools = []
             }
 
-            let config = SessionConfig(
-                model: plan.model.isEmpty ? "gpt-4.1" : plan.model,
-                tools: planTools.isEmpty ? nil : planTools,
-                userId: self.userId
+            let model = plan.model.isEmpty ? "gpt-4.1" : plan.model
+            let provider = modelRegistry.model(id: model)?.provider
+
+            let config = RuntimeSessionConfig(
+                sessionName: "plan-\(plan.id.uuidString.prefix(8))",
+                model: model,
+                provider: provider,
+                tools: planTools.isEmpty ? nil : planTools
             )
-            let session = try await client.createSession(config: config)
+            try await runtime.createSession(config: config)
             
-            // 3. Send plan prompt and wait for response
-            let resultText = try await session.sendAndWait(
-                prompt: plan.prompt,
-                timeout: 120
-            ) ?? "No output"
+            // 3. Send plan prompt and collect response via events
+            var resultText = ""
+            let sub = runtime.subscribe { event in
+                if case .assistantTextDelta(let delta) = event {
+                    resultText += delta.text
+                } else if case .assistantMessageComplete(let complete) = event {
+                    resultText = complete.content
+                }
+            }
+
+            try await runtime.send(prompt: plan.prompt, attachments: nil)
+            runtime.unsubscribe(sub)
+
+            let finalResult = resultText.isEmpty ? "No output" : resultText
             
-            // 4. Calculate cost (rough estimate since we don't have token counts from sendAndWait)
-            let cost: Double = 0 // Token tracking happens on the main chat flow
-            
-            // 5. Record result
+            // 4. Record result
             execution.complete(
-                result: resultText,
+                result: finalResult,
                 tokensUsed: nil,
-                cost: cost
+                cost: 0
             )
             planStore.addExecution(execution)
             
-            // 6. Post notification
-            postCompletionNotification(plan: plan, result: resultText, cost: cost)
+            // 5. Post notification
+            postCompletionNotification(plan: plan, result: finalResult, cost: 0)
             
-            // 7. Disconnect
-            try? await session.destroy()
+            // 6. Cleanup
+            await runtime.destroy()
             
         } catch {
             execution.fail(error: error.localizedDescription)

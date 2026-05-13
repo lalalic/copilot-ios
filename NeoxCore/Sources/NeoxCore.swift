@@ -1,7 +1,6 @@
 // NeoxCore — shared infrastructure for Neox-family apps
 //
 // This package provides the generic app shell extracted from Neox:
-// - ConnectionManager: relay connection state machine
 // - ContextToolProvider: device context tool (time, battery, network, projects)
 // - RegisteredTool: tool registry model
 // - ChannelProvider: protocol for messaging channels (WeChat, Discord, etc.)
