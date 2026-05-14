@@ -4,6 +4,7 @@ import CopilotSDK
 import CopilotChat
 import WebKitAgent
 import Network
+import Combine
 #if canImport(MediaKit)
 import MediaKit
 #endif
@@ -42,6 +43,12 @@ open class BaseCoordinator: ObservableObject {
     /// User-managed providers (built-ins + custom OpenAI-compatible endpoints).
     /// Single source of truth for which models are visible in the picker.
     public let providerRegistry = ProviderRegistry()
+
+    /// Subscriptions kept alive for the lifetime of the coordinator.
+    /// Used to forward `objectWillChange` from nested ObservableObjects
+    /// (e.g. `providerRegistry`) so SwiftUI views observing the coordinator
+    /// refresh when those nested objects change.
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Neo Desktop (Remote) Settings
 
@@ -260,6 +267,14 @@ open class BaseCoordinator: ObservableObject {
 
         // Seed default DeepSeek credentials if none configured.
         seedDefaultCredentials()
+
+        // Forward provider registry changes (e.g. toggling enabled models,
+        // adding/deleting providers) into our own objectWillChange so any
+        // SwiftUI view observing the coordinator — including the model
+        // picker accessed via `pickerProviderGroups` — refreshes.
+        providerRegistry.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         // Load per-app supported model list from relay (best-effort, async).
         Task { await self.loadAvailableModels() }
