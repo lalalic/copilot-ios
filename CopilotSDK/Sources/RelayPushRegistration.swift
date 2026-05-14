@@ -26,6 +26,7 @@ public final class RelayPushRegistration: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "relay-push-registration", qos: .utility)
     private var observer: NSObjectProtocol?
+    private var bearerObserver: NSObjectProtocol?
     private var bearerProvider: (() -> String?)?
     private var relayBaseURL: String = "https://relay.ai.qili2.com"
     private var apnsEnv: String = {
@@ -61,6 +62,22 @@ public final class RelayPushRegistration: @unchecked Sendable {
             ) { [weak self] note in
                 guard let token = note.object as? String, !token.isEmpty else { return }
                 self?.register(token: token)
+            }
+        }
+
+        // Listen for relay-bearer-available so we can retry registration when
+        // the bootstrap flow completes after we already received the APN token.
+        if bearerObserver == nil {
+            bearerObserver = NotificationCenter.default.addObserver(
+                forName: Notification.Name("relayBearerAvailable"),
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self else { return }
+                if let cached = UserDefaults.standard.string(forKey: "apnsDeviceToken"), !cached.isEmpty {
+                    self.lastRegisteredToken = nil // force resend
+                    self.register(token: cached)
+                }
             }
         }
 
@@ -111,7 +128,9 @@ public final class RelayPushRegistration: @unchecked Sendable {
     /// Stop listening for token notifications. Useful for tests.
     public func stop() {
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let bearerObserver { NotificationCenter.default.removeObserver(bearerObserver) }
         observer = nil
+        bearerObserver = nil
         bearerProvider = nil
         lastRegisteredToken = nil
     }

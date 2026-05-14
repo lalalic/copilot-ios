@@ -287,6 +287,39 @@ open class BaseCoordinator: ObservableObject {
             }
         )
 
+        // Bootstrap per-device relay bearer (best-effort, async). Reads
+        // `RelayBootstrapToken` from Info.plist. If a bearer is already
+        // stored, this is a no-op. On success, posts
+        // `relayBearerAvailableNotification` which RelayPushRegistration
+        // observes to retry token registration.
+        if credentialStore.getAPIKey(for: .relay) == nil {
+            let relayHostRef = self.relayHost
+            let platformId: String = {
+                #if canImport(UIKit)
+                return UIDevice.current.userInterfaceIdiom == .pad ? "ios-ipad" : "ios-iphone"
+                #else
+                return "ios-unknown"
+                #endif
+            }()
+            let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+            Task { [weak self] in
+                let bearer = await RelayDeviceBootstrap.register(
+                    relayBaseURL: "https://\(relayHostRef)",
+                    platform: platformId,
+                    appVersion: appVersion
+                )
+                guard let bearer else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    try? self.credentialStore.setAPIKey(bearer, for: .relay)
+                    NotificationCenter.default.post(
+                        name: RelayDeviceBootstrap.bearerAvailableNotification,
+                        object: bearer
+                    )
+                }
+            }
+        }
+
         // Load per-app supported model list from relay (best-effort, async).
         Task { await self.loadAvailableModels() }
     }
