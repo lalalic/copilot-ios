@@ -276,6 +276,17 @@ open class BaseCoordinator: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
+        // Register APNs device token with the relay so the relay can forward
+        // status pushes (`report_to_channel` / `report_to_neox`) when the app
+        // isn't connected via live SSE. Bearer is provided lazily so the
+        // token gets re-sent whenever a new bearer becomes available.
+        RelayPushRegistration.shared.start(
+            relayBaseURL: "https://\(self.relayHost)",
+            bearerProvider: { [weak self] in
+                self?.credentialStore.getAPIKey(for: .relay)
+            }
+        )
+
         // Load per-app supported model list from relay (best-effort, async).
         Task { await self.loadAvailableModels() }
     }
