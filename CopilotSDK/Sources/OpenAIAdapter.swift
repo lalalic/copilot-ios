@@ -145,6 +145,16 @@ public final class OpenAIAdapter: ProviderAdapter, @unchecked Sendable {
 
         Self.logger.info("[SSE] status=\(httpResponse.statusCode)")
 
+        Self.publishWalletHeader(httpResponse)
+
+        // Server-side wallet (relay v4): 402 → insufficient_funds.
+        if httpResponse.statusCode == 402 {
+            var bodyText = ""
+            for try await line in asyncBytes.lines { bodyText += line }
+            Self.logger.warning("[SSE] insufficient_funds: \(bodyText.prefix(200))")
+            throw OpenAIAdapterError.apiError(statusCode: 402, message: bodyText)
+        }
+
         guard httpResponse.statusCode == 200 else {
             // Read error body
             var errorBody = ""
@@ -247,6 +257,14 @@ public final class OpenAIAdapter: ProviderAdapter, @unchecked Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIAdapterError.invalidResponse
+        }
+
+        Self.publishWalletHeader(httpResponse)
+
+        if httpResponse.statusCode == 402 {
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            Self.logger.warning("[OAI] insufficient_funds: \(bodyText.prefix(200))")
+            throw OpenAIAdapterError.apiError(statusCode: 402, message: bodyText)
         }
 
         guard httpResponse.statusCode == 200 else {
@@ -380,6 +398,26 @@ public final class OpenAIAdapter: ProviderAdapter, @unchecked Sendable {
         let id: String
         let name: String
         var arguments: String
+    }
+
+    // MARK: - Server-side wallet (relay v4)
+
+    /// Posted whenever the relay returns an `X-Balance-Cents` header.
+    /// `userInfo["cents"]` is the integer balance in cents.
+    /// Observers (e.g. a `BalanceStore`) can mirror it into UI state.
+    public static let walletBalanceDidChange = Notification.Name("CopilotSDK.WalletBalanceDidChange")
+
+    /// Read `X-Balance-Cents` from the response (relay v4 server-side wallet)
+    /// and broadcast it. Best-effort — silent on missing/invalid header.
+    static func publishWalletHeader(_ response: HTTPURLResponse) {
+        guard let raw = response.value(forHTTPHeaderField: "X-Balance-Cents") ?? response.value(forHTTPHeaderField: "x-balance-cents"),
+              let cents = Int(raw.trimmingCharacters(in: .whitespaces))
+        else { return }
+        NotificationCenter.default.post(
+            name: walletBalanceDidChange,
+            object: nil,
+            userInfo: ["cents": cents]
+        )
     }
 }
 
