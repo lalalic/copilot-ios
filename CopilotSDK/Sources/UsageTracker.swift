@@ -26,7 +26,14 @@ public class UsageTracker: ObservableObject, @unchecked Sendable {
     
     /// Per-model token breakdown for the current session.
     @Published public private(set) var sessionUsageByModel: [String: TokenUsage] = [:]
-    
+
+    /// True once the server has reported a balance via `X-Balance-Cents`.
+    /// When set, the client no longer locally debits `balance` from `record(...)` —
+    /// the relay is authoritative and pushes balance via response headers.
+    @Published public private(set) var serverManaged: Bool = false
+
+    private var walletObserver: NSObjectProtocol?
+
     // MARK: - Types
     
     public struct TokenUsage: Codable, Sendable {
@@ -65,6 +72,33 @@ public class UsageTracker: ObservableObject, @unchecked Sendable {
         }
         self.lifetimeCost = defaults.double(forKey: Self.lifetimeCostKey)
         self.lifetimeTokens = defaults.integer(forKey: Self.lifetimeTokensKey)
+
+        // Subscribe to relay v4 server-side wallet updates.
+        // `OpenAIAdapter` posts this notification with userInfo["cents"] on every
+        // /llm/v1/chat/completions response that carries an `X-Balance-Cents` header.
+        let center = NotificationCenter.default
+        self.walletObserver = center.addObserver(
+            forName: Notification.Name("CopilotSDK.WalletBalanceDidChange"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            guard let cents = note.userInfo?["cents"] as? Int else { return }
+            self.applyServerBalance(cents: cents)
+        }
+    }
+
+    deinit {
+        if let obs = walletObserver { NotificationCenter.default.removeObserver(obs) }
+    }
+
+    /// Apply a server-authoritative balance (in cents) to this tracker.
+    /// Flips `serverManaged` to true; subsequent `record(...)` calls will skip
+    /// local debit and only update session/lifetime counters.
+    public func applyServerBalance(cents: Int) {
+        self.serverManaged = true
+        self.balance = Double(cents) / 100.0
+        persist()
     }
     
     // MARK: - Recording
@@ -91,10 +125,12 @@ public class UsageTracker: ObservableObject, @unchecked Sendable {
         lifetimeCost += cost
         lifetimeTokens += promptTokens + completionTokens
         
-        // Deduct from balance
-        balance -= cost
-        if balance < 0 { balance = 0 }
-        
+        // Deduct from balance (skip when relay is authoritative).
+        if !serverManaged {
+            balance -= cost
+            if balance < 0 { balance = 0 }
+        }
+
         persist()
     }
 
