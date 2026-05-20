@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(Vision)
+import Vision
+#endif
 import os.log
 
 private let logger = Logger(subsystem: "com.copilot-ios.sdk", category: "FileTools")
@@ -17,22 +23,28 @@ public final class FileToolProvider: Sendable {
     /// Base directory for the agent's workspace.
     public let baseDirectory: URL
 
+    /// Returns true when the current model supports image inputs (vision).
+    /// Set by the coordinator after construction.
+    public let modelSupportsImages: @Sendable () -> Bool
+
     /// Create a FileToolProvider with the default workspace directory (Documents/workspace/).
-    public init() {
+    public init(modelSupportsImages: @escaping @Sendable () -> Bool = { true }) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         self.baseDirectory = docs.appendingPathComponent("workspace", isDirectory: true)
+        self.modelSupportsImages = modelSupportsImages
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
     /// Create a FileToolProvider with a custom base directory.
-    public init(baseDirectory: URL) {
+    public init(baseDirectory: URL, modelSupportsImages: @escaping @Sendable () -> Bool = { true }) {
         self.baseDirectory = baseDirectory
+        self.modelSupportsImages = modelSupportsImages
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
-    /// All file tools: read_file, write_file, patch_file, create_project.
+    /// All file tools: read_file, write_file, patch_file, create_project, describe_media.
     public var tools: [ToolDefinition] {
-        [readFileTool, writeFileTool, patchFileTool, createProjectTool]
+        [readFileTool, writeFileTool, patchFileTool, createProjectTool, describeMediaTool]
     }
 
     // MARK: - Path Resolution
@@ -335,5 +347,150 @@ public final class FileToolProvider: Sendable {
                 return "Error creating project: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: - describe_media
+
+    private var describeMediaTool: ToolDefinition {
+        ToolDefinition(
+            name: "describe_media",
+            description: "Describe an image file. When the model supports vision, returns base64 image data. Otherwise, uses on-device analysis (scene classification, OCR, saliency) to return a text description. Only works with image files (jpg, png, gif, webp, heic, bmp, tiff, svg).",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "path": .object([
+                        "type": .string("string"),
+                        "description": .string("Workspace-relative path to an image file"),
+                    ]),
+                ]),
+                "required": .array([.string("path")]),
+            ]),
+            skipPermission: true,
+            handler: { [self] args in
+                guard case .object(let dict) = args,
+                      case .string(let path) = dict["path"] else {
+                    return "Error: missing 'path' parameter"
+                }
+
+                let ext = (path as NSString).pathExtension.lowercased()
+                let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff", "tif", "svg"]
+                guard imageExtensions.contains(ext) else {
+                    return "Error: '\(path)' is not an image file. Supported: \(imageExtensions.sorted().joined(separator: ", "))."
+                }
+
+                guard let fileURL = resolve(path) else {
+                    return "Error: path escapes sandbox"
+                }
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    return "Error: image not found at '\(path)'"
+                }
+                guard let data = try? Data(contentsOf: fileURL) else {
+                    return "Error: failed to read image at '\(path)'"
+                }
+
+                if modelSupportsImages() {
+                    return Self.imageAsBase64(data: data, path: path, ext: ext)
+                } else {
+                    return await Self.analyzeOnDevice(data: data, path: path)
+                }
+            }
+        )
+    }
+
+    /// Return resized base64 image data for vision models.
+    private static func imageAsBase64(data: Data, path: String, ext: String) -> String {
+        #if canImport(UIKit)
+        if let image = UIImage(data: data) {
+            let maxDim: CGFloat = 768
+            let size = image.size
+            let maxSide = max(size.width, size.height)
+            let targetSize: CGSize
+            if maxSide > maxDim {
+                let scale = maxDim / maxSide
+                targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+            } else {
+                targetSize = size
+            }
+            let renderer = UIGraphicsImageRenderer(size: targetSize)
+            let jpegData = renderer.jpegData(withCompressionQuality: 0.7) { ctx in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+            return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
+        }
+        #endif
+        let mime: String
+        switch ext {
+        case "png": mime = "image/png"
+        case "gif": mime = "image/gif"
+        case "webp": mime = "image/webp"
+        case "svg": mime = "image/svg+xml"
+        default: mime = "image/jpeg"
+        }
+        return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"
+    }
+
+    /// Describe a media file directly (without going through the LLM agent loop).
+    /// Saves the data to a temp file in the workspace, then runs the same logic
+    /// as the `describe_media` tool: base64 for vision models, on-device analysis otherwise.
+    public func describeMedia(data: Data, filename: String) async -> String {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let tempDir = baseDirectory.appendingPathComponent(".tmp-media", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let tempURL = tempDir.appendingPathComponent(filename)
+        try? data.write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let relativePath = ".tmp-media/\(filename)"
+        if modelSupportsImages() {
+            return Self.imageAsBase64(data: data, path: relativePath, ext: ext)
+        } else {
+            return await Self.analyzeOnDevice(data: data, path: relativePath)
+        }
+    }
+
+    /// On-device Vision framework analysis for non-vision models.
+    private static func analyzeOnDevice(data: Data, path: String) async -> String {
+        #if canImport(UIKit) && canImport(Vision)
+        guard let image = UIImage(data: data), let cgImage = image.cgImage else {
+            return "[image:\(path)] Error: could not decode image for on-device analysis"
+        }
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        let classifyRequest = VNClassifyImageRequest()
+        let textRequest = VNRecognizeTextRequest()
+        textRequest.recognitionLevel = .fast
+        let saliencyRequest = VNGenerateAttentionBasedSaliencyImageRequest()
+
+        try? handler.perform([classifyRequest, textRequest, saliencyRequest])
+
+        let sceneLabels = (classifyRequest.results ?? [])
+            .filter { $0.confidence > 0.1 }
+            .prefix(8)
+            .map { "\($0.identifier) (\(String(format: "%.0f%%", $0.confidence * 100)))" }
+
+        let texts = (textRequest.results ?? [])
+            .compactMap { $0.topCandidates(1).first?.string }
+
+        var focalPointCount = 0
+        if let saliencyMap = saliencyRequest.results?.first {
+            focalPointCount = saliencyMap.salientObjects?.count ?? 0
+        }
+
+        var parts: [String] = []
+        parts.append("[image:\(path)]")
+        parts.append("Size: \(Int(image.size.width))x\(Int(image.size.height))")
+        if !sceneLabels.isEmpty {
+            parts.append("Scene: \(sceneLabels.joined(separator: ", "))")
+        }
+        if !texts.isEmpty {
+            parts.append("Text found: \(texts.joined(separator: " | "))")
+        }
+        if focalPointCount > 0 {
+            parts.append("Focal points: \(focalPointCount)")
+        }
+        return parts.joined(separator: "\n")
+        #else
+        return "[image:\(path)] On-device analysis unavailable on this platform"
+        #endif
     }
 }

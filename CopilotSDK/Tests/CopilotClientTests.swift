@@ -425,7 +425,7 @@ final class CopilotClientTests: XCTestCase {
         let config = SessionConfig(
             model: "gpt-4.1",
             customAgents: [
-                CustomAgentConfig(name: "researcher", description: "Explores code", tools: ["grep", "view"]),
+                CustomAgentConfig(name: "researcher", description: "Explores code", tools: ["grep", "describe_media"]),
                 CustomAgentConfig(name: "editor", description: "Makes changes", tools: ["edit", "bash"]),
             ],
             agent: "researcher"
@@ -441,7 +441,7 @@ final class CopilotClientTests: XCTestCase {
         // First agent
         guard case .object(let first) = agents[0] else { XCTFail("Expected object"); return }
         XCTAssertEqual(first["name"], .string("researcher"))
-        XCTAssertEqual(first["tools"], .array([.string("grep"), .string("view")]))
+        XCTAssertEqual(first["tools"], .array([.string("grep"), .string("describe_media")]))
 
         // agent pre-selection
         XCTAssertEqual(params["agent"], .string("researcher"))

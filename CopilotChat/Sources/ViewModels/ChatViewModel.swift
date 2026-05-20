@@ -1214,92 +1214,6 @@ public final class ChatViewModel: ObservableObject {
         return "Payment checkout link: \(checkoutURL)"
     }
 
-    /// Build the `view` tool definition.
-    /// The model calls this to view images — either from attachments or workspace files.
-    private func makeViewTool() -> ToolDefinition {
-        ToolDefinition(
-            name: "view",
-            description: "View an image by name or path. Returns auto-resized base64 image data for vision models. Only works with image files (jpg, png, gif, webp, heic, bmp, tiff, svg).",
-            parameters: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "path": .object([
-                        "type": .string("string"),
-                        "description": .string("Image filename from attached files, or a workspace-relative file path"),
-                    ]),
-                ]),
-                "required": .array([.string("path")]),
-            ]),
-            overridesBuiltInTool: true,
-            skipPermission: true,
-            handler: { [weak self] args in
-                guard let self else { return "Error: view model deallocated" }
-                return await self.handleView(args)
-            }
-        )
-    }
-
-    /// Handle `view` tool call — load and return image data.
-    /// Checks attachments first, then workspace files.
-    private func handleView(_ args: JSONValue) async -> String {
-        guard case .object(let dict) = args,
-              case .string(let path) = dict["path"] else {
-            return "Error: missing 'path' parameter"
-        }
-
-        // Check if it's an image by extension
-        let ext = (path as NSString).pathExtension.lowercased()
-        let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff", "tif", "svg"]
-        guard imageExtensions.contains(ext) else {
-            return "Error: '\(path)' is not an image file. The view tool only supports images (\(imageExtensions.sorted().joined(separator: ", ")))."
-        }
-
-        // Try attachment store first
-        do {
-            let result = try await attachmentStore.loadSmart(name: path)
-            return result.modelDescription
-        } catch AttachmentError.notFound {
-            // Not in attachments — try workspace path
-        } catch {
-            return "Error: \(error)"
-        }
-
-        // Try workspace file
-        guard let workspaceURL else {
-            return "Error: no workspace configured"
-        }
-        let fileURL = workspaceURL.appendingPathComponent(path)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return "Error: image not found at '\(path)'"
-        }
-
-        // Load image directly and resize
-        guard let data = try? Data(contentsOf: fileURL) else {
-            return "Error: failed to read image at '\(path)'"
-        }
-        let mime = AttachmentStore.mimeType(for: ext)
-        #if canImport(UIKit)
-        if let image = UIImage(data: data) {
-            let maxDim: CGFloat = 768
-            let size = image.size
-            let maxSide = max(size.width, size.height)
-            let targetSize: CGSize
-            if maxSide > maxDim {
-                let scale = maxDim / maxSide
-                targetSize = CGSize(width: size.width * scale, height: size.height * scale)
-            } else {
-                targetSize = size
-            }
-            let renderer = UIGraphicsImageRenderer(size: targetSize)
-            let jpegData = renderer.jpegData(withCompressionQuality: 0.7) { ctx in
-                image.draw(in: CGRect(origin: .zero, size: targetSize))
-            }
-            return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
-        }
-        #endif
-        return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"
-    }
-
     // MARK: - Convert to Markdown Tool
 
     /// Build the `convert_to_markdown` tool — converts files (PDF, DOC, etc.) to markdown text.
@@ -1416,7 +1330,7 @@ public final class ChatViewModel: ObservableObject {
         case .videoMetadata(let duration, let width, let height, _, _):
             return "# \(path)\n\nVideo: \(width)×\(height), \(String(format: "%.1f", duration))s"
         case .image:
-            return "Error: '\(path)' is an image. Use the `view` tool instead."
+            return "Error: '\(path)' is an image. Use the `describe_media` tool instead."
         case .binary(_, let mimeType):
             return "Error: unsupported format '\(mimeType)' for markdown conversion"
         }

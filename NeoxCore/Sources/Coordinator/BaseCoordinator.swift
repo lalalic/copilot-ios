@@ -229,7 +229,21 @@ open class BaseCoordinator: ObservableObject {
         self.profileLoader = loader
     self.appRuntimeConfig = runtimeConfig
         self.workspaceURL = resolvedWorkspace
-        self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
+        let registry = self.modelRegistry
+        self.fileToolProvider = FileToolProvider(
+            baseDirectory: resolvedWorkspace,
+            modelSupportsImages: {
+                let raw = UserDefaults.standard.string(forKey: NeoxCoreSettings.selectedModelKey) ?? ""
+                // Extract modelId from composite "providerId/modelId"
+                let modelId: String
+                if let slash = raw.firstIndex(of: "/") {
+                    modelId = String(raw[raw.index(after: slash)...])
+                } else {
+                    modelId = raw
+                }
+                return registry.model(id: modelId)?.supportsImages ?? true
+            }
+        )
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
         let memProvider = self.memoryToolProvider
         let fileProvider = self.fileToolProvider
