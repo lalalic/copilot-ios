@@ -57,7 +57,7 @@ public enum RelayDeviceBootstrap {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard status == 200 else {
+            guard status == 200 || status == 201 else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
                 NSLog("[RelayDeviceBootstrap] register failed HTTP \(status): \(preview)")
                 return nil

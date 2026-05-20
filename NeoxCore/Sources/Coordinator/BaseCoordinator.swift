@@ -315,7 +315,11 @@ open class BaseCoordinator: ObservableObject {
                 guard let bearer else { return }
                 await MainActor.run {
                     guard let self else { return }
-                    try? self.credentialStore.setAPIKey(bearer, for: .relay)
+                    do {
+                        try self.credentialStore.setAPIKey(bearer, for: .relay)
+                    } catch {
+                        NSLog("[Bootstrap] Keychain write failed: \(error)")
+                    }
                     NotificationCenter.default.post(
                         name: RelayDeviceBootstrap.bearerAvailableNotification,
                         object: bearer
