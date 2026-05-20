@@ -27,8 +27,15 @@ public final class FileToolProvider: Sendable {
     /// Set by the coordinator after construction.
     public let modelSupportsImages: @Sendable () -> Bool
 
+    /// Optional closure to describe an image using the LLM (for direct callers like StepEditorView).
+    /// Receives (imageData, mimeType, prompt) and returns the LLM's text description.
+    /// Set by the coordinator to route through the orchestrator session.
+    public nonisolated(unsafe) var describeImageWithLLM: (@Sendable (_ imageData: Data, _ mimeType: String, _ prompt: String) async -> String?)?
+
     /// Create a FileToolProvider with the default workspace directory (Documents/workspace/).
-    public init(modelSupportsImages: @escaping @Sendable () -> Bool = { true }) {
+    public init(
+        modelSupportsImages: @escaping @Sendable () -> Bool = { true }
+    ) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         self.baseDirectory = docs.appendingPathComponent("workspace", isDirectory: true)
         self.modelSupportsImages = modelSupportsImages
@@ -36,7 +43,10 @@ public final class FileToolProvider: Sendable {
     }
 
     /// Create a FileToolProvider with a custom base directory.
-    public init(baseDirectory: URL, modelSupportsImages: @escaping @Sendable () -> Bool = { true }) {
+    public init(
+        baseDirectory: URL,
+        modelSupportsImages: @escaping @Sendable () -> Bool = { true }
+    ) {
         self.baseDirectory = baseDirectory
         self.modelSupportsImages = modelSupportsImages
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
@@ -430,22 +440,19 @@ public final class FileToolProvider: Sendable {
     }
 
     /// Describe a media file directly (without going through the LLM agent loop).
-    /// Saves the data to a temp file in the workspace, then runs the same logic
-    /// as the `describe_media` tool: base64 for vision models, on-device analysis otherwise.
+    /// For vision models: sends the image to the LLM via describeImageWithLLM and returns text.
+    /// For non-vision models: uses on-device Vision framework analysis.
+    /// Falls back to on-device analysis if describeImageWithLLM is not set.
     public func describeMedia(data: Data, filename: String) async -> String {
-        let ext = (filename as NSString).pathExtension.lowercased()
-        let tempDir = baseDirectory.appendingPathComponent(".tmp-media", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let tempURL = tempDir.appendingPathComponent(filename)
-        try? data.write(to: tempURL)
-        defer { try? FileManager.default.removeItem(at: tempURL) }
-
-        let relativePath = ".tmp-media/\(filename)"
-        if modelSupportsImages() {
-            return Self.imageAsBase64(data: data, path: relativePath, ext: ext)
-        } else {
-            return await Self.analyzeOnDevice(data: data, path: relativePath)
+        if modelSupportsImages(), let describe = describeImageWithLLM {
+            // Send to LLM for vision-based description
+            if let description = await describe(data, "image/jpeg", "Describe this image concisely: what's in it, the scene, mood, and any notable details.") {
+                return description
+            }
         }
+        // Fallback: on-device analysis
+        let relativePath = filename
+        return await Self.analyzeOnDevice(data: data, path: relativePath)
     }
 
     /// On-device Vision framework analysis for non-vision models.

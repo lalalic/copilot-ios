@@ -314,12 +314,30 @@ public final class OpenAIAdapter: ProviderAdapter, @unchecked Sendable {
             if let toolCallId = msg.toolCallId {
                 apiMsg["tool_call_id"] = toolCallId
             }
-            // Tool messages use simple string content
-            let textContent = msg.content.compactMap { part -> String? in
-                if case .text(let s) = part { return s }
-                return nil
-            }.joined()
-            apiMsg["content"] = textContent
+            // Tool messages: support multimodal content (images from describe_media)
+            let hasImages = msg.content.contains { if case .image = $0 { return true } else { return false } }
+            if hasImages {
+                var contentParts: [[String: Any]] = []
+                for part in msg.content {
+                    switch part {
+                    case .text(let s):
+                        contentParts.append(["type": "text", "text": s])
+                    case .image(let data, let mimeType):
+                        let base64 = data.base64EncodedString()
+                        contentParts.append([
+                            "type": "image_url",
+                            "image_url": ["url": "data:\(mimeType);base64,\(base64)"],
+                        ])
+                    }
+                }
+                apiMsg["content"] = contentParts
+            } else {
+                let textContent = msg.content.compactMap { part -> String? in
+                    if case .text(let s) = part { return s }
+                    return nil
+                }.joined()
+                apiMsg["content"] = textContent
+            }
             return apiMsg
         }
 
