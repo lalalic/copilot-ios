@@ -146,19 +146,9 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
             throw DirectProviderError.unknownProvider(providerId)
         }
 
-        // For relay providers, wait briefly for bootstrap to complete
-        if credentialStore.getAPIKey(forProviderKey: providerId) == nil && config.providerConfig?.apiKey == nil {
-            if adapter is OpenAIAdapter {
-                // Wait up to 5s for bootstrap to store a credential
-                for _ in 0..<10 {
-                    try await Task.sleep(nanoseconds: 500_000_000)
-                    if credentialStore.getAPIKey(forProviderKey: providerId) != nil { break }
-                }
-            }
-            if credentialStore.getAPIKey(forProviderKey: providerId) == nil {
-                throw DirectProviderError.noCredentials(providerId)
-            }
-        }
+        // Credentials are checked lazily in send() — not here — so
+        // the session can connect before bootstrap finishes storing
+        // the relay bearer token.
 
         activeAdapter = adapter
         activeProviderId = providerId
@@ -236,8 +226,18 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
         // Prefer the API key injected via providerConfig (e.g. from a custom
         // user-added provider keyed by UUID); fall back to the credential
         // store under the providerId.
-        guard let apiKey = activeProviderConfig?.apiKey
-            ?? credentialStore.getAPIKey(forProviderKey: providerId) else {
+        var apiKey = activeProviderConfig?.apiKey
+            ?? credentialStore.getAPIKey(forProviderKey: providerId)
+
+        // Wait briefly for bootstrap credential if not yet available
+        if apiKey == nil {
+            for _ in 0..<10 {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                apiKey = credentialStore.getAPIKey(forProviderKey: providerId)
+                if apiKey != nil { break }
+            }
+        }
+        guard let apiKey else {
             Self.logger.error("[SEND] no credentials for \(providerId)")
             throw DirectProviderError.noCredentials(providerId)
         }
