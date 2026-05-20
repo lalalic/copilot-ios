@@ -81,6 +81,11 @@ public enum ModelCatalog {
     public static func model(for id: String) -> ModelInfo? {
         allModels.first { $0.id == id }
     }
+
+    /// Find a model by ID and provider family.
+    public static func model(for id: String, family: String) -> ModelInfo? {
+        allModels.first { $0.id == id && $0.family == family }
+    }
     
     /// Models grouped by tier.
     public static var byTier: [(tier: ModelTier, models: [ModelInfo])] {

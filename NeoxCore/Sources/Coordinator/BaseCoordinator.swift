@@ -118,6 +118,8 @@ open class BaseCoordinator: ObservableObject {
     public var pickerProviderGroups: [(id: String, name: String, models: [CopilotChat.ModelInfo])] {
         providerRegistry.enabledModelsByProvider.map { (provider, models) in
             let infos: [CopilotChat.ModelInfo] = models.map { m in
+                // Prefer a catalog entry matching both model ID and provider family
+                if let known = ModelCatalog.model(for: m.id, family: provider.id) { return known }
                 if let known = ModelCatalog.model(for: m.id) { return known }
                 return CopilotChat.ModelInfo(
                     id: m.id,
@@ -136,7 +138,9 @@ open class BaseCoordinator: ObservableObject {
     /// The provider name is shown elsewhere via the Providers section so we
     /// don't repeat it here.
     public var selectedModelDisplayName: String {
-        let (_, modelId) = resolveProviderAndModel(from: selectedModel)
+        let (providerId, modelId) = resolveProviderAndModel(from: selectedModel)
+        if let info = ModelCatalog.model(for: modelId, family: providerId) { return info.name }
+        if let info = ModelCatalog.model(for: modelId) { return info.name }
         return modelId
     }
 
