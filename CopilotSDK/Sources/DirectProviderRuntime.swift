@@ -146,8 +146,18 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
             throw DirectProviderError.unknownProvider(providerId)
         }
 
-        guard credentialStore.getAPIKey(forProviderKey: providerId) != nil || config.providerConfig?.apiKey != nil else {
-            throw DirectProviderError.noCredentials(providerId)
+        // For relay providers, wait briefly for bootstrap to complete
+        if credentialStore.getAPIKey(forProviderKey: providerId) == nil && config.providerConfig?.apiKey == nil {
+            if adapter is OpenAIAdapter {
+                // Wait up to 5s for bootstrap to store a credential
+                for _ in 0..<10 {
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                    if credentialStore.getAPIKey(forProviderKey: providerId) != nil { break }
+                }
+            }
+            if credentialStore.getAPIKey(forProviderKey: providerId) == nil {
+                throw DirectProviderError.noCredentials(providerId)
+            }
         }
 
         activeAdapter = adapter
