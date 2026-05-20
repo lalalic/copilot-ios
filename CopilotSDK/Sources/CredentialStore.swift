@@ -71,8 +71,9 @@ public final class CredentialStore: @unchecked Sendable {
         ]
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw CredentialStoreError.keychainError(status)
+        if status != errSecSuccess {
+            // Keychain unavailable (e.g. simulator without entitlements) — fall back to UserDefaults
+            UserDefaults.standard.set(key, forKey: userDefaultsKey(for: providerKey))
         }
     }
 
@@ -91,12 +92,13 @@ public final class CredentialStore: @unchecked Sendable {
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let key = String(data: data, encoding: .utf8) else {
-            return nil
+        if status == errSecSuccess,
+           let data = result as? Data,
+           let key = String(data: data, encoding: .utf8) {
+            return key
         }
-        return key
+        // Keychain unavailable — check UserDefaults fallback
+        return UserDefaults.standard.string(forKey: userDefaultsKey(for: providerKey))
     }
 
     /// Remove an API key for a custom provider identifier.
@@ -149,6 +151,10 @@ public final class CredentialStore: @unchecked Sendable {
 
     private func keychainService(for providerKey: String) -> String {
         "\(keychainServicePrefix).\(providerKey)"
+    }
+
+    private func userDefaultsKey(for providerKey: String) -> String {
+        "\(keychainServicePrefix).fallback.\(providerKey)"
     }
 
     private func baseURLKey(for providerKey: String) -> String {
