@@ -892,17 +892,17 @@ public final class ChatViewModel: ObservableObject {
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].isStreaming {
-            // Append to existing streaming message — preserve whitespace-only
-            // deltas (newlines) so multi-line content keeps its structure
-            let existing = messages[lastIndex].fullText
-            let updated = existing + delta
-            messages[lastIndex].content = parseContentBlocks(updated)
+            // Append to existing streaming message using raw text buffer
+            // to preserve all whitespace (newlines, spaces) exactly as streamed
+            let raw = (messages[lastIndex].streamingRawText ?? "") + delta
+            messages[lastIndex].streamingRawText = raw
+            messages[lastIndex].content = [.text(raw)]
         } else {
             // Start a new streaming message — skip if purely whitespace
             let trimmedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedDelta.isEmpty else { return }
-            let blocks = parseContentBlocks(delta)
-            messages.append(ChatMessage(role: .assistant, content: blocks, isStreaming: true, project: projectScope))
+            messages.append(ChatMessage(role: .assistant, content: [.text(delta)], isStreaming: true, project: projectScope))
+            messages[messages.count - 1].streamingRawText = delta
         }
     }
 
@@ -913,17 +913,18 @@ public final class ChatViewModel: ObservableObject {
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].isStreaming {
-            if trimmed.isEmpty {
-                if messages[lastIndex].fullText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    messages.remove(at: lastIndex)
-                } else {
-                    messages[lastIndex].isStreaming = false
-                    sessionLogger?.log(role: "assistant", text: messages[lastIndex].fullText, project: projectScope)
-                }
+            // Use the raw streaming buffer if available (preserves newlines),
+            // otherwise fall back to the finalization content
+            let finalText = messages[lastIndex].streamingRawText?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? trimmed
+            messages[lastIndex].streamingRawText = nil
+
+            if finalText.isEmpty {
+                messages.remove(at: lastIndex)
             } else {
-                messages[lastIndex].content = parseContentBlocks(trimmed)
+                messages[lastIndex].content = parseContentBlocks(finalText)
                 messages[lastIndex].isStreaming = false
-                sessionLogger?.log(role: "assistant", text: trimmed, project: projectScope)
+                sessionLogger?.log(role: "assistant", text: finalText, project: projectScope)
             }
         } else {
             guard !trimmed.isEmpty else { return }

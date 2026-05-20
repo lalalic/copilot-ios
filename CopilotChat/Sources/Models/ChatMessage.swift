@@ -10,6 +10,9 @@ public struct ChatMessage: Identifiable, Sendable {
     public let timestamp: Date
     public var isStreaming: Bool
     public var project: String?
+    /// Raw text accumulated during streaming (preserves all whitespace).
+    /// Cleared on finalization when content blocks are parsed from the final text.
+    public var streamingRawText: String?
     /// Display label showing where this message came from (e.g., "#general", "WeChat: Room")
     public var source: String?
 

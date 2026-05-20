@@ -411,11 +411,22 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
                     // Accumulate tool calls for execution
                     accumulator.addToolCall(ProviderToolCall(id: tc.toolCallId, name: tc.toolName, arguments: tc.result ?? "{}"))
 
+                case .turnEnd, .sessionIdle:
+                    // Suppress intermediate turn boundaries — the agent loop
+                    // may continue with another round after tool execution.
+                    // We emit turnEnd once at the end of the loop instead.
+                    break
+
                 default:
                     break
                 }
-                // Forward all events to subscribers
-                onEvent(event)
+                // Forward events to subscribers (except turn boundaries handled above)
+                switch event {
+                case .turnEnd, .sessionIdle:
+                    break
+                default:
+                    onEvent(event)
+                }
             }
 
             let accumulatedText = accumulator.text
@@ -481,6 +492,9 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
             try? sessionStore.appendMessages(runtimeMessages, to: name)
         }
 
+        // Emit final turn boundary — suppressed during intermediate rounds
+        onEvent(.turnEnd(.init()))
+        onEvent(.sessionIdle)
         await MainActor.run { _state = .idle }
     }
 
