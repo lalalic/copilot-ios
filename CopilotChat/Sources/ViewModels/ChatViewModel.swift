@@ -889,18 +889,18 @@ public final class ChatViewModel: ObservableObject {
     /// Append a delta token to the current streaming assistant message,
     /// or create a new one if none exists.
     private func appendOrUpdateAssistantDelta(_ delta: String) {
-        let trimmedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDelta.isEmpty else { return }
-
         if let lastIndex = messages.indices.last,
            messages[lastIndex].role == .assistant,
            messages[lastIndex].isStreaming {
-            // Append to existing streaming message
+            // Append to existing streaming message — preserve whitespace-only
+            // deltas (newlines) so multi-line content keeps its structure
             let existing = messages[lastIndex].fullText
             let updated = existing + delta
             messages[lastIndex].content = parseContentBlocks(updated)
         } else {
-            // Start a new streaming message
+            // Start a new streaming message — skip if purely whitespace
+            let trimmedDelta = delta.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedDelta.isEmpty else { return }
             let blocks = parseContentBlocks(delta)
             messages.append(ChatMessage(role: .assistant, content: blocks, isStreaming: true, project: projectScope))
         }
