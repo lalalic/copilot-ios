@@ -71,10 +71,10 @@ public enum ModelCatalog {
         // Relay (zero-config OpenAI-compatible endpoint at relay.ai.qili2.com,
         // billed through the platform credit account instead of a per-provider
         // API key). Currently only DeepSeek is exposed.
-        ModelInfo(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)", family: "relay", tier: .fast,
-                  description: "Routed via Relay. Fast, cheap."),
-        ModelInfo(id: "relay-deepseek-v4-pro", name: "DeepSeek V4 Pro (Relay)", family: "relay", tier: .balanced,
-                  description: "Routed via Relay. Capable & balanced."),
+        ModelInfo(id: "deepseek-v4-flash", name: "Flash", family: "relay", tier: .fast,
+                  description: "DeepSeek V4 Flash via Relay."),
+        ModelInfo(id: "deepseek-v4-pro", name: "Pro", family: "relay", tier: .balanced,
+                  description: "DeepSeek V4 Pro via Relay."),
     ]
     
     /// Find a model by ID.

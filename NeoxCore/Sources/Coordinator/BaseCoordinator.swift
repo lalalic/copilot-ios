@@ -370,11 +370,64 @@ open class BaseCoordinator: ObservableObject {
         guard !useDirectProvider else { return }
         let base = "https://\(relayHost)"
         await availableModelsStore.load(appId: appId, relayBase: base)
+
+        // If per-app endpoint failed, try the generic /llm/v1/models
+        if availableModelsStore.lastError != nil {
+            await loadModelsFromLLMEndpoint(base: base)
+        }
+
+        // Sync the relay provider's model list with server-advertised models.
+        // This ensures the picker shows server names, not hardcoded ones.
+        let serverModels = availableModelsStore.models
+        if !serverModels.isEmpty,
+           availableModelsStore.loadedAppId != nil || availableModelsStore.lastError == nil {
+            let providerModels = serverModels.map { m in
+                ProviderModel(id: m.id, name: m.name)
+            }
+            providerRegistry.setModels(providerId: "relay", models: providerModels)
+        }
+
         let ids = Set(availableModelsStore.models.map(\.id))
         if !ids.contains(selectedModel),
            let fallback = availableModelsStore.defaultId ?? availableModelsStore.models.first?.id {
             selectedModel = fallback
             UserDefaults.standard.set(fallback, forKey: NeoxCoreSettings.selectedModelKey)
+        }
+    }
+
+    /// Fallback: fetch from /llm/v1/models (OpenAI-compatible endpoint).
+    private func loadModelsFromLLMEndpoint(base: String) async {
+        guard let url = URL(string: "\(base)/llm/v1/models") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            struct ModelsResponse: Decodable {
+                let data: [ModelEntry]
+                struct ModelEntry: Decodable {
+                    let id: String
+                    let name: String?
+                    let `default`: Bool?
+                }
+            }
+            let response = try JSONDecoder().decode(ModelsResponse.self, from: data)
+            let models = response.data.map { entry in
+                ModelInfo(
+                    id: entry.id,
+                    name: entry.name ?? entry.id,
+                    family: "relay",
+                    tier: .balanced,
+                    description: ""
+                )
+            }
+            if !models.isEmpty {
+                await MainActor.run {
+                    availableModelsStore.updateFromFallback(
+                        models: models,
+                        defaultId: response.data.first(where: { $0.default == true })?.id
+                    )
+                }
+            }
+        } catch {
+            // Silently fail — keep hardcoded defaults
         }
     }
 
@@ -714,17 +767,25 @@ open class BaseCoordinator: ObservableObject {
     /// back to the first enabled provider's first enabled model so the user
     /// can always reach a working configuration.
     public func resolveProviderAndModel(from raw: String) -> (providerId: String, modelId: String) {
-        if let slash = raw.firstIndex(of: "/") {
-            let providerId = String(raw[..<slash])
-            let modelId = String(raw[raw.index(after: slash)...])
+        // Migrate legacy relay- prefixed model IDs
+        let migrated: String
+        if raw.contains("relay-deepseek-") {
+            migrated = raw.replacingOccurrences(of: "relay-deepseek-", with: "deepseek-")
+        } else {
+            migrated = raw
+        }
+
+        if let slash = migrated.firstIndex(of: "/") {
+            let providerId = String(migrated[..<slash])
+            let modelId = String(migrated[migrated.index(after: slash)...])
             if !providerId.isEmpty, !modelId.isEmpty {
                 return (providerId, modelId)
             }
         }
 
-        // Legacy migration: find the first enabled provider that has `raw`.
-        for p in providerRegistry.providers where p.enabledModelIds.contains(raw) {
-            return (p.id, raw)
+        // Legacy migration: find the first enabled provider that has `migrated`.
+        for p in providerRegistry.providers where p.enabledModelIds.contains(migrated) {
+            return (p.id, migrated)
         }
 
         // Last-resort fallback: first enabled model of first enabled provider.
@@ -735,7 +796,7 @@ open class BaseCoordinator: ObservableObject {
 
         // Nothing configured — return the relay default so error messages are
         // meaningful instead of crashing.
-        return ("relay", "relay-deepseek-v4-flash")
+        return ("relay", "deepseek-v4-flash")
     }
 
     /// Create a ChatViewModel backed by NeoDesktopRuntime.

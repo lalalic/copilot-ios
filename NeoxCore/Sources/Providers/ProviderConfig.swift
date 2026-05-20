@@ -128,6 +128,20 @@ public final class ProviderRegistry: ObservableObject, @unchecked Sendable {
                     providers[i].source = .builtin
                     changed = true
                 }
+                // Migrate legacy relay- prefixed model IDs to bare IDs
+                let legacyMap = [
+                    "relay-deepseek-v4-flash": "deepseek-v4-flash",
+                    "relay-deepseek-v4-pro": "deepseek-v4-pro",
+                ]
+                for j in providers[i].models.indices {
+                    if let newId = legacyMap[providers[i].models[j].id] {
+                        providers[i].models[j] = ProviderModel(id: newId, name: providers[i].models[j].name)
+                        changed = true
+                    }
+                }
+                providers[i].enabledModelIds = providers[i].enabledModelIds.map { id in
+                    legacyMap[id] ?? id
+                }
             }
         }
         if changed { persist() }
@@ -135,8 +149,8 @@ public final class ProviderRegistry: ObservableObject, @unchecked Sendable {
 
     public static func defaultRelay() -> ProviderConfig {
         let models = [
-            ProviderModel(id: "relay-deepseek-v4-flash", name: "DeepSeek V4 Flash (Relay)"),
-            ProviderModel(id: "relay-deepseek-v4-pro",   name: "DeepSeek V4 Pro (Relay)"),
+            ProviderModel(id: "deepseek-v4-flash", name: "Flash"),
+            ProviderModel(id: "deepseek-v4-pro",   name: "Pro"),
         ]
         return ProviderConfig(
             id: "relay",

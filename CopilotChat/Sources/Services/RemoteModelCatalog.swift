@@ -112,4 +112,11 @@ public final class RemoteModelCatalog: ObservableObject {
         }
         isLoading = false
     }
+
+    /// Update from a fallback source (e.g. /llm/v1/models).
+    public func updateFromFallback(models: [ModelInfo], defaultId: String?) {
+        self.models = models
+        self.defaultId = defaultId
+        self.lastError = nil
+    }
 }
