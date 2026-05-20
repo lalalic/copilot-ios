@@ -16,6 +16,11 @@ public enum NeoxCoreSettings {
     public static let showBuildInChatKey = "showBuildInChat"
     public static let useDirectProviderKey = "useDirectProvider"
 
+    // Utility model keys — dedicated models for specific tasks
+    public static let visionModelKey = "visionModel"       // "providerId/modelId" or empty for on-device
+    public static let ttsModelKey = "ttsModel"             // "providerId/modelId" or empty for on-device
+    public static let sttModelKey = "sttModel"             // "providerId/modelId" or empty for on-device
+
     // Feedback (Send Feedback + auto crash report) — see Feedback target
     public static let feedbackEndpointKey = "feedbackEndpoint"
     public static let feedbackAutoCrashReportKey = "feedbackAutoCrashReport"

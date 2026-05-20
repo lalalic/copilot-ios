@@ -118,15 +118,31 @@ open class BaseCoordinator: ObservableObject {
     public var pickerProviderGroups: [(id: String, name: String, models: [CopilotChat.ModelInfo])] {
         providerRegistry.enabledModelsByProvider.map { (provider, models) in
             let infos: [CopilotChat.ModelInfo] = models.map { m in
+                let regInfo = modelRegistry.model(provider: provider.id, id: m.id)
+                    ?? modelRegistry.model(id: m.id)
+                let vision = regInfo?.supportsImages ?? true
                 // Prefer a catalog entry matching both model ID and provider family
-                if let known = ModelCatalog.model(for: m.id, family: provider.id) { return known }
-                if let known = ModelCatalog.model(for: m.id) { return known }
+                if let known = ModelCatalog.model(for: m.id, family: provider.id) {
+                    return CopilotChat.ModelInfo(
+                        id: known.id, name: known.name, family: known.family,
+                        tier: known.tier, description: known.description,
+                        supportsImages: vision
+                    )
+                }
+                if let known = ModelCatalog.model(for: m.id) {
+                    return CopilotChat.ModelInfo(
+                        id: known.id, name: known.name, family: known.family,
+                        tier: known.tier, description: known.description,
+                        supportsImages: vision
+                    )
+                }
                 return CopilotChat.ModelInfo(
                     id: m.id,
                     name: m.name,
                     family: provider.id,
                     tier: .balanced,
-                    description: ""
+                    description: "",
+                    supportsImages: vision
                 )
             }
             return (provider.id, provider.name, infos)
@@ -229,21 +245,7 @@ open class BaseCoordinator: ObservableObject {
         self.profileLoader = loader
     self.appRuntimeConfig = runtimeConfig
         self.workspaceURL = resolvedWorkspace
-        let registry = self.modelRegistry
-        self.fileToolProvider = FileToolProvider(
-            baseDirectory: resolvedWorkspace,
-            modelSupportsImages: {
-                let raw = UserDefaults.standard.string(forKey: NeoxCoreSettings.selectedModelKey) ?? ""
-                // Extract modelId from composite "providerId/modelId"
-                let modelId: String
-                if let slash = raw.firstIndex(of: "/") {
-                    modelId = String(raw[raw.index(after: slash)...])
-                } else {
-                    modelId = raw
-                }
-                return registry.model(id: modelId)?.supportsImages ?? true
-            }
-        )
+        self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
         let memProvider = self.memoryToolProvider
         let fileProvider = self.fileToolProvider

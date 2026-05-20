@@ -23,32 +23,22 @@ public final class FileToolProvider: Sendable {
     /// Base directory for the agent's workspace.
     public let baseDirectory: URL
 
-    /// Returns true when the current model supports image inputs (vision).
-    /// Set by the coordinator after construction.
-    public let modelSupportsImages: @Sendable () -> Bool
-
-    /// Optional closure to describe an image using the LLM (for direct callers like StepEditorView).
+    /// Optional closure to describe an image using a dedicated vision model.
     /// Receives (imageData, mimeType, prompt) and returns the LLM's text description.
-    /// Set by the coordinator to route through the orchestrator session.
-    public nonisolated(unsafe) var describeImageWithLLM: (@Sendable (_ imageData: Data, _ mimeType: String, _ prompt: String) async -> String?)?
+    /// If nil or returns nil, falls back to on-device Vision framework.
+    /// Set by the coordinator based on the selected vision model in settings.
+    public nonisolated(unsafe) var visionCall: (@Sendable (_ imageData: Data, _ mimeType: String, _ prompt: String) async -> String?)?
 
     /// Create a FileToolProvider with the default workspace directory (Documents/workspace/).
-    public init(
-        modelSupportsImages: @escaping @Sendable () -> Bool = { true }
-    ) {
+    public init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         self.baseDirectory = docs.appendingPathComponent("workspace", isDirectory: true)
-        self.modelSupportsImages = modelSupportsImages
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
     /// Create a FileToolProvider with a custom base directory.
-    public init(
-        baseDirectory: URL,
-        modelSupportsImages: @escaping @Sendable () -> Bool = { true }
-    ) {
+    public init(baseDirectory: URL) {
         self.baseDirectory = baseDirectory
-        self.modelSupportsImages = modelSupportsImages
         try? FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
 
@@ -398,26 +388,26 @@ public final class FileToolProvider: Sendable {
                     return "Error: failed to read image at '\(path)'"
                 }
 
-                // Always use on-device analysis for tool results (APIs don't support images in tool results)
+                // Use vision model if configured, otherwise on-device analysis
+                if let vision = visionCall {
+                    if let description = await vision(data, "image/jpeg", "Describe this image concisely: what's in it, the scene, mood, and any notable details.") {
+                        return "[image:\(path)] \(description)"
+                    }
+                }
                 return await Self.analyzeOnDevice(data: data, path: path)
             }
         )
     }
 
     /// Describe a media file directly (without going through the LLM agent loop).
-    /// For vision models: sends the image to the LLM via describeImageWithLLM and returns text.
-    /// For non-vision models: uses on-device Vision framework analysis.
-    /// Falls back to on-device analysis if describeImageWithLLM is not set.
+    /// Uses the dedicated vision model if configured, otherwise on-device Vision framework.
     public func describeMedia(data: Data, filename: String) async -> String {
-        if modelSupportsImages(), let describe = describeImageWithLLM {
-            // Send to LLM for vision-based description
-            if let description = await describe(data, "image/jpeg", "Describe this image concisely: what's in it, the scene, mood, and any notable details.") {
+        if let vision = visionCall {
+            if let description = await vision(data, "image/jpeg", "Describe this image concisely: what's in it, the scene, mood, and any notable details.") {
                 return description
             }
         }
-        // Fallback: on-device analysis
-        let relativePath = filename
-        return await Self.analyzeOnDevice(data: data, path: relativePath)
+        return await Self.analyzeOnDevice(data: data, path: filename)
     }
 
     /// On-device Vision framework analysis for non-vision models.

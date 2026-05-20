@@ -10,14 +10,16 @@ public struct ModelInfo: Identifiable, Hashable, Sendable {
     public let family: String      // "OpenAI", "Anthropic", "xAI", "DeepSeek"
     public let tier: ModelTier
     public let description: String
+    public let supportsImages: Bool
     
     public init(id: String, name: String, family: String, tier: ModelTier,
-                description: String) {
+                description: String, supportsImages: Bool = true) {
         self.id = id
         self.name = name
         self.family = family
         self.tier = tier
         self.description = description
+        self.supportsImages = supportsImages
     }
 }
 
