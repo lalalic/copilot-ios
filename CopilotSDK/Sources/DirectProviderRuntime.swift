@@ -465,11 +465,10 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
                     onEvent(.toolStart(.init(toolCallId: tc.id, toolName: tc.name, arguments: tc.arguments)))
                     onEvent(.toolComplete(.init(toolCallId: tc.id, toolName: tc.name, result: result, isError: isError)))
 
-                    // Add tool result to conversation — parse inline image data URIs
-                    let contentParts = Self.parseToolResultContent(result)
+                    // Add tool result to conversation
                     conversationMessages.append(ProviderMessage(
                         role: .tool,
-                        content: contentParts,
+                        content: [.text(result)],
                         toolCallId: tc.id
                     ))
 
@@ -524,36 +523,6 @@ public final class DirectProviderRuntime: AgentSessionRuntime, @unchecked Sendab
     }
 
     // MARK: - Helpers
-
-    /// Parse a tool result string for inline `data:image/...;base64,...` URIs.
-    /// If found, splits into text + image content parts so vision models can see the image.
-    static func parseToolResultContent(_ result: String) -> [ProviderMessage.ContentPart] {
-        // Pattern: [image:path] data:mime;base64,DATA or just data:image/...;base64,...
-        let pattern = #"data:(image/[a-zA-Z+]+);base64,([A-Za-z0-9+/=\s]+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)),
-              let mimeRange = Range(match.range(at: 1), in: result),
-              let dataRange = Range(match.range(at: 2), in: result) else {
-            return [.text(result)]
-        }
-
-        let mimeType = String(result[mimeRange])
-        let base64String = String(result[dataRange]).replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
-        guard let imageData = Data(base64Encoded: base64String) else {
-            return [.text(result)]
-        }
-
-        // Extract any text before the data URI as a label
-        let fullMatchRange = Range(match.range, in: result)!
-        let textBefore = String(result[result.startIndex..<fullMatchRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var parts: [ProviderMessage.ContentPart] = []
-        if !textBefore.isEmpty {
-            parts.append(.text(textBefore))
-        }
-        parts.append(.image(data: imageData, mimeType: mimeType))
-        return parts
-    }
 
     private func emit(_ event: RuntimeEvent) {
         subscriptionLock.lock()

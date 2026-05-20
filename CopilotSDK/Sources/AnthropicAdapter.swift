@@ -359,37 +359,14 @@ public final class AnthropicAdapter: ProviderAdapter, @unchecked Sendable {
         // Handle tool results — Anthropic format
         if msg.role == .tool {
             apiMsg["role"] = "user"
-            // Support multimodal tool results (images from describe_media)
-            let hasImages = msg.content.contains { if case .image = $0 { return true } else { return false } }
-            var resultContent: [[String: Any]] = []
-            if hasImages {
-                for part in msg.content {
-                    switch part {
-                    case .text(let s):
-                        resultContent.append(["type": "text", "text": s])
-                    case .image(let data, let mimeType):
-                        let base64 = data.base64EncodedString()
-                        resultContent.append([
-                            "type": "image",
-                            "source": [
-                                "type": "base64",
-                                "media_type": mimeType,
-                                "data": base64,
-                            ] as [String: Any],
-                        ])
-                    }
-                }
-            } else {
-                let textContent = msg.content.compactMap { part -> String? in
-                    if case .text(let s) = part { return s }
-                    return nil
-                }.joined()
-                resultContent.append(["type": "text", "text": textContent])
-            }
+            let textContent = msg.content.compactMap { part -> String? in
+                if case .text(let s) = part { return s }
+                return nil
+            }.joined()
             apiMsg["content"] = [[
                 "type": "tool_result",
                 "tool_use_id": msg.toolCallId ?? "",
-                "content": resultContent,
+                "content": textContent,
             ] as [String: Any]]
             return apiMsg
         }

@@ -364,7 +364,7 @@ public final class FileToolProvider: Sendable {
     private var describeMediaTool: ToolDefinition {
         ToolDefinition(
             name: "describe_media",
-            description: "Describe an image file. When the model supports vision, returns base64 image data. Otherwise, uses on-device analysis (scene classification, OCR, saliency) to return a text description. Only works with image files (jpg, png, gif, webp, heic, bmp, tiff, svg).",
+            description: "Describe an image file using on-device analysis (scene classification, OCR, saliency). Returns a text description of the image contents. Only works with image files (jpg, png, gif, webp, heic, bmp, tiff, svg).",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -398,45 +398,10 @@ public final class FileToolProvider: Sendable {
                     return "Error: failed to read image at '\(path)'"
                 }
 
-                if modelSupportsImages() {
-                    return Self.imageAsBase64(data: data, path: path, ext: ext)
-                } else {
-                    return await Self.analyzeOnDevice(data: data, path: path)
-                }
+                // Always use on-device analysis for tool results (APIs don't support images in tool results)
+                return await Self.analyzeOnDevice(data: data, path: path)
             }
         )
-    }
-
-    /// Return resized base64 image data for vision models.
-    private static func imageAsBase64(data: Data, path: String, ext: String) -> String {
-        #if canImport(UIKit)
-        if let image = UIImage(data: data) {
-            let maxDim: CGFloat = 768
-            let size = image.size
-            let maxSide = max(size.width, size.height)
-            let targetSize: CGSize
-            if maxSide > maxDim {
-                let scale = maxDim / maxSide
-                targetSize = CGSize(width: size.width * scale, height: size.height * scale)
-            } else {
-                targetSize = size
-            }
-            let renderer = UIGraphicsImageRenderer(size: targetSize)
-            let jpegData = renderer.jpegData(withCompressionQuality: 0.7) { ctx in
-                image.draw(in: CGRect(origin: .zero, size: targetSize))
-            }
-            return "[image:\(path)] data:image/jpeg;base64,\(jpegData.base64EncodedString())"
-        }
-        #endif
-        let mime: String
-        switch ext {
-        case "png": mime = "image/png"
-        case "gif": mime = "image/gif"
-        case "webp": mime = "image/webp"
-        case "svg": mime = "image/svg+xml"
-        default: mime = "image/jpeg"
-        }
-        return "[image:\(path)] data:\(mime);base64,\(data.base64EncodedString())"
     }
 
     /// Describe a media file directly (without going through the LLM agent loop).
