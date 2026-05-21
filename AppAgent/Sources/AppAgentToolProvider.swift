@@ -40,7 +40,7 @@ public final class AppAgentToolProvider {
     - `find` — Find elements by text content. Params: `text` (required). Searches labels and values.
     - `scroll_to` — Scroll to make an element visible. Params: `ref` (required).
     - `pick` — Select a value in a picker, date picker, or segmented control. Params: `ref` (required), `value` (required), `component` (optional, picker column index, default 0).
-    - `screenshot` — Take a screenshot. Returns base64 JPEG.
+    - `screenshot` — Take a screenshot. Returns base64 PNG.
 
     Workflow: snapshot → read refs → tap/type/swipe → snapshot again after interactions.
     """

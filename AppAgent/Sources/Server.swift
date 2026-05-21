@@ -354,7 +354,7 @@ public final class MCPServer {
                     let result = try await handler(jsonArgs)
                     let isImage = result.count > 1000 && !result.contains("\n")
                     let content: [[String: Any]] = isImage
-                        ? [["type": "image", "data": result, "mimeType": "image/jpeg"]]
+                        ? [["type": "image", "data": result, "mimeType": "image/png"]]
                         : [["type": "text", "text": result]]
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": content, "isError": false

@@ -35,7 +35,7 @@ public final class WebAgentToolProvider {
     - `web-agent download <ref|url> [filename]` — Download a file by element ref or URL.
     - `web-agent upload <ref> <filePath>` — Upload a file to a file input element.
     - `web-agent evaluate <script>` — Run JavaScript on the current page.
-    - `web-agent screenshot` — Take a screenshot. Returns base64 JPEG.
+    - `web-agent screenshot` — Take a screenshot. Returns base64 PNG.
     - `web-agent set_cookies <json>` — Inject cookies. JSON array of {name, value, domain, path, ...}.
     - `web-agent get_cookies [domain]` — Export cookies as JSON, optionally filtered by domain.
 

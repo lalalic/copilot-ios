@@ -239,7 +239,7 @@ public final class InteractionEngine {
 
     // MARK: - Screenshot
 
-    /// Take a screenshot of the current screen as base64 JPEG.
+    /// Take a screenshot of the current screen as base64 PNG.
     public func screenshot(quality: CGFloat = 0.1) -> String? {
         guard let window = Self.keyWindow else { return nil }
 
@@ -248,7 +248,7 @@ public final class InteractionEngine {
             window.layer.render(in: ctx.cgContext)
         }
 
-        guard let data = image.jpegData(compressionQuality: quality) else {
+        guard let data = image.pngData() else {
             return nil
         }
 

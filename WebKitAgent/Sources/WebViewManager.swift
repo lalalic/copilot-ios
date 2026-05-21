@@ -338,12 +338,12 @@ public final class WebViewManager: NSObject, ObservableObject {
 
     // MARK: - Screenshot
 
-    /// Take a screenshot of the current page as JPEG base64.
+    /// Take a screenshot of the current page as PNG base64.
     public func screenshot(quality: CGFloat = 0.1) async -> String? {
         #if os(iOS)
         let config = WKSnapshotConfiguration()
         guard let image = try? await webView.takeSnapshot(configuration: config),
-              let data = image.jpegData(compressionQuality: quality) else {
+              let data = image.pngData() else {
             return nil
         }
         return data.base64EncodedString()
@@ -354,7 +354,7 @@ public final class WebViewManager: NSObject, ObservableObject {
         }
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
-              let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) else {
+              let data = bitmap.representation(using: .png, properties: [:]) else {
             return nil
         }
         return data.base64EncodedString()
