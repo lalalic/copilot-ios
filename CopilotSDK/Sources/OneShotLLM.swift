@@ -24,7 +24,7 @@ public enum OneShotLLM {
         imageMimeType: String = "image/jpeg"
     ) async -> String? {
         var contentParts: [ProviderMessage.ContentPart] = [.text(prompt)]
-        if let imageData {
+        if let imageData, !imageData.isEmpty {
             contentParts.append(.image(data: imageData, mimeType: imageMimeType))
         }
 
