@@ -30,14 +30,7 @@ public struct NeoDesktopSettingsSection: View {
                     }
 
                 if coordinator.useNeoDesktop {
-                    Toggle("Take questions", isOn: $coordinator.neoDesktopTakeQuestions)
-                        .onChange(of: coordinator.neoDesktopTakeQuestions) { newValue in
-                            Task {
-                                try? await coordinator.neoDesktopRuntime?.setAskChannel(newValue ? "neox" : "auto")
-                            }
-                        }
-
-                    Text("Chat messages are sent to your Neo desktop via relay")
+                    Text("Chat messages are sent to your Neo desktop via relay. Questions are answered on this device.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

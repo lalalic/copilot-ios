@@ -68,6 +68,12 @@ open class BaseCoordinator: ObservableObject {
     /// Reference to the current NeoDesktopRuntime, if active.
     public private(set) var neoDesktopRuntime: NeoDesktopRuntime?
 
+    /// True when Neox is acting purely as a remote channel for a paired Neo desktop.
+    /// In this mode there is no local agent session; the chat is a thin client over the relay.
+    public var isNeoChannelMode: Bool {
+        useNeoDesktop && (neoDesktopPairingSecret.map { !$0.isEmpty } ?? false)
+    }
+
     // MARK: - Dev Server Settings
 
     @Published public var useDevServer: Bool = UserDefaults.standard.object(forKey: NeoxCoreSettings.useDevServerKey) == nil ? true : UserDefaults.standard.bool(forKey: NeoxCoreSettings.useDevServerKey)
@@ -831,6 +837,8 @@ open class BaseCoordinator: ObservableObject {
             pairingSecret: pairingSecret
         )
         self.neoDesktopRuntime = runtime
+        // Always route questions to this device when Neox is connected to Neo Desktop.
+        Task { try? await runtime.setAskChannel("neox") }
 
         let config = RuntimeSessionConfig(
             sessionName: "neo-desktop",
@@ -855,6 +863,7 @@ open class BaseCoordinator: ObservableObject {
         )
 
         self.chatViewModel = vm
+        vm.useServerTranscription = true  // Use mlx-whisper on the Mac for transcription
         configureChat(vm: vm)
         Task { await vm.connect() }
         return vm

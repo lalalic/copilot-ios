@@ -83,8 +83,24 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
         emit(.turnStart(.init()))
 
         do {
-            let body: [String: Any] = ["prompt": prompt]
-            let _ = try await proxyPOST("/api/neo/proxy/api/chat/send", body: body)
+            // Check for audio attachments — send via audio transcription endpoint
+            if let audio = attachments?.first(where: { $0.mimeType.hasPrefix("audio/") }) {
+                let base64 = audio.data.base64EncodedString()
+                let ext = audio.name.components(separatedBy: ".").last ?? "m4a"
+                var body: [String: Any] = ["audio": base64, "format": ext]
+                if !prompt.isEmpty { body["language"] = prompt } // Use prompt text as language hint if short
+                let _ = try await proxyPOST("/api/neo/proxy/api/chat/send-audio", body: body)
+            } else {
+                var body: [String: Any] = ["prompt": prompt]
+                // Include image attachments as base64
+                if let atts = attachments, !atts.isEmpty {
+                    let images = atts.filter { $0.isImage }.map { att -> [String: String] in
+                        ["name": att.name, "data": att.data.base64EncodedString(), "mimeType": att.mimeType]
+                    }
+                    if !images.isEmpty { body["attachments"] = images }
+                }
+                let _ = try await proxyPOST("/api/neo/proxy/api/chat/send", body: body)
+            }
             // Response is just { ok: true } — actual content comes via SSE events
         } catch {
             updateState(.error(error.localizedDescription))
@@ -239,7 +255,7 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 updateState(.working)
             }
             // Raw text delta from assistant (data is JSON-encoded string)
-            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? String) ?? data
+            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8), options: [.fragmentsAllowed]) as? String) ?? data
             emit(.assistantTextDelta(.init(text: text)))
 
         case "thinking":
@@ -248,7 +264,7 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 updateState(.working)
             }
             // Reasoning delta (data is JSON-encoded string)
-            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? String) ?? data
+            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8), options: [.fragmentsAllowed]) as? String) ?? data
             emit(.reasoningDelta(.init(text: text)))
 
         case "message":

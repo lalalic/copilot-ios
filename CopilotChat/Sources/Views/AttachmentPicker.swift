@@ -62,7 +62,8 @@ public struct AttachmentPicker: View {
                     let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                     try? FileManager.default.removeItem(at: temp)
                     try? FileManager.default.copyItem(at: url, to: temp)
-                    onSelect(temp)
+                    let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
+                    onSelect(shrunk)
                 }
             case .failure:
                 break
@@ -115,8 +116,9 @@ private struct PhotoPickerView: UIViewControllerRepresentable {
                                 let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                                 try? FileManager.default.removeItem(at: temp)
                                 try? FileManager.default.copyItem(at: url, to: temp)
+                                let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
                                 Task { @MainActor [weak self] in
-                                    self?.onSelect(temp)
+                                    self?.onSelect(shrunk)
                                 }
                             }
                         }

@@ -61,21 +61,25 @@ public struct InputBar: View {
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPickerSheet { url in
                 onAttachment?(url)
+            } onDismiss: {
                 showPhotoPicker = false
             }
         }
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [.item],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                try? FileManager.default.removeItem(at: temp)
-                try? FileManager.default.copyItem(at: url, to: temp)
-                onAttachment?(temp)
+            if case .success(let urls) = result {
+                for url in urls {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                    let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                    try? FileManager.default.removeItem(at: temp)
+                    try? FileManager.default.copyItem(at: url, to: temp)
+                    let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
+                    onAttachment?(shrunk)
+                }
             }
         }
         #endif
@@ -140,10 +144,10 @@ public struct InputBar: View {
             toggleSpeech()
         } label: {
             HStack {
-                if speechService.isListening {
+                if speechService.isListening || speechService.isRecording {
                     Image(systemName: "waveform")
                         .foregroundStyle(.red)
-                    Text("Listening...")
+                    Text(speechService.isRecording ? "Recording..." : "Listening...")
                         .foregroundStyle(.red)
                 } else {
                     Image(systemName: "mic.fill")
@@ -164,10 +168,16 @@ public struct InputBar: View {
 
     @ViewBuilder
     private var trailingButtons: some View {
-        if speechService.isListening {
-            // Stop listening
+        if speechService.isListening || speechService.isRecording {
+            // Stop listening/recording
             Button {
-                speechService.stopListening()
+                if viewModel.useServerTranscription {
+                    if let audioData = speechService.stopRecording() {
+                        Task { await viewModel.sendAudio(audioData) }
+                    }
+                } else {
+                    speechService.stopListening()
+                }
             } label: {
                 Image(systemName: "stop.circle.fill")
                     .font(.system(size: 28))
@@ -247,7 +257,20 @@ public struct InputBar: View {
     }
 
     private func toggleSpeech() {
-        if speechService.isListening {
+        if viewModel.useServerTranscription {
+            // Server-side transcription mode: record audio → send to Mac
+            if speechService.isRecording {
+                if let audioData = speechService.stopRecording() {
+                    Task { await viewModel.sendAudio(audioData) }
+                }
+            } else {
+                do {
+                    try speechService.startRecording()
+                } catch {
+                    // Recording failed — ignore silently
+                }
+            }
+        } else if speechService.isListening {
             speechService.stopListening()
         } else {
             do {
@@ -287,11 +310,12 @@ import PhotosUI
 /// Wrapper around PHPickerViewController for selecting photos.
 private struct PhotoPickerSheet: UIViewControllerRepresentable {
     let onSelect: (URL) -> Void
+    let onDismiss: () -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
-        config.selectionLimit = 1
-        config.filter = .images
+        config.selectionLimit = 0 // unlimited
+        config.filter = .any(of: [.images, .videos])
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
@@ -300,29 +324,36 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelect: onSelect)
+        Coordinator(onSelect: onSelect, onDismiss: onDismiss)
     }
 
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
         let onSelect: (URL) -> Void
+        let onDismiss: () -> Void
 
-        init(onSelect: @escaping (URL) -> Void) {
+        init(onSelect: @escaping (URL) -> Void, onDismiss: @escaping () -> Void) {
             self.onSelect = onSelect
+            self.onDismiss = onDismiss
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
-            guard let provider = results.first?.itemProvider,
-                  provider.canLoadObject(ofClass: UIImage.self) else { return }
-
-            provider.loadFileRepresentation(forTypeIdentifier: "public.image") { [weak self] url, _ in
-                if let url {
-                    let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                    try? FileManager.default.removeItem(at: temp)
-                    try? FileManager.default.copyItem(at: url, to: temp)
-                    DispatchQueue.main.async {
-                        self?.onSelect(temp)
+            defer { onDismiss() }
+            for result in results {
+                let provider = result.itemProvider
+                let types = ["public.image", "public.movie"]
+                for type in types where provider.hasRepresentationConforming(toTypeIdentifier: type) {
+                    provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, _ in
+                        guard let self, let url else { return }
+                        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                        try? FileManager.default.removeItem(at: temp)
+                        try? FileManager.default.copyItem(at: url, to: temp)
+                        let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
+                        DispatchQueue.main.async {
+                            self.onSelect(shrunk)
+                        }
                     }
+                    break
                 }
             }
         }
