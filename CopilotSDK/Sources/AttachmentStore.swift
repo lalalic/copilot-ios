@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -48,6 +49,7 @@ public struct AttachmentEntry: Identifiable, Sendable {
 /// Per-session, in-memory registry of attached files.
 /// Files are registered eagerly (metadata only) but data is loaded lazily
 /// via `loadData(name:)` — typically called by the `get_attachment` tool.
+@Observable
 public final class AttachmentStore: @unchecked Sendable {
     
     /// All current attachment entries.

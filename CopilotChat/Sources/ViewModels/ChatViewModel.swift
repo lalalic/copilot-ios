@@ -125,6 +125,12 @@ public final class ChatViewModel: ObservableObject {
     /// Diagnostic: whether runtime is non-nil (for testing tools).
     public var hasRuntimeForDiag: Bool { runtime != nil }
 
+    /// Whether speech input should record audio for server-side transcription
+    /// (e.g., NeoDesktop mode uses mlx-whisper on the Mac).
+    /// When true, InputBar records audio and sends via sendAudio() instead of
+    /// using on-device SFSpeechRecognizer.
+    public var useServerTranscription: Bool = false
+
     /// Callback for channel-forwarded ask_questions in headless sessions.
     /// When set, questions are dispatched through this handler (e.g., to Discord/WeChat)
     /// instead of being auto-answered. The handler receives the question text for display.
@@ -475,7 +481,18 @@ public final class ChatViewModel: ObservableObject {
         messages.append(userMessage)
         sessionLogger?.log(role: "user", text: text, project: projectScope)
 
-        // Clear attachments after sending
+        // Snapshot attachments as RuntimeAttachments before clearing,
+        // so .idle → sendPrompt can forward bytes to the runtime.
+        let attachmentSnapshot: [RuntimeAttachment]? = {
+            let entries = attachmentStore.entries
+            guard !entries.isEmpty else { return nil }
+            return entries.compactMap { entry in
+                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
+                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
+            }
+        }()
+
+        // Clear attachments after snapshotting
         if attachmentDesc != nil {
             attachmentStore.clear()
         }
@@ -515,7 +532,7 @@ public final class ChatViewModel: ObservableObject {
         case .idle:
             // Normal prompt
             chatState = .working
-            await sendPrompt(promptText)
+            await sendPrompt(promptText, attachments: attachmentSnapshot)
 
         default:
             break
@@ -707,9 +724,27 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Send recorded audio for server-side transcription (mlx-whisper on Mac).
+    public func sendAudio(_ audioData: Data) async {
+        guard let runtime else { return }
+
+        // Add user message indicating audio was sent
+        messages.append(ChatMessage(role: .user, content: [.text("🎙️ [Voice message]")], project: projectScope))
+        sessionLogger?.log(role: "user", text: "🎙️ [Voice message]", project: projectScope)
+
+        chatState = .working
+        let attachment = RuntimeAttachment(name: "recording.m4a", data: audioData, mimeType: "audio/mp4")
+        do {
+            try await runtime.send(prompt: "", attachments: [attachment])
+        } catch {
+            appendSystemMessage("Audio send failed: \(error.localizedDescription)")
+            chatState = .idle
+        }
+    }
+
     // MARK: - Private Send Helpers
 
-    private func sendPrompt(_ text: String) async {
+    private func sendPrompt(_ text: String, attachments preSnapped: [RuntimeAttachment]? = nil) async {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
@@ -724,8 +759,19 @@ public final class ChatViewModel: ObservableObject {
             return
         }
 
+        // Use the pre-snapped attachments if provided (callers may have already
+        // cleared the store before invoking sendPrompt). Otherwise read live.
+        let attachments: [RuntimeAttachment]? = preSnapped ?? {
+            let entries = attachmentStore.entries
+            guard !entries.isEmpty else { return nil }
+            return entries.compactMap { entry in
+                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
+                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
+            }
+        }()
+
         do {
-            try await runtime.send(prompt: effectiveText, attachments: nil)
+            try await runtime.send(prompt: effectiveText, attachments: attachments)
         } catch {
             appendSystemMessage("Send failed: \(error.localizedDescription)")
             chatState = .idle

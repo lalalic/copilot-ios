@@ -33,19 +33,6 @@ public struct ChatView: View {
             // Message list
             messageList
 
-            if case .working = viewModel.chatState, viewModel.toolCalls.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Thinking…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-            }
-
             if case .compacting = viewModel.chatState {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -57,12 +44,6 @@ public struct ChatView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-            }
-
-            // Tool activity (if any tools are running)
-            if !viewModel.toolCalls.isEmpty {
-                ToolActivityView(toolCalls: viewModel.toolCalls)
-                    .padding(.vertical, 4)
             }
 
             // Todo panel (above input bar, like VS Code chat)

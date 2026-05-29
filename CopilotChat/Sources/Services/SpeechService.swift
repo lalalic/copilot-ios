@@ -172,6 +172,47 @@ public final class SpeechService: ObservableObject {
             try startListening(onResult: onResult)
         }
     }
+
+    // MARK: - Audio Recording (for server-side transcription)
+
+    private var audioRecorder: AVAudioRecorder?
+    @Published public var isRecording: Bool = false
+    private var recordingURL: URL?
+
+    /// Start recording audio to a temp file (no on-device recognition).
+    /// Use this for NeoDesktop mode where transcription happens on the Mac.
+    public func startRecording() throws {
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("neo-recording-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+        ]
+        audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+        audioRecorder?.record()
+        recordingURL = url
+        isRecording = true
+    }
+
+    /// Stop recording and return the audio data.
+    public func stopRecording() -> Data? {
+        audioRecorder?.stop()
+        audioRecorder = nil
+        isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+        guard let url = recordingURL else { return nil }
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            recordingURL = nil
+        }
+        return try? Data(contentsOf: url)
+    }
 }
 
 // MARK: - Errors

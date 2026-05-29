@@ -250,13 +250,13 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
     fileprivate func handleSSEEvent(event: String, data: String) {
         switch event {
         case "delta":
-            // If we were waiting for user input but got a delta, the question was answered elsewhere
+            // Skip text deltas — wait for the complete `message` event so the chat
+            // bubble shows clean text (some providers/relays double-encode deltas,
+            // producing `""word""` artifacts when concatenated).
             if _state == .waitingForUser {
                 updateState(.working)
             }
-            // Raw text delta from assistant (data is JSON-encoded string)
-            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8), options: [.fragmentsAllowed]) as? String) ?? data
-            emit(.assistantTextDelta(.init(text: text)))
+            break
 
         case "thinking":
             // If we were waiting for user input but got thinking, the question was answered elsewhere
@@ -264,7 +264,7 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 updateState(.working)
             }
             // Reasoning delta (data is JSON-encoded string)
-            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8), options: [.fragmentsAllowed]) as? String) ?? data
+            let text = (try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? String) ?? data
             emit(.reasoningDelta(.init(text: text)))
 
         case "message":
@@ -308,6 +308,22 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 toolName: toolName,
                 arguments: args.flatMap { try? String(data: JSONSerialization.data(withJSONObject: $0), encoding: .utf8) }
             )))
+            // Surface routing/assignment intent inline as a chat bubble (mirrors discord-bridge)
+            if toolName == "route_to_agent", let agent = (args?["agent"] as? String) {
+                let task = (args?["task"] as? String) ?? ""
+                let suffix = task.isEmpty ? "" : ": \(String(task.prefix(300)))"
+                emit(.assistantMessageComplete(.init(content: "🚀 Route → \(agent)\(suffix)", model: nil)))
+            } else if toolName == "assign_task", let pid = (args?["projectId"] as? String) {
+                let prompt = (args?["prompt"] as? String) ?? ""
+                let suffix = prompt.isEmpty ? "" : ": \(String(prompt.prefix(300)))"
+                emit(.assistantMessageComplete(.init(content: "📋 Assign → \(pid)\(suffix)", model: nil)))
+            }
+
+        case "terminal-start":
+            guard let json = parseJSON(data) else { return }
+            if let explanation = json["explanation"] as? String, !explanation.isEmpty {
+                emit(.assistantMessageComplete(.init(content: "⚙️ \(explanation)", model: nil)))
+            }
 
         case "tool-end":
             guard let json = parseJSON(data) else { return }
