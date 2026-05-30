@@ -66,6 +66,14 @@ public struct ChatView: View {
                 onAttachment: { url in
                     viewModel.attachmentStore.add(url: url)
                     viewModel.objectWillChange.send()
+                },
+                onAttachmentBatchStart: { count in
+                    viewModel.attachmentStore.beginPending(count)
+                    viewModel.objectWillChange.send()
+                },
+                onAttachmentEnded: {
+                    viewModel.attachmentStore.endPending()
+                    viewModel.objectWillChange.send()
                 }
             )
         }

@@ -18,17 +18,23 @@ public struct InputBar: View {
     private let inputModes: InputMode
     private let onSend: () async -> Void
     private let onAttachment: ((URL) -> Void)?
+    private let onAttachmentBatchStart: ((Int) -> Void)?
+    private let onAttachmentEnded: (() -> Void)?
 
     public init(
         viewModel: ChatViewModel,
         inputModes: InputMode = .textAndSpeech,
         onSend: @escaping () async -> Void,
-        onAttachment: ((URL) -> Void)? = nil
+        onAttachment: ((URL) -> Void)? = nil,
+        onAttachmentBatchStart: ((Int) -> Void)? = nil,
+        onAttachmentEnded: (() -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.inputModes = inputModes
         self.onSend = onSend
         self.onAttachment = onAttachment
+        self.onAttachmentBatchStart = onAttachmentBatchStart
+        self.onAttachmentEnded = onAttachmentEnded
     }
 
     public var body: some View {
@@ -59,27 +65,26 @@ public struct InputBar: View {
         }
         #if canImport(UIKit)
         .sheet(isPresented: $showPhotoPicker) {
-            PhotoPickerSheet { url in
-                onAttachment?(url)
-            } onDismiss: {
-                showPhotoPicker = false
-            }
+            PhotoPickerSheet(
+                onBatchStart: { count in onAttachmentBatchStart?(count) },
+                onSelect: { url in
+                    if let url { onAttachment?(url) }
+                    onAttachmentEnded?()
+                }
+            )
         }
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [.item],
-            allowsMultipleSelection: true
+            allowsMultipleSelection: false
         ) { result in
-            if case .success(let urls) = result {
-                for url in urls {
-                    let accessing = url.startAccessingSecurityScopedResource()
-                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                    let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                    try? FileManager.default.removeItem(at: temp)
-                    try? FileManager.default.copyItem(at: url, to: temp)
-                    let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
-                    onAttachment?(shrunk)
-                }
+            if case .success(let urls) = result, let url = urls.first {
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: temp)
+                try? FileManager.default.copyItem(at: url, to: temp)
+                onAttachment?(temp)
             }
         }
         #endif
@@ -307,14 +312,17 @@ private struct PulseAnimation: ViewModifier {
 #if canImport(UIKit)
 import PhotosUI
 
-/// Wrapper around PHPickerViewController for selecting photos.
+/// Wrapper around PHPickerViewController for selecting photos and videos.
+/// `onBatchStart(n)` fires synchronously with the chosen count so the receiver
+/// can show pending state; `onSelect(url?)` fires once per result (URL on success,
+/// nil on load failure) so the receiver can drain its pending counter.
 private struct PhotoPickerSheet: UIViewControllerRepresentable {
-    let onSelect: (URL) -> Void
-    let onDismiss: () -> Void
+    let onBatchStart: @Sendable (Int) -> Void
+    let onSelect: @Sendable (URL?) -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
-        config.selectionLimit = 0 // unlimited
+        config.selectionLimit = 10
         config.filter = .any(of: [.images, .videos])
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
@@ -324,36 +332,44 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelect: onSelect, onDismiss: onDismiss)
+        Coordinator(onBatchStart: onBatchStart, onSelect: onSelect)
     }
 
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let onSelect: (URL) -> Void
-        let onDismiss: () -> Void
+        let onBatchStart: @Sendable (Int) -> Void
+        let onSelect: @Sendable (URL?) -> Void
 
-        init(onSelect: @escaping (URL) -> Void, onDismiss: @escaping () -> Void) {
+        init(onBatchStart: @escaping @Sendable (Int) -> Void, onSelect: @escaping @Sendable (URL?) -> Void) {
+            self.onBatchStart = onBatchStart
             self.onSelect = onSelect
-            self.onDismiss = onDismiss
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
-            defer { onDismiss() }
+            guard !results.isEmpty else { return }
+            onBatchStart(results.count)
+
             for result in results {
                 let provider = result.itemProvider
                 let types = ["public.image", "public.movie"]
-                for type in types where provider.hasRepresentationConforming(toTypeIdentifier: type) {
-                    provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, _ in
-                        guard let self, let url else { return }
-                        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                        try? FileManager.default.removeItem(at: temp)
-                        try? FileManager.default.copyItem(at: url, to: temp)
-                        let shrunk = AttachmentImageProcessor.shrinkIfImage(at: temp) ?? temp
-                        DispatchQueue.main.async {
-                            self.onSelect(shrunk)
+                let type = types.first(where: { provider.hasRepresentationConforming(toTypeIdentifier: $0) })
+
+                guard let type else {
+                    DispatchQueue.main.async { [onSelect] in onSelect(nil) }
+                    continue
+                }
+
+                provider.loadFileRepresentation(forTypeIdentifier: type) { [onSelect] url, _ in
+                    Task {
+                        var staged: URL?
+                        if let url {
+                            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                            try? FileManager.default.removeItem(at: temp)
+                            try? FileManager.default.copyItem(at: url, to: temp)
+                            staged = await AttachmentImageProcessor.process(at: temp)
                         }
+                        await MainActor.run { onSelect(staged) }
                     }
-                    break
                 }
             }
         }

@@ -463,6 +463,14 @@ public final class ChatViewModel: ObservableObject {
             return
         }
 
+        // Wait for any in-flight picker / video transcode work to finish so
+        // the prompt isn't sent before the attached media is ready.
+        var waited = 0
+        while attachmentStore.pendingUploads > 0 && waited < 600 {  // up to 60s
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 1
+        }
+
         // Prepend attachment context if files are attached
         let attachmentDesc = attachmentStore.promptDescription()
         let promptText: String
@@ -481,18 +489,7 @@ public final class ChatViewModel: ObservableObject {
         messages.append(userMessage)
         sessionLogger?.log(role: "user", text: text, project: projectScope)
 
-        // Snapshot attachments as RuntimeAttachments before clearing,
-        // so .idle → sendPrompt can forward bytes to the runtime.
-        let attachmentSnapshot: [RuntimeAttachment]? = {
-            let entries = attachmentStore.entries
-            guard !entries.isEmpty else { return nil }
-            return entries.compactMap { entry in
-                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
-                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
-            }
-        }()
-
-        // Clear attachments after snapshotting
+        // Clear attachments after sending
         if attachmentDesc != nil {
             attachmentStore.clear()
         }
@@ -532,7 +529,7 @@ public final class ChatViewModel: ObservableObject {
         case .idle:
             // Normal prompt
             chatState = .working
-            await sendPrompt(promptText, attachments: attachmentSnapshot)
+            await sendPrompt(promptText)
 
         default:
             break
@@ -744,7 +741,7 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: - Private Send Helpers
 
-    private func sendPrompt(_ text: String, attachments preSnapped: [RuntimeAttachment]? = nil) async {
+    private func sendPrompt(_ text: String) async {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
@@ -759,9 +756,8 @@ public final class ChatViewModel: ObservableObject {
             return
         }
 
-        // Use the pre-snapped attachments if provided (callers may have already
-        // cleared the store before invoking sendPrompt). Otherwise read live.
-        let attachments: [RuntimeAttachment]? = preSnapped ?? {
+        // Convert attachment store entries to RuntimeAttachments
+        let attachments: [RuntimeAttachment]? = {
             let entries = attachmentStore.entries
             guard !entries.isEmpty else { return nil }
             return entries.compactMap { entry in

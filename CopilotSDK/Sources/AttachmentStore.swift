@@ -54,8 +54,24 @@ public final class AttachmentStore: @unchecked Sendable {
     
     /// All current attachment entries.
     public private(set) var entries: [AttachmentEntry] = []
-    
+
+    /// Number of files currently being prepared (e.g. PHPicker loadFileRepresentation
+    /// + video transcode). `send()` should wait for this to reach zero so the prompt
+    /// doesn't fire while pending media is still arriving.
+    public private(set) var pendingUploads: Int = 0
+
     public init() {}
+
+    /// Increment the pending-uploads counter by `count`.
+    public func beginPending(_ count: Int = 1) {
+        guard count > 0 else { return }
+        pendingUploads += count
+    }
+
+    /// Decrement the pending-uploads counter (floored at zero).
+    public func endPending(_ count: Int = 1) {
+        pendingUploads = max(0, pendingUploads - count)
+    }
     
     // MARK: - Add / Remove / Clear
     
