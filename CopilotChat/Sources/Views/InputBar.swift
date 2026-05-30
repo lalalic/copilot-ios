@@ -360,13 +360,23 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
                 }
 
                 provider.loadFileRepresentation(forTypeIdentifier: type) { [onSelect] url, _ in
+                    // The provided URL is only valid for the duration of this completion handler —
+                    // copy it out synchronously before doing any async work.
+                    var copied: URL?
+                    if let url {
+                        let unique = UUID().uuidString + "-" + url.lastPathComponent
+                        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(unique)
+                        do {
+                            try FileManager.default.copyItem(at: url, to: temp)
+                            copied = temp
+                        } catch {
+                            // copy failed — leave copied=nil
+                        }
+                    }
                     Task {
                         var staged: URL?
-                        if let url {
-                            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                            try? FileManager.default.removeItem(at: temp)
-                            try? FileManager.default.copyItem(at: url, to: temp)
-                            staged = await AttachmentImageProcessor.process(at: temp)
+                        if let copied {
+                            staged = await AttachmentImageProcessor.process(at: copied)
                         }
                         await MainActor.run { onSelect(staged) }
                     }

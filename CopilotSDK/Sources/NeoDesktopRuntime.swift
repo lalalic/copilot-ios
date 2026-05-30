@@ -92,12 +92,12 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 let _ = try await proxyPOST("/api/neo/proxy/api/chat/send-audio", body: body)
             } else {
                 var body: [String: Any] = ["prompt": prompt]
-                // Include image attachments as base64
+                // Include image + video attachments as base64
                 if let atts = attachments, !atts.isEmpty {
-                    let images = atts.filter { $0.isImage }.map { att -> [String: String] in
+                    let media = atts.filter { $0.isMedia }.map { att -> [String: String] in
                         ["name": att.name, "data": att.data.base64EncodedString(), "mimeType": att.mimeType]
                     }
-                    if !images.isEmpty { body["attachments"] = images }
+                    if !media.isEmpty { body["attachments"] = media }
                 }
                 let _ = try await proxyPOST("/api/neo/proxy/api/chat/send", body: body)
             }

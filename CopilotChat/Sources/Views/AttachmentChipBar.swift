@@ -1,10 +1,15 @@
 import SwiftUI
+import AVFoundation
 import CopilotSDK
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Attachment Chip Bar
 
 /// Horizontal strip of chips showing staged attachments.
-/// Each chip shows the file name and a dismiss button.
+/// For image / video attachments, the chip shows a small thumbnail; other
+/// types fall back to an icon + filename.
 struct AttachmentChipBar: View {
 
     let store: AttachmentStore
@@ -27,13 +32,51 @@ struct AttachmentChipBar: View {
 
 // MARK: - Attachment Chip
 
-/// A single attachment chip with icon, name, and close button.
 private struct AttachmentChip: View {
 
     let entry: AttachmentEntry
     let onRemove: () -> Void
 
     var body: some View {
+        if isMedia {
+            mediaThumb
+        } else {
+            fileChip
+        }
+    }
+
+    private var isMedia: Bool {
+        entry.mimeType.hasPrefix("image/") || entry.mimeType.hasPrefix("video/")
+    }
+
+    @ViewBuilder
+    private var mediaThumb: some View {
+        ZStack(alignment: .topTrailing) {
+            ThumbnailView(entry: entry)
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if entry.mimeType.hasPrefix("video/") {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(3)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .padding(3)
+                    }
+                }
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white, .black.opacity(0.6))
+            }
+            .offset(x: 6, y: -6)
+        }
+    }
+
+    @ViewBuilder
+    private var fileChip: some View {
         HStack(spacing: 4) {
             Image(systemName: iconName)
                 .font(.system(size: 12))
@@ -51,19 +94,70 @@ private struct AttachmentChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(Color(.systemGray5))
-        )
+        .background(Capsule().fill(Color(.systemGray5)))
     }
 
     private var iconName: String {
         let mime = entry.mimeType
-        if mime.hasPrefix("image/") { return "photo" }
-        if mime.hasPrefix("video/") { return "video" }
         if mime.hasPrefix("audio/") { return "waveform" }
         if mime == "application/pdf" { return "doc.richtext" }
         if mime.hasPrefix("text/") { return "doc.text" }
         return "doc"
     }
 }
+
+// MARK: - Thumbnail
+
+#if canImport(UIKit)
+private struct ThumbnailView: View {
+    let entry: AttachmentEntry
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle()
+                    .fill(Color(.systemGray5))
+                    .overlay {
+                        Image(systemName: entry.mimeType.hasPrefix("video/") ? "video" : "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+        }
+        .task(id: entry.id) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        let url = entry.fileURL
+        let mime = entry.mimeType
+        let img: UIImage? = await Task.detached { () -> UIImage? in
+            if mime.hasPrefix("video/") {
+                let asset = AVURLAsset(url: url)
+                let gen = AVAssetImageGenerator(asset: asset)
+                gen.appliesPreferredTrackTransform = true
+                gen.maximumSize = CGSize(width: 200, height: 200)
+                if let cg = try? gen.copyCGImage(at: CMTime(seconds: 0.1, preferredTimescale: 600), actualTime: nil) {
+                    return UIImage(cgImage: cg)
+                }
+                return nil
+            }
+            if let data = try? Data(contentsOf: url) {
+                return UIImage(data: data)
+            }
+            return nil
+        }.value
+        if let img { self.image = img }
+    }
+}
+#else
+private struct ThumbnailView: View {
+    let entry: AttachmentEntry
+    var body: some View { Color.gray }
+}
+#endif

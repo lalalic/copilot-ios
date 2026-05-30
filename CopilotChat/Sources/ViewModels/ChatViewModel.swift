@@ -480,6 +480,17 @@ public final class ChatViewModel: ObservableObject {
             promptText = text
         }
 
+        // Snapshot attachments NOW (before the `clear()` below wipes the store
+        // out from under the async `sendPrompt(_:)` call).
+        let attachmentSnapshot: [RuntimeAttachment]? = {
+            let entries = attachmentStore.entries
+            guard !entries.isEmpty else { return nil }
+            return entries.compactMap { entry in
+                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
+                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
+            }
+        }()
+
         // Add user message to the chat (show original text, not the injection)
         let userMessage = ChatMessage(
             role: .user,
@@ -529,7 +540,7 @@ public final class ChatViewModel: ObservableObject {
         case .idle:
             // Normal prompt
             chatState = .working
-            await sendPrompt(promptText)
+            await sendPrompt(promptText, attachments: attachmentSnapshot)
 
         default:
             break
@@ -741,7 +752,7 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: - Private Send Helpers
 
-    private func sendPrompt(_ text: String) async {
+    private func sendPrompt(_ text: String, attachments preSnapped: [RuntimeAttachment]? = nil) async {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
@@ -756,8 +767,9 @@ public final class ChatViewModel: ObservableObject {
             return
         }
 
-        // Convert attachment store entries to RuntimeAttachments
-        let attachments: [RuntimeAttachment]? = {
+        // Use the pre-snapshot if provided (preferred — captures attachments before
+        // the store is cleared); otherwise read from the store now.
+        let attachments: [RuntimeAttachment]? = preSnapped ?? {
             let entries = attachmentStore.entries
             guard !entries.isEmpty else { return nil }
             return entries.compactMap { entry in

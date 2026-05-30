@@ -169,6 +169,12 @@ public struct RuntimeAttachment: Sendable {
     public var isImage: Bool {
         mimeType.hasPrefix("image/")
     }
+
+    public var isVideo: Bool {
+        mimeType.hasPrefix("video/")
+    }
+
+    public var isMedia: Bool { isImage || isVideo }
 }
 
 // MARK: - RuntimeMessage
