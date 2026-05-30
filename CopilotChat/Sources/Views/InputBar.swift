@@ -379,9 +379,16 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
                         }
                     }
                     Task {
+                        let started = Date()
                         var staged: URL?
                         if let copied {
                             staged = await AttachmentImageProcessor.process(at: copied)
+                        }
+                        // Keep the spinner visible long enough for the user to see it.
+                        let elapsed = Date().timeIntervalSince(started)
+                        let minSpinner: TimeInterval = 0.6
+                        if elapsed < minSpinner {
+                            try? await Task.sleep(nanoseconds: UInt64((minSpinner - elapsed) * 1_000_000_000))
                         }
                         await MainActor.run { onItemEnd(id, staged) }
                     }
