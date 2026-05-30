@@ -25,6 +25,19 @@ public enum AttachmentError: Error, CustomStringConvertible {
     }
 }
 
+// MARK: - PendingAttachment
+
+/// Placeholder for an attachment that's mid-flight (still being copied out of
+/// PHPicker / transcoded). Drives the spinner shown on the chip.
+public struct PendingAttachment: Identifiable, Sendable {
+    public let id: UUID
+    public let isVideo: Bool
+    public init(id: UUID = UUID(), isVideo: Bool) {
+        self.id = id
+        self.isVideo = isVideo
+    }
+}
+
 // MARK: - AttachmentEntry
 
 /// Metadata about a single attachment file (lazy — data loaded on demand).
@@ -55,22 +68,39 @@ public final class AttachmentStore: @unchecked Sendable {
     /// All current attachment entries.
     public private(set) var entries: [AttachmentEntry] = []
 
-    /// Number of files currently being prepared (e.g. PHPicker loadFileRepresentation
-    /// + video transcode). `send()` should wait for this to reach zero so the prompt
-    /// doesn't fire while pending media is still arriving.
-    public private(set) var pendingUploads: Int = 0
+    /// Placeholders for attachments currently being prepared (PHPicker file
+    /// extraction + video transcode). Rendered as spinner-chips so the user
+    /// sees progress; `send()` waits for this to drain before firing.
+    public private(set) var pending: [PendingAttachment] = []
+
+    /// Backwards-compat: number of in-flight attachments.
+    public var pendingUploads: Int { pending.count }
 
     public init() {}
 
-    /// Increment the pending-uploads counter by `count`.
-    public func beginPending(_ count: Int = 1) {
-        guard count > 0 else { return }
-        pendingUploads += count
+    /// Register an in-flight placeholder; returns its id so the caller can
+    /// resolve it once the file is ready.
+    @discardableResult
+    public func addPending(isVideo: Bool) -> UUID {
+        let p = PendingAttachment(isVideo: isVideo)
+        pending.append(p)
+        return p.id
     }
 
-    /// Decrement the pending-uploads counter (floored at zero).
+    /// Resolve / cancel an in-flight placeholder. Called once per `addPending`.
+    public func resolvePending(_ id: UUID) {
+        pending.removeAll { $0.id == id }
+    }
+
+    /// Legacy counter API — kept so older call sites keep compiling. New code
+    /// should use `addPending(isVideo:)` / `resolvePending(_:)` instead.
+    public func beginPending(_ count: Int = 1) {
+        guard count > 0 else { return }
+        for _ in 0..<count { _ = addPending(isVideo: false) }
+    }
+
     public func endPending(_ count: Int = 1) {
-        pendingUploads = max(0, pendingUploads - count)
+        for _ in 0..<min(count, pending.count) { pending.removeLast() }
     }
     
     // MARK: - Add / Remove / Clear

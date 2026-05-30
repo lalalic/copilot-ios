@@ -18,23 +18,23 @@ public struct InputBar: View {
     private let inputModes: InputMode
     private let onSend: () async -> Void
     private let onAttachment: ((URL) -> Void)?
-    private let onAttachmentBatchStart: ((Int) -> Void)?
-    private let onAttachmentEnded: (() -> Void)?
+    private let onAttachmentItemBegin: ((Bool) -> UUID)?
+    private let onAttachmentItemEnd: ((UUID, URL?) -> Void)?
 
     public init(
         viewModel: ChatViewModel,
         inputModes: InputMode = .textAndSpeech,
         onSend: @escaping () async -> Void,
         onAttachment: ((URL) -> Void)? = nil,
-        onAttachmentBatchStart: ((Int) -> Void)? = nil,
-        onAttachmentEnded: (() -> Void)? = nil
+        onAttachmentItemBegin: ((Bool) -> UUID)? = nil,
+        onAttachmentItemEnd: ((UUID, URL?) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.inputModes = inputModes
         self.onSend = onSend
         self.onAttachment = onAttachment
-        self.onAttachmentBatchStart = onAttachmentBatchStart
-        self.onAttachmentEnded = onAttachmentEnded
+        self.onAttachmentItemBegin = onAttachmentItemBegin
+        self.onAttachmentItemEnd = onAttachmentItemEnd
     }
 
     public var body: some View {
@@ -66,10 +66,10 @@ public struct InputBar: View {
         #if canImport(UIKit)
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPickerSheet(
-                onBatchStart: { count in onAttachmentBatchStart?(count) },
-                onSelect: { url in
+                onItemBegin: { isVideo in onAttachmentItemBegin?(isVideo) ?? UUID() },
+                onItemEnd: { id, url in
                     if let url { onAttachment?(url) }
-                    onAttachmentEnded?()
+                    onAttachmentItemEnd?(id, url)
                 }
             )
         }
@@ -313,12 +313,12 @@ private struct PulseAnimation: ViewModifier {
 import PhotosUI
 
 /// Wrapper around PHPickerViewController for selecting photos and videos.
-/// `onBatchStart(n)` fires synchronously with the chosen count so the receiver
-/// can show pending state; `onSelect(url?)` fires once per result (URL on success,
-/// nil on load failure) so the receiver can drain its pending counter.
+/// `onItemBegin(isVideo) -> UUID` fires synchronously per chosen item so the
+/// receiver can show a per-chip spinner; `onItemEnd(id, url?)` fires when the
+/// file is ready (url) or has failed (nil).
 private struct PhotoPickerSheet: UIViewControllerRepresentable {
-    let onBatchStart: @Sendable (Int) -> Void
-    let onSelect: @Sendable (URL?) -> Void
+    let onItemBegin: @Sendable (Bool) -> UUID
+    let onItemEnd: @Sendable (UUID, URL?) -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
@@ -332,34 +332,39 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onBatchStart: onBatchStart, onSelect: onSelect)
+        Coordinator(onItemBegin: onItemBegin, onItemEnd: onItemEnd)
     }
 
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let onBatchStart: @Sendable (Int) -> Void
-        let onSelect: @Sendable (URL?) -> Void
+        let onItemBegin: @Sendable (Bool) -> UUID
+        let onItemEnd: @Sendable (UUID, URL?) -> Void
 
-        init(onBatchStart: @escaping @Sendable (Int) -> Void, onSelect: @escaping @Sendable (URL?) -> Void) {
-            self.onBatchStart = onBatchStart
-            self.onSelect = onSelect
+        init(onItemBegin: @escaping @Sendable (Bool) -> UUID,
+             onItemEnd: @escaping @Sendable (UUID, URL?) -> Void) {
+            self.onItemBegin = onItemBegin
+            self.onItemEnd = onItemEnd
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true)
             guard !results.isEmpty else { return }
-            onBatchStart(results.count)
 
             for result in results {
                 let provider = result.itemProvider
-                let types = ["public.image", "public.movie"]
-                let type = types.first(where: { provider.hasRepresentationConforming(toTypeIdentifier: $0) })
+                let isVideo = provider.hasRepresentationConforming(toTypeIdentifier: "public.movie")
+                let type = isVideo ? "public.movie"
+                    : (provider.hasRepresentationConforming(toTypeIdentifier: "public.image") ? "public.image" : nil)
+
+                // Always register the placeholder synchronously on the main thread
+                // so the chip-bar updates immediately.
+                let id = onItemBegin(isVideo)
 
                 guard let type else {
-                    DispatchQueue.main.async { [onSelect] in onSelect(nil) }
+                    DispatchQueue.main.async { [onItemEnd] in onItemEnd(id, nil) }
                     continue
                 }
 
-                provider.loadFileRepresentation(forTypeIdentifier: type) { [onSelect] url, _ in
+                provider.loadFileRepresentation(forTypeIdentifier: type) { [onItemEnd] url, _ in
                     // The provided URL is only valid for the duration of this completion handler —
                     // copy it out synchronously before doing any async work.
                     var copied: URL?
@@ -378,7 +383,7 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
                         if let copied {
                             staged = await AttachmentImageProcessor.process(at: copied)
                         }
-                        await MainActor.run { onSelect(staged) }
+                        await MainActor.run { onItemEnd(id, staged) }
                     }
                 }
             }

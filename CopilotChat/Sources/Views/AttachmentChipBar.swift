@@ -22,11 +22,45 @@ struct AttachmentChipBar: View {
                         store.remove(at: index)
                     }
                 }
+                ForEach(store.pending) { p in
+                    PendingChip(isVideo: p.isVideo)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
         .background(.ultraThinMaterial)
+    }
+}
+
+// MARK: - Pending Chip
+
+/// Spinner-overlay placeholder shown while an attachment is being copied /
+/// transcoded.
+private struct PendingChip: View {
+    let isVideo: Bool
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(.systemGray5))
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            ProgressView()
+                .scaleEffect(0.8)
+
+            if isVideo {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(3)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+        }
+        .frame(width: 56, height: 56)
     }
 }
 

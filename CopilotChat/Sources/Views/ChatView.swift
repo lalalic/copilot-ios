@@ -53,8 +53,8 @@ public struct ChatView: View {
                 .fill(platformGray5)
                 .frame(height: 1)
 
-            // Attachment chips (if any files are staged)
-            if !viewModel.attachmentStore.entries.isEmpty {
+            // Attachment chips (if any files are staged or in-flight)
+            if !viewModel.attachmentStore.entries.isEmpty || !viewModel.attachmentStore.pending.isEmpty {
                 AttachmentChipBar(store: viewModel.attachmentStore)
             }
 
@@ -67,12 +67,13 @@ public struct ChatView: View {
                     viewModel.attachmentStore.add(url: url)
                     viewModel.objectWillChange.send()
                 },
-                onAttachmentBatchStart: { count in
-                    viewModel.attachmentStore.beginPending(count)
+                onAttachmentItemBegin: { isVideo in
+                    let id = viewModel.attachmentStore.addPending(isVideo: isVideo)
                     viewModel.objectWillChange.send()
+                    return id
                 },
-                onAttachmentEnded: {
-                    viewModel.attachmentStore.endPending()
+                onAttachmentItemEnd: { id, _ in
+                    viewModel.attachmentStore.resolvePending(id)
                     viewModel.objectWillChange.send()
                 }
             )
