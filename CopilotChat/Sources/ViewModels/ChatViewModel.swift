@@ -55,6 +55,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public var chatState: ChatState = .disconnected
     @Published public var inputText: String = ""
     @Published public var isListening: Bool = false
+    /// True while `send()` is preparing the outgoing prompt: waiting for
+    /// attachment uploads/transcodes to finish, then dispatching. Drives the
+    /// send-button spinner in the UI.
+    @Published public var isSending: Bool = false
 
     /// URL to present in SFSafariViewController for Stripe checkout.
     @Published public var stripeCheckoutURL: URL?
@@ -462,6 +466,9 @@ public final class ChatViewModel: ObservableObject {
             handleSlashCommand(text)
             return
         }
+
+        isSending = true
+        defer { isSending = false }
 
         // Wait for any in-flight picker / video transcode work to finish so
         // the prompt isn't sent before the attached media is ready.

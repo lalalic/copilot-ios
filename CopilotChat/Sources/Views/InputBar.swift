@@ -188,15 +188,22 @@ public struct InputBar: View {
                     .font(.system(size: 28))
                     .foregroundStyle(.red)
             }
-        } else if !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // Send button
+        } else if !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSending {
+            // Send button (spinner while preparing/uploading)
             Button {
                 Task { await onSend() }
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.blue)
+                if viewModel.isSending {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.blue)
+                }
             }
+            .disabled(viewModel.isSending)
         } else if inputModes.contains(.speech) && inputModes.contains(.text) {
             // Mic button (when text field is empty)
             Button {
@@ -212,11 +219,17 @@ public struct InputBar: View {
             Button {
                 Task { await onSend() }
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(viewModel.inputText.isEmpty ? .gray : .blue)
+                if viewModel.isSending {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(viewModel.inputText.isEmpty ? .gray : .blue)
+                }
             }
-            .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(viewModel.isSending || viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
