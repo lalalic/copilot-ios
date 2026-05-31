@@ -488,13 +488,21 @@ public final class ChatViewModel: ObservableObject {
         }
 
         // Snapshot attachments NOW (before the `clear()` below wipes the store
-        // out from under the async `sendPrompt(_:)` call).
+        // out from under the async `sendPrompt(_:)` call). Media files keep
+        // their file URL so runtimes can stream — never loads big videos into
+        // memory here.
         let attachmentSnapshot: [RuntimeAttachment]? = {
             let entries = attachmentStore.entries
             guard !entries.isEmpty else { return nil }
             return entries.compactMap { entry in
-                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
-                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
+                let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path)
+                let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+                return RuntimeAttachment(
+                    name: entry.displayName,
+                    fileURL: entry.fileURL,
+                    mimeType: entry.mimeType,
+                    size: size
+                )
             }
         }()
 
@@ -780,8 +788,14 @@ public final class ChatViewModel: ObservableObject {
             let entries = attachmentStore.entries
             guard !entries.isEmpty else { return nil }
             return entries.compactMap { entry in
-                guard let data = try? Data(contentsOf: entry.fileURL) else { return nil }
-                return RuntimeAttachment(name: entry.displayName, data: data, mimeType: entry.mimeType)
+                let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path)
+                let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+                return RuntimeAttachment(
+                    name: entry.displayName,
+                    fileURL: entry.fileURL,
+                    mimeType: entry.mimeType,
+                    size: size
+                )
             }
         }()
 

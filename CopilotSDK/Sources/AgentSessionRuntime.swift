@@ -157,13 +157,31 @@ public struct RuntimeProviderConfig: Sendable {
 /// An attachment sent with a prompt.
 public struct RuntimeAttachment: Sendable {
     public let name: String
+    /// In-memory bytes. Empty when `fileURL` is set — runtimes that need bytes
+    /// should read from disk on demand.
     public let data: Data
     public let mimeType: String
+    /// Optional on-disk location. When set, runtimes capable of streaming
+    /// (e.g. `NeoDesktopRuntime` via direct-to-CDN upload) should prefer this
+    /// to avoid loading the whole file into memory.
+    public let fileURL: URL?
+    /// Known size in bytes; used when `data` is empty.
+    public let size: Int
 
     public init(name: String, data: Data, mimeType: String) {
         self.name = name
         self.data = data
         self.mimeType = mimeType
+        self.fileURL = nil
+        self.size = data.count
+    }
+
+    public init(name: String, fileURL: URL, mimeType: String, size: Int) {
+        self.name = name
+        self.data = Data()
+        self.mimeType = mimeType
+        self.fileURL = fileURL
+        self.size = size
     }
 
     public var isImage: Bool {

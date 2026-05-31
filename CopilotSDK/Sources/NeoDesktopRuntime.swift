@@ -85,19 +85,61 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
         do {
             // Check for audio attachments — send via audio transcription endpoint
             if let audio = attachments?.first(where: { $0.mimeType.hasPrefix("audio/") }) {
-                let base64 = audio.data.base64EncodedString()
+                let bytes: Data
+                if !audio.data.isEmpty {
+                    bytes = audio.data
+                } else if let url = audio.fileURL, let d = try? Data(contentsOf: url) {
+                    bytes = d
+                } else {
+                    throw NeoDesktopError.serverError("audio attachment has no data")
+                }
+                let base64 = bytes.base64EncodedString()
                 let ext = audio.name.components(separatedBy: ".").last ?? "m4a"
                 var body: [String: Any] = ["audio": base64, "format": ext]
                 if !prompt.isEmpty { body["language"] = prompt } // Use prompt text as language hint if short
                 let _ = try await proxyPOST("/api/neo/proxy/api/chat/send-audio", body: body)
             } else {
                 var body: [String: Any] = ["prompt": prompt]
-                // Include image + video attachments as base64
+                // Upload media (image/video) directly to CDN, then send only URL
+                // references to the relay. Keeps big payloads off the relay
+                // entirely.
                 if let atts = attachments, !atts.isEmpty {
-                    let media = atts.filter { $0.isMedia }.map { att -> [String: String] in
-                        ["name": att.name, "data": att.data.base64EncodedString(), "mimeType": att.mimeType]
+                    let mediaAtts = atts.filter { $0.isMedia }
+                    if !mediaAtts.isEmpty {
+                        guard let baseURL = URL(string: relayBaseURL) else {
+                            throw NeoDesktopError.serverError("invalid relay URL")
+                        }
+                        let cdn = RelayTTSService(relayBaseURL: baseURL)
+                        var refs: [[String: Any]] = []
+                        for att in mediaAtts {
+                            let url: String
+                            if let f = att.fileURL {
+                                url = try await cdn.uploadFileDirect(
+                                    fileURL: f,
+                                    filename: att.name,
+                                    mimeType: att.mimeType
+                                )
+                            } else {
+                                // Fallback: write Data to a temp file, then stream-upload.
+                                let tmp = FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("neoatt-\(UUID().uuidString)-\(att.name)")
+                                try att.data.write(to: tmp)
+                                defer { try? FileManager.default.removeItem(at: tmp) }
+                                url = try await cdn.uploadFileDirect(
+                                    fileURL: tmp,
+                                    filename: att.name,
+                                    mimeType: att.mimeType
+                                )
+                            }
+                            refs.append([
+                                "url": url,
+                                "name": att.name,
+                                "mimeType": att.mimeType,
+                                "size": att.size,
+                            ])
+                        }
+                        body["attachments"] = refs
                     }
-                    if !media.isEmpty { body["attachments"] = media }
                 }
                 let _ = try await proxyPOST("/api/neo/proxy/api/chat/send", body: body)
             }
