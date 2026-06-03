@@ -1,4 +1,0 @@
-module NeoxCore {
-header "NeoxCore-Swift.h"
-export *
-}

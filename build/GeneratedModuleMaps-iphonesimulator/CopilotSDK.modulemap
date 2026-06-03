@@ -1,4 +1,0 @@
-module CopilotSDK {
-header "CopilotSDK-Swift.h"
-export *
-}

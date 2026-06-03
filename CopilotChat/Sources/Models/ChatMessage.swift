@@ -37,7 +37,7 @@ public struct ChatMessage: Identifiable, Sendable {
         /// Inline image data.
         case image(Data, mimeType: String)
         /// File attachment reference.
-        case attachment(URL, name: String)
+        case attachment(URL, name: String, mimeType: String)
     }
 
     public init(

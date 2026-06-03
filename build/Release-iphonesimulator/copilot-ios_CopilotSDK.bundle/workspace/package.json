@@ -1,9 +1,0 @@
-{
-    "name":"neo",
-    "version":"1.0.0",
-    "description":"Neo: an AI citizen growing in the digital world",
-    "monorepo": true,
-    "workspaces": [
-        "*"
-    ]
-}

@@ -1,4 +1,0 @@
-module CopilotChat {
-header "CopilotChat-Swift.h"
-export *
-}

@@ -20,8 +20,10 @@ public final class ChatSessionLogger: Sendable {
 
     // MARK: - Logging
 
-    /// Append a message entry to today's JSONL file.
-    public func log(role: String, text: String, project: String? = nil) {
+    /// Append a message entry to today's JSONL file. Optional `attachments`
+    /// each describe one stored media file (path is workspace-relative when
+    /// possible, else absolute) so chat reload can re-render thumbnails.
+    public func log(role: String, text: String, project: String? = nil, attachments: [[String: String]]? = nil) {
         var entry: [String: Any] = [
             "ts": ISO8601DateFormatter().string(from: Date()),
             "role": role,
@@ -29,6 +31,9 @@ public final class ChatSessionLogger: Sendable {
         ]
         if let project, !project.isEmpty {
             entry["project"] = project
+        }
+        if let attachments, !attachments.isEmpty {
+            entry["attachments"] = attachments
         }
         guard let data = try? JSONSerialization.data(withJSONObject: entry),
               let line = String(data: data, encoding: .utf8) else { return }
@@ -61,15 +66,16 @@ public final class ChatSessionLogger: Sendable {
     }
 
     /// Load the most recent messages across session files.
-    /// Returns an array of (role, text, project, timestamp) tuples.
-    public func loadHistory() -> [(role: String, text: String, project: String?, timestamp: Date)] {
+    /// Returns an array of (role, text, project, timestamp, attachments) tuples.
+    /// `attachments` is the raw [{name, mimeType, path}] dictionary list, or nil.
+    public func loadHistory() -> [(role: String, text: String, project: String?, timestamp: Date, attachments: [[String: String]]?)] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil)
             .filter({ $0.pathExtension == "jsonl" })
             .sorted(by: { $0.lastPathComponent > $1.lastPathComponent }) // newest first
         else { return [] }
 
-        var results: [(role: String, text: String, project: String?, timestamp: Date)] = []
+        var results: [(role: String, text: String, project: String?, timestamp: Date, attachments: [[String: String]]?)] = []
         let isoFormatter = ISO8601DateFormatter()
 
         for file in files {
@@ -93,7 +99,8 @@ public final class ChatSessionLogger: Sendable {
 
                 let project = (obj["project"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let ts = isoFormatter.date(from: tsStr) ?? Date()
-                results.append((role: role, text: text, project: project, timestamp: ts))
+                let attachments = obj["attachments"] as? [[String: String]]
+                results.append((role: role, text: text, project: project, timestamp: ts, attachments: attachments))
 
                 if results.count >= historyCount { break }
             }
