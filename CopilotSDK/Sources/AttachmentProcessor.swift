@@ -47,15 +47,20 @@ public protocol AttachmentProcessor: Sendable {
 
 /// Preprocessor for `NeoDesktopRuntime`:
 /// 1. Shrink images to ≤1080p, videos to ≤720p
-/// 2. Upload media to CDN via `RelayCDNUploader`
-/// 3. Return `ProcessedAttachment` with `remoteURL` set
+/// 2. Pipe media through relay to desktop (streaming, no CDN round-trip)
+/// 3. Falls back to CDN upload if pipe endpoint unavailable
+/// 4. Return `ProcessedAttachment` with `remoteURL` (fileId or CDN URL)
 ///
 /// Non-media attachments are passed through with local URLs only.
 public final class DesktopAttachmentProcessor: AttachmentProcessor, @unchecked Sendable {
 
+    private let relayBaseURL: URL
+    private let pairingSecret: String
     private let cdnUploader: RelayCDNUploader
 
-    public init(relayBaseURL: URL, credentialStore: CredentialStore = CredentialStore()) {
+    public init(relayBaseURL: URL, pairingSecret: String, credentialStore: CredentialStore = CredentialStore()) {
+        self.relayBaseURL = relayBaseURL
+        self.pairingSecret = pairingSecret
         self.cdnUploader = RelayCDNUploader(relayBaseURL: relayBaseURL, credentialStore: credentialStore)
     }
 
@@ -69,18 +74,26 @@ public final class DesktopAttachmentProcessor: AttachmentProcessor, @unchecked S
                 let shrunk = await AttachmentImageProcessor.process(at: sourceURL)
                 let shrunkSize = fileSize(shrunk)
 
-                // Upload to CDN
-                let url = try await cdnUploader.upload(
-                    fileURL: shrunk,
-                    filename: att.name,
-                    mimeType: att.mimeType
-                )
+                // Try streaming pipe first (faster, no CDN round-trip)
+                let remoteRef: String
+                do {
+                    let fileId = try await pipeFile(fileURL: shrunk, filename: att.name, mimeType: att.mimeType)
+                    remoteRef = "pipe:\(fileId)"
+                } catch {
+                    // Fall back to CDN upload
+                    remoteRef = try await cdnUploader.upload(
+                        fileURL: shrunk,
+                        filename: att.name,
+                        mimeType: att.mimeType
+                    )
+                }
+
                 results.append(ProcessedAttachment(
                     name: att.name,
                     mimeType: att.mimeType,
                     size: shrunkSize,
                     fileURL: shrunk,
-                    remoteURL: url,
+                    remoteURL: remoteRef,
                     data: Data()
                 ))
             } else {
@@ -96,6 +109,38 @@ public final class DesktopAttachmentProcessor: AttachmentProcessor, @unchecked S
             }
         }
         return results
+    }
+
+    /// Stream a file to the desktop via the relay pipe endpoint.
+    /// Returns the fileId assigned by the relay.
+    private func pipeFile(fileURL: URL, filename: String, mimeType: String) async throws -> String {
+        var comps = URLComponents(url: relayBaseURL.appendingPathComponent("api/neo/pipe"),
+                                  resolvingAgainstBaseURL: false)!
+        comps.queryItems = [
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "mimeType", value: mimeType),
+        ]
+        guard let url = comps.url else {
+            throw RelayCDNError.missingField("pipe", "url")
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(pairingSecret)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 120
+
+        // Stream from disk
+        let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: fileURL)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let txt = String(data: data, encoding: .utf8) ?? ""
+            throw RelayCDNError.httpError("pipe", (resp as? HTTPURLResponse)?.statusCode ?? 0, txt)
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let fileId = obj["fileId"] as? String else {
+            throw RelayCDNError.missingField("pipe", "fileId")
+        }
+        return fileId
     }
 
     private func writeToTemp(_ att: RuntimeAttachment) -> URL {

@@ -109,16 +109,30 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                     if !mediaAtts.isEmpty {
                         var refs: [[String: Any]] = []
                         for att in mediaAtts {
-                            let url: String
-                            if let existing = att.remoteURL {
-                                // Already uploaded by the processor
-                                url = existing
+                            if let remote = att.remoteURL, remote.hasPrefix("pipe:") {
+                                // Piped file — desktop already has it. Send fileId reference.
+                                let fileId = String(remote.dropFirst("pipe:".count))
+                                refs.append([
+                                    "fileId": fileId,
+                                    "name": att.name,
+                                    "mimeType": att.mimeType,
+                                    "size": att.size,
+                                ])
+                            } else if let existing = att.remoteURL {
+                                // CDN URL (fallback path)
+                                refs.append([
+                                    "url": existing,
+                                    "name": att.name,
+                                    "mimeType": att.mimeType,
+                                    "size": att.size,
+                                ])
                             } else {
-                                // Fallback: upload now (legacy path / no processor)
+                                // No processor — upload now via CDN (legacy path)
                                 guard let baseURL = URL(string: relayBaseURL) else {
                                     throw NeoDesktopError.serverError("invalid relay URL")
                                 }
                                 let cdn = RelayCDNUploader(relayBaseURL: baseURL)
+                                let url: String
                                 if let f = att.fileURL {
                                     url = try await cdn.upload(
                                         fileURL: f,
@@ -136,13 +150,13 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                                         mimeType: att.mimeType
                                     )
                                 }
+                                refs.append([
+                                    "url": url,
+                                    "name": att.name,
+                                    "mimeType": att.mimeType,
+                                    "size": att.size,
+                                ])
                             }
-                            refs.append([
-                                "url": url,
-                                "name": att.name,
-                                "mimeType": att.mimeType,
-                                "size": att.size,
-                            ])
                         }
                         body["attachments"] = refs
                     }
