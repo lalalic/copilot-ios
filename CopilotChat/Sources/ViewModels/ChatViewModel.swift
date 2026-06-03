@@ -1000,16 +1000,9 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Restore pending questions from previous session (after app restart).
-    /// Call after agent connects but before user interaction.
+    /// Disabled: auto-resuming stale questions after restart confuses users.
     func restorePendingQuestions() {
-        guard !skipPendingRestore else { return }
-        guard let data = UserDefaults.standard.data(forKey: "pendingAskQuestions"),
-              let questions = try? JSONDecoder().decode([AskQuestionItem].self, from: data),
-              !questions.isEmpty else { return }
-
-        NSLog("[ChatVM] Restoring %d pending questions from previous session", questions.count)
-        activeQuestions = questions
-        chatState = .waitingForQuestions(questions)
+        clearPendingQuestions()
     }
 
     private func parseAskQuestions(_ payload: JSONValue) -> [AskQuestionItem] {
