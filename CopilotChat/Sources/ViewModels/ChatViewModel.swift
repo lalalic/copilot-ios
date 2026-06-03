@@ -60,6 +60,12 @@ public final class ChatViewModel: ObservableObject {
     /// send-button spinner in the UI.
     @Published public var isSending: Bool = false
 
+    /// Names of attachments currently being uploaded/processed.
+    /// MessageBubble uses this to show a spinner overlay on individual thumbnails.
+    @Published public var uploadingAttachments: Set<String> = []
+    /// Names of attachments that failed to upload.
+    @Published public var failedAttachments: Set<String> = []
+
     /// URL to present in SFSafariViewController for Stripe checkout.
     @Published public var stripeCheckoutURL: URL?
 
@@ -533,20 +539,8 @@ public final class ChatViewModel: ObservableObject {
             }
         }()
 
-        // Preprocess attachments through the per-runtime processor (shrink,
-        // upload to CDN for desktop, etc.). Falls back to raw snapshot when
-        // no processor is configured.
-        let processedAttachments: [ProcessedAttachment]?
-        if let processor = attachmentProcessor, let snapshot = attachmentSnapshot {
-            processedAttachments = try? await processor.process(snapshot)
-        } else {
-            processedAttachments = nil
-        }
-
-        // Add user message to the chat (show original text, not the injection).
-        // Also embed attachment blocks so the bubble can render thumbnails. We
-        // persist a small JPEG thumb under .neo/reports/sessions/thumbs/ so
-        // the message survives app restart with its visual intact.
+        // Add user message to the chat immediately — show thumbnails before
+        // uploads begin so the user gets instant visual feedback.
         var userContent: [ChatMessage.ContentBlock] = [.text(text)]
         var loggedAttachments: [[String: String]] = []
         for entry in attachmentStore.entries {
@@ -558,8 +552,6 @@ public final class ChatViewModel: ObservableObject {
                 return entry.fileURL
             }()
             userContent.append(.attachment(thumbURL, name: entry.displayName, mimeType: entry.mimeType))
-            // Persist as workspace-relative path so the link survives container-UUID
-            // changes between app installs. Fall back to absolute when we can't.
             let relativePath: String = {
                 if let ws = workspaceURL, thumbURL.path.hasPrefix(ws.path) {
                     var p = String(thumbURL.path.dropFirst(ws.path.count))
@@ -582,9 +574,52 @@ public final class ChatViewModel: ObservableObject {
         messages.append(userMessage)
         sessionLogger?.log(role: "user", text: text, project: projectScope, attachments: loggedAttachments.isEmpty ? nil : loggedAttachments)
 
-        // Clear attachments after sending
+        // Clear attachments after showing the message
         if attachmentDesc != nil {
             attachmentStore.clear()
+        }
+
+        // Process attachments sequentially (smallest first) with per-item
+        // upload state tracking and auto-retry. This runs AFTER the message
+        // bubble is already visible with thumbnails.
+        let processedAttachments: [ProcessedAttachment]?
+        if let processor = attachmentProcessor, let snapshot = attachmentSnapshot, !snapshot.isEmpty {
+            // Sort by size ascending — smaller files upload first for faster UX
+            let sorted = snapshot.sorted { $0.size < $1.size }
+
+            // Mark all as uploading
+            let names = Set(sorted.map(\.name))
+            uploadingAttachments = names
+            failedAttachments = []
+
+            var results: [ProcessedAttachment] = []
+            for att in sorted {
+                var lastError: Error?
+                var processed: ProcessedAttachment?
+                // Retry up to 3 times
+                for attempt in 1...3 {
+                    do {
+                        processed = try await processor.processOne(att)
+                        break
+                    } catch {
+                        lastError = error
+                        if attempt < 3 {
+                            // Brief delay before retry
+                            try? await Task.sleep(nanoseconds: UInt64(attempt) * 500_000_000)
+                        }
+                    }
+                }
+                uploadingAttachments.remove(att.name)
+                if let p = processed {
+                    results.append(p)
+                } else {
+                    failedAttachments.insert(att.name)
+                    print("[ChatViewModel.send] attachment \(att.name) failed after 3 retries: \(lastError?.localizedDescription ?? "unknown")")
+                }
+            }
+            processedAttachments = results.isEmpty ? nil : results
+        } else {
+            processedAttachments = nil
         }
 
         switch chatState {

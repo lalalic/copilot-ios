@@ -117,7 +117,11 @@ public struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.filteredMessages) { message in
-                        MessageBubble(message: message)
+                        MessageBubble(
+                            message: message,
+                            uploadingAttachments: viewModel.uploadingAttachments,
+                            failedAttachments: viewModel.failedAttachments
+                        )
                             .id(message.id)
                     }
 

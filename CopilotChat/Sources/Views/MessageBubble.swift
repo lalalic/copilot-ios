@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -12,9 +13,13 @@ import AppKit
 public struct MessageBubble: View {
 
     private let message: ChatMessage
+    private let uploadingAttachments: Set<String>
+    private let failedAttachments: Set<String>
 
-    public init(message: ChatMessage) {
+    public init(message: ChatMessage, uploadingAttachments: Set<String> = [], failedAttachments: Set<String> = []) {
         self.message = message
+        self.uploadingAttachments = uploadingAttachments
+        self.failedAttachments = failedAttachments
     }
 
     public var body: some View {
@@ -134,8 +139,43 @@ public struct MessageBubble: View {
             }
             #endif
 
-        case .attachment(_, let name):
-            attachmentChip(name: name)
+        case .attachment(let url, let name, let mimeType):
+            if mimeType.hasPrefix("image/") || mimeType.hasPrefix("video/") {
+                BubbleMediaThumb(url: url, mimeType: mimeType)
+                    .overlay {
+                        if uploadingAttachments.contains(name) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(.black.opacity(0.35))
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            }
+                            .frame(width: 56, height: 56)
+                        } else if failedAttachments.contains(name) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(.black.opacity(0.35))
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.red)
+                            }
+                            .frame(width: 56, height: 56)
+                        }
+                    }
+            } else {
+                attachmentChip(name: name)
+                    .overlay {
+                        if uploadingAttachments.contains(name) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                        } else if failedAttachments.contains(name) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.red)
+                        }
+                    }
+            }
         }
     }
 
@@ -212,3 +252,81 @@ extension MessageBubble {
         message.role == .user ? .white : .primary
     }
 }
+
+// MARK: - Bubble Media Thumbnail
+
+#if canImport(UIKit)
+private struct BubbleMediaThumb: View {
+    let url: URL
+    let mimeType: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .bottomTrailing) {
+                        if mimeType.hasPrefix("video/") {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(3)
+                                .background(.black.opacity(0.6), in: Circle())
+                                .padding(3)
+                        }
+                    }
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        Image(systemName: mimeType.hasPrefix("video/") ? "video" : "photo")
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 16))
+                    }
+            }
+        }
+        .task(id: url) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        let u = url
+        let mime = mimeType
+        let img: UIImage? = await Task.detached { () -> UIImage? in
+            // Persisted thumbnails are JPEGs — try decoding as image first
+            // regardless of mimeType. Fall back to video frame extraction only
+            // when the file is not a decodable image (e.g., raw video URL).
+            if let data = try? Data(contentsOf: u), let i = UIImage(data: data) {
+                return i
+            }
+            if mime.hasPrefix("video/") {
+                let asset = AVURLAsset(url: u)
+                let gen = AVAssetImageGenerator(asset: asset)
+                gen.appliesPreferredTrackTransform = true
+                gen.maximumSize = CGSize(width: 400, height: 400)
+                if let cg = try? gen.copyCGImage(at: CMTime(seconds: 0.1, preferredTimescale: 600), actualTime: nil) {
+                    return UIImage(cgImage: cg)
+                }
+            }
+            return nil
+        }.value
+        if let img { self.image = img }
+    }
+}
+#else
+private struct BubbleMediaThumb: View {
+    let url: URL
+    let mimeType: String
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(Color.gray.opacity(0.3))
+            .frame(width: 56, height: 56)
+    }
+}
+#endif

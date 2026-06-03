@@ -41,6 +41,19 @@ public protocol AttachmentProcessor: Sendable {
     /// Process a batch of raw attachments into runtime-specific form.
     /// May shrink, upload, or simply pass through.
     func process(_ attachments: [RuntimeAttachment]) async throws -> [ProcessedAttachment]
+
+    /// Process a single attachment. Default implementation calls `process([att]).first`.
+    func processOne(_ attachment: RuntimeAttachment) async throws -> ProcessedAttachment
+}
+
+extension AttachmentProcessor {
+    public func processOne(_ attachment: RuntimeAttachment) async throws -> ProcessedAttachment {
+        let results = try await process([attachment])
+        guard let first = results.first else {
+            throw NSError(domain: "AttachmentProcessor", code: -1, userInfo: [NSLocalizedDescriptionKey: "No result"])
+        }
+        return first
+    }
 }
 
 // MARK: - DesktopAttachmentProcessor
