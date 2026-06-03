@@ -4,21 +4,24 @@ import AVFoundation
 import UIKit
 #endif
 
-/// Downsizes image / video attachments before they are staged in the AttachmentStore.
+/// Downsizes image / video attachments before upload or vision processing.
 /// Non-media files are left untouched.
-enum AttachmentImageProcessor {
+public enum AttachmentImageProcessor {
 
-    /// Max side length (in pixels) for staged images / videos. 1080p target.
-    static let maxDimension: CGFloat = 1080
+    /// Max side length (in pixels) for staged images. 1080p target.
+    public static let maxDimension: CGFloat = 1080
+    /// Max side length for staged videos. 720p target — keeps file sizes
+    /// reasonable for upload while still giving the vision model usable frames.
+    public static let maxVideoDimension: CGFloat = 720
     /// JPEG quality for re-encoded images.
-    static let jpegQuality: CGFloat = 0.85
+    public static let jpegQuality: CGFloat = 0.85
 
     private static let imageExts: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "webp", "bmp", "tiff", "tif", "gif"]
     private static let videoExts: Set<String> = ["mp4", "mov", "m4v", "qt", "avi", "mkv"]
 
     /// Shrink an image or video at `url` to ≤ 1080p. Falls back to original URL
     /// if shrinking is not applicable / fails.
-    static func process(at url: URL) async -> URL {
+    public static func process(at url: URL) async -> URL {
         let ext = url.pathExtension.lowercased()
         if imageExts.contains(ext) {
             return shrinkIfImage(at: url) ?? url
@@ -32,7 +35,7 @@ enum AttachmentImageProcessor {
     /// If `url` points to an image, write a downscaled JPEG to a sibling temp file
     /// and return its URL. Returns `nil` if no shrinking was performed (or platform
     /// lacks UIKit) — caller should fall back to the original URL.
-    static func shrinkIfImage(at url: URL) -> URL? {
+    public static func shrinkIfImage(at url: URL) -> URL? {
         #if canImport(UIKit)
         let ext = url.pathExtension.lowercased()
         guard imageExts.contains(ext) else { return nil }
@@ -60,7 +63,7 @@ enum AttachmentImageProcessor {
     }
 
     /// Re-encode a video at ≤1080p (longest side). Skips if already smaller.
-    static func shrinkVideo(at url: URL) async throws -> URL? {
+    public static func shrinkVideo(at url: URL) async throws -> URL? {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .video)
         guard let track = tracks.first else { return nil }
@@ -68,16 +71,16 @@ enum AttachmentImageProcessor {
         let preferredTransform = try await track.load(.preferredTransform)
         let displaySize = naturalSize.applying(preferredTransform)
         let w = abs(displaySize.width), h = abs(displaySize.height)
-        // Already ≤1080p on the long side — no re-encode needed.
-        if max(w, h) <= maxDimension { return nil }
+        // Already ≤720p on the long side — no re-encode needed.
+        if max(w, h) <= maxVideoDimension { return nil }
 
-        let preset = AVAssetExportPreset1920x1080
+        let preset = AVAssetExportPreset1280x720
         let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
         guard compatiblePresets.contains(preset),
               let session = AVAssetExportSession(asset: asset, presetName: preset) else { return nil }
 
         let baseName = (url.lastPathComponent as NSString).deletingPathExtension
-        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName)-1080p.mp4")
+        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(baseName)-720p.mp4")
         try? FileManager.default.removeItem(at: outURL)
 
         session.outputURL = outURL

@@ -167,6 +167,9 @@ public struct RuntimeAttachment: Sendable {
     public let fileURL: URL?
     /// Known size in bytes; used when `data` is empty.
     public let size: Int
+    /// Remote CDN URL. Set by `DesktopAttachmentProcessor` after uploading.
+    /// When present, `NeoDesktopRuntime` skips its own upload and uses this URL directly.
+    public let remoteURL: String?
 
     public init(name: String, data: Data, mimeType: String) {
         self.name = name
@@ -174,6 +177,7 @@ public struct RuntimeAttachment: Sendable {
         self.mimeType = mimeType
         self.fileURL = nil
         self.size = data.count
+        self.remoteURL = nil
     }
 
     public init(name: String, fileURL: URL, mimeType: String, size: Int) {
@@ -182,6 +186,16 @@ public struct RuntimeAttachment: Sendable {
         self.mimeType = mimeType
         self.fileURL = fileURL
         self.size = size
+        self.remoteURL = nil
+    }
+
+    public init(name: String, fileURL: URL, mimeType: String, size: Int, remoteURL: String?) {
+        self.name = name
+        self.data = Data()
+        self.mimeType = mimeType
+        self.fileURL = fileURL
+        self.size = size
+        self.remoteURL = remoteURL
     }
 
     public var isImage: Bool {

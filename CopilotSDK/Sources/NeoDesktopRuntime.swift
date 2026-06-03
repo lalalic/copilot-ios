@@ -102,34 +102,40 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
                 var body: [String: Any] = ["prompt": prompt]
                 // Upload media (image/video) directly to CDN, then send only URL
                 // references to the relay. Keeps big payloads off the relay
-                // entirely.
+                // entirely. When attachments already have a remoteURL (set by
+                // DesktopAttachmentProcessor), skip the upload.
                 if let atts = attachments, !atts.isEmpty {
                     let mediaAtts = atts.filter { $0.isMedia }
                     if !mediaAtts.isEmpty {
-                        guard let baseURL = URL(string: relayBaseURL) else {
-                            throw NeoDesktopError.serverError("invalid relay URL")
-                        }
-                        let cdn = RelayTTSService(relayBaseURL: baseURL)
                         var refs: [[String: Any]] = []
                         for att in mediaAtts {
                             let url: String
-                            if let f = att.fileURL {
-                                url = try await cdn.uploadFileDirect(
-                                    fileURL: f,
-                                    filename: att.name,
-                                    mimeType: att.mimeType
-                                )
+                            if let existing = att.remoteURL {
+                                // Already uploaded by the processor
+                                url = existing
                             } else {
-                                // Fallback: write Data to a temp file, then stream-upload.
-                                let tmp = FileManager.default.temporaryDirectory
-                                    .appendingPathComponent("neoatt-\(UUID().uuidString)-\(att.name)")
-                                try att.data.write(to: tmp)
-                                defer { try? FileManager.default.removeItem(at: tmp) }
-                                url = try await cdn.uploadFileDirect(
-                                    fileURL: tmp,
-                                    filename: att.name,
-                                    mimeType: att.mimeType
-                                )
+                                // Fallback: upload now (legacy path / no processor)
+                                guard let baseURL = URL(string: relayBaseURL) else {
+                                    throw NeoDesktopError.serverError("invalid relay URL")
+                                }
+                                let cdn = RelayCDNUploader(relayBaseURL: baseURL)
+                                if let f = att.fileURL {
+                                    url = try await cdn.upload(
+                                        fileURL: f,
+                                        filename: att.name,
+                                        mimeType: att.mimeType
+                                    )
+                                } else {
+                                    let tmp = FileManager.default.temporaryDirectory
+                                        .appendingPathComponent("neoatt-\(UUID().uuidString)-\(att.name)")
+                                    try att.data.write(to: tmp)
+                                    defer { try? FileManager.default.removeItem(at: tmp) }
+                                    url = try await cdn.upload(
+                                        fileURL: tmp,
+                                        filename: att.name,
+                                        mimeType: att.mimeType
+                                    )
+                                }
                             }
                             refs.append([
                                 "url": url,

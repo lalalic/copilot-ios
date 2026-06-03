@@ -118,172 +118,26 @@ public final class RelayTTSService: @unchecked Sendable {
     // MARK: - CDN Upload
 
     /// Upload audio bytes to CDN via relay. Returns the public URL.
+    /// Delegates to `RelayCDNUploader.uploadData`.
     public func uploadToCDN(data: Data, filename: String, mimeType: String = "audio/m4a") async throws -> String {
-        var comps = URLComponents(url: relayBaseURL.appendingPathComponent("cdn/upload"),
-                                  resolvingAgainstBaseURL: false)!
-        comps.queryItems = [URLQueryItem(name: "filename", value: filename)]
-        var req = URLRequest(url: comps.url!)
-        req.httpMethod = "POST"
-        req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        addAuth(to: &req)
-        req.httpBody = data
-        let (respData, resp) = try await URLSession.shared.data(for: req)
-        try ensureOK(resp, body: respData, label: "/cdn/upload")
-        guard let obj = try JSONSerialization.jsonObject(with: respData) as? [String: Any],
-              let url = obj["url"] as? String else {
-            throw RelayTTSError.missingField("/cdn/upload", "url")
-        }
-        return url
+        let cdn = RelayCDNUploader(relayBaseURL: relayBaseURL, credentialStore: credentialStore)
+        return try await cdn.uploadData(data, filename: filename, mimeType: mimeType)
     }
 
-    // MARK: - Direct CDN Upload (Qiniu put-token pattern)
-
-    public struct CDNUploadToken: Sendable {
-        public let uploadToken: String
-        public let key: String
-        public let cdnUrl: String
-        public let uploadHost: String
-    }
-
-    /// Fetch a Qiniu put token from the relay so the client can upload a
-    /// single file directly to Qiniu. Body is small JSON only — no payload.
-    public func requestUploadToken(filename: String, prefix: String = "neox/attachments") async throws -> CDNUploadToken {
-        var comps = URLComponents(url: relayBaseURL.appendingPathComponent("cdn/token"),
-                                  resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "filename", value: filename),
-            URLQueryItem(name: "prefix", value: prefix),
-        ]
-        var req = URLRequest(url: comps.url!)
-        req.httpMethod = "POST"
-        addAuth(to: &req)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try ensureOK(resp, body: data, label: "/cdn/token")
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let token = obj["uploadToken"] as? String,
-              let key = obj["key"] as? String,
-              let cdnUrl = obj["cdnUrl"] as? String,
-              let host = obj["uploadHost"] as? String else {
-            throw RelayTTSError.missingField("/cdn/token", "uploadToken/key/cdnUrl/uploadHost")
-        }
-        return CDNUploadToken(uploadToken: token, key: key, cdnUrl: cdnUrl, uploadHost: host)
-    }
+    // MARK: - Direct CDN Upload (delegated to RelayCDNUploader)
 
     /// Upload a local file directly to Qiniu via a put-token, streaming from
     /// disk (never holds the whole file in memory). Returns the CDN URL.
-    ///
-    /// - Parameters:
-    ///   - fileURL: local file URL to upload.
-    ///   - filename: original filename (used by relay to pick the extension).
-    ///   - mimeType: content-type embedded in the multipart part.
-    ///   - prefix: Qiniu key prefix (default `neox/attachments`).
-    ///   - progress: optional callback `(sent, total)` invoked on a background queue.
+    /// Delegates to `RelayCDNUploader.upload`.
     public func uploadFileDirect(
         fileURL: URL,
         filename: String,
         mimeType: String = "application/octet-stream",
         prefix: String = "neox/attachments",
-        progress: ((Int64, Int64) -> Void)? = nil
+        progress: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> String {
-        let token = try await requestUploadToken(filename: filename, prefix: prefix)
-
-        // Compose a multipart body to a temp file so the upload stays streaming.
-        let boundary = "----neox-" + UUID().uuidString
-        let tmpDir = FileManager.default.temporaryDirectory
-        let bodyURL = tmpDir.appendingPathComponent("cdnup-\(UUID().uuidString).multipart")
-        try? FileManager.default.removeItem(at: bodyURL)
-
-        let crlf = "\r\n"
-        func part(_ name: String, value: String) -> Data {
-            var d = Data()
-            d.append("--\(boundary)\(crlf)".data(using: .utf8)!)
-            d.append("Content-Disposition: form-data; name=\"\(name)\"\(crlf)\(crlf)".data(using: .utf8)!)
-            d.append("\(value)\(crlf)".data(using: .utf8)!)
-            return d
-        }
-
-        guard let out = OutputStream(url: bodyURL, append: false) else {
-            throw RelayTTSError.missingField("/cdn-direct", "tmp output stream")
-        }
-        out.open()
-        defer { out.close() }
-
-        func writeData(_ d: Data) throws {
-            try d.withUnsafeBytes { rawBuf in
-                guard let base = rawBuf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                var remaining = d.count
-                var offset = 0
-                while remaining > 0 {
-                    let written = out.write(base.advanced(by: offset), maxLength: remaining)
-                    if written < 0 { throw out.streamError ?? RelayTTSError.missingField("/cdn-direct", "write") }
-                    if written == 0 { break }
-                    offset += written
-                    remaining -= written
-                }
-            }
-        }
-
-        // Form fields
-        try writeData(part("token", value: token.uploadToken))
-        try writeData(part("key", value: token.key))
-
-        // File header
-        var fileHeader = Data()
-        fileHeader.append("--\(boundary)\(crlf)".data(using: .utf8)!)
-        fileHeader.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(crlf)".data(using: .utf8)!)
-        fileHeader.append("Content-Type: \(mimeType)\(crlf)\(crlf)".data(using: .utf8)!)
-        try writeData(fileHeader)
-
-        // File bytes — stream from source file in 64KB chunks
-        guard let inFile = InputStream(url: fileURL) else {
-            throw RelayTTSError.missingField("/cdn-direct", "source file")
-        }
-        inFile.open()
-        let bufSize = 64 * 1024
-        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
-        defer { buf.deallocate(); inFile.close() }
-        while inFile.hasBytesAvailable {
-            let n = inFile.read(buf, maxLength: bufSize)
-            if n <= 0 { break }
-            var written = 0
-            while written < n {
-                let w = out.write(buf.advanced(by: written), maxLength: n - written)
-                if w <= 0 { throw out.streamError ?? RelayTTSError.missingField("/cdn-direct", "write-file") }
-                written += w
-            }
-        }
-
-        // File trailer + closing boundary
-        try writeData("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
-
-        // POST to Qiniu upload host
-        guard let hostURL = URL(string: token.uploadHost) else {
-            throw RelayTTSError.missingField("/cdn-direct", "uploadHost URL")
-        }
-        var req = URLRequest(url: hostURL)
-        req.httpMethod = "POST"
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 600  // big videos may take a while on slow networks
-
-        let session: URLSession
-        let delegate: CDNUploadDelegate?
-        if let progress {
-            let d = CDNUploadDelegate(progress: progress)
-            delegate = d
-            session = URLSession(configuration: .default, delegate: d, delegateQueue: nil)
-        } else {
-            delegate = nil
-            session = URLSession.shared
-        }
-        defer {
-            if delegate != nil { session.finishTasksAndInvalidate() }
-            try? FileManager.default.removeItem(at: bodyURL)
-        }
-
-        let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
-        try ensureOK(resp, body: data, label: "qiniu-upload")
-        // Success — Qiniu echoes the key but we already know the CDN URL.
-        return token.cdnUrl
+        let cdn = RelayCDNUploader(relayBaseURL: relayBaseURL, credentialStore: credentialStore)
+        return try await cdn.upload(fileURL: fileURL, filename: filename, mimeType: mimeType, prefix: prefix, progress: progress)
     }
 
     // MARK: - Helpers
@@ -329,13 +183,5 @@ public enum RelayTTSError: LocalizedError {
         case .missingField(let label, let field):
             return "\(label): missing \(field) in response"
         }
-    }
-}
-
-private final class CDNUploadDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    let progress: (Int64, Int64) -> Void
-    init(progress: @escaping (Int64, Int64) -> Void) { self.progress = progress }
-    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
-        progress(totalBytesSent, totalBytesExpectedToSend)
     }
 }

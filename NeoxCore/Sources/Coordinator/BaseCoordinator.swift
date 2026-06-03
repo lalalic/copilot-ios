@@ -864,6 +864,10 @@ open class BaseCoordinator: ObservableObject {
 
         self.chatViewModel = vm
         vm.useServerTranscription = true  // Use mlx-whisper on the Mac for transcription
+        vm.attachmentProcessor = DesktopAttachmentProcessor(
+            relayBaseURL: URL(string: "https://relay.ai.qili2.com")!,
+            credentialStore: credentialStore
+        )
         configureChat(vm: vm)
         Task { await vm.connect() }
         return vm
@@ -971,6 +975,7 @@ open class BaseCoordinator: ObservableObject {
         )
 
         self.chatViewModel = vm
+        vm.attachmentProcessor = DirectAttachmentProcessor()
         configureChat(vm: vm)
         Task { await vm.connect() }
         return vm

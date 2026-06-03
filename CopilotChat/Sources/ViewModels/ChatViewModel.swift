@@ -135,6 +135,13 @@ public final class ChatViewModel: ObservableObject {
     /// using on-device SFSpeechRecognizer.
     public var useServerTranscription: Bool = false
 
+    /// Per-runtime attachment preprocessor. Shrinks media and optionally
+    /// uploads to CDN before the prompt is sent.
+    /// Set by the coordinator based on runtime type:
+    /// - Desktop: `DesktopAttachmentProcessor` (shrink + CDN upload)
+    /// - Agent:   `DirectAttachmentProcessor` (shrink + keep local)
+    public var attachmentProcessor: AttachmentProcessor?
+
     /// Callback for channel-forwarded ask_questions in headless sessions.
     /// When set, questions are dispatched through this handler (e.g., to Discord/WeChat)
     /// instead of being auto-answered. The handler receives the question text for display.
@@ -400,9 +407,29 @@ public final class ChatViewModel: ObservableObject {
             }
             // Honor literal \n in system notification text
             let text = (entry.role == "system") ? entry.text.replacingOccurrences(of: "\\n", with: "\n") : entry.text
+            var content: [ChatMessage.ContentBlock] = entry.role == "assistant" ? parseContentBlocks(text) : [.text(text)]
+            if let atts = entry.attachments {
+                for a in atts {
+                    guard let name = a["name"], let mime = a["mimeType"], let path = a["path"] else { continue }
+                    // Resolve relative paths against current workspaceURL
+                    // (absolute paths from older entries still work as-is).
+                    let url: URL = {
+                        if path.hasPrefix("/") {
+                            return URL(fileURLWithPath: path)
+                        }
+                        if let ws = workspaceURL {
+                            return ws.appendingPathComponent(path)
+                        }
+                        return URL(fileURLWithPath: path)
+                    }()
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        content.append(.attachment(url, name: name, mimeType: mime))
+                    }
+                }
+            }
             return ChatMessage(
                 role: role,
-                content: entry.role == "assistant" ? parseContentBlocks(text) : [.text(text)],
+                content: content,
                 timestamp: entry.timestamp,
                 project: entry.project
             )
@@ -506,14 +533,54 @@ public final class ChatViewModel: ObservableObject {
             }
         }()
 
-        // Add user message to the chat (show original text, not the injection)
+        // Preprocess attachments through the per-runtime processor (shrink,
+        // upload to CDN for desktop, etc.). Falls back to raw snapshot when
+        // no processor is configured.
+        let processedAttachments: [ProcessedAttachment]?
+        if let processor = attachmentProcessor, let snapshot = attachmentSnapshot {
+            processedAttachments = try? await processor.process(snapshot)
+        } else {
+            processedAttachments = nil
+        }
+
+        // Add user message to the chat (show original text, not the injection).
+        // Also embed attachment blocks so the bubble can render thumbnails. We
+        // persist a small JPEG thumb under .neo/reports/sessions/thumbs/ so
+        // the message survives app restart with its visual intact.
+        var userContent: [ChatMessage.ContentBlock] = [.text(text)]
+        var loggedAttachments: [[String: String]] = []
+        for entry in attachmentStore.entries {
+            let thumbURL: URL = {
+                if let ws = workspaceURL,
+                   let t = MessageThumbnailStore.makeThumbnail(sourceURL: entry.fileURL, mimeType: entry.mimeType, workspaceURL: ws) {
+                    return t
+                }
+                return entry.fileURL
+            }()
+            userContent.append(.attachment(thumbURL, name: entry.displayName, mimeType: entry.mimeType))
+            // Persist as workspace-relative path so the link survives container-UUID
+            // changes between app installs. Fall back to absolute when we can't.
+            let relativePath: String = {
+                if let ws = workspaceURL, thumbURL.path.hasPrefix(ws.path) {
+                    var p = String(thumbURL.path.dropFirst(ws.path.count))
+                    if p.hasPrefix("/") { p.removeFirst() }
+                    return p
+                }
+                return thumbURL.path
+            }()
+            loggedAttachments.append([
+                "name": entry.displayName,
+                "mimeType": entry.mimeType,
+                "path": relativePath,
+            ])
+        }
         let userMessage = ChatMessage(
             role: .user,
-            content: [.text(text)],
+            content: userContent,
             project: projectScope
         )
         messages.append(userMessage)
-        sessionLogger?.log(role: "user", text: text, project: projectScope)
+        sessionLogger?.log(role: "user", text: text, project: projectScope, attachments: loggedAttachments.isEmpty ? nil : loggedAttachments)
 
         // Clear attachments after sending
         if attachmentDesc != nil {
@@ -555,7 +622,7 @@ public final class ChatViewModel: ObservableObject {
         case .idle:
             // Normal prompt
             chatState = .working
-            await sendPrompt(promptText, attachments: attachmentSnapshot)
+            await sendPrompt(promptText, attachments: attachmentSnapshot, processed: processedAttachments)
 
         default:
             break
@@ -767,7 +834,7 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: - Private Send Helpers
 
-    private func sendPrompt(_ text: String, attachments preSnapped: [RuntimeAttachment]? = nil) async {
+    private func sendPrompt(_ text: String, attachments preSnapped: [RuntimeAttachment]? = nil, processed: [ProcessedAttachment]? = nil) async {
         // Inject project context if a project is scoped
         let effectiveText: String
         if let project = projectScope {
@@ -782,22 +849,46 @@ public final class ChatViewModel: ObservableObject {
             return
         }
 
-        // Use the pre-snapshot if provided (preferred — captures attachments before
-        // the store is cleared); otherwise read from the store now.
-        let attachments: [RuntimeAttachment]? = preSnapped ?? {
-            let entries = attachmentStore.entries
-            guard !entries.isEmpty else { return nil }
-            return entries.compactMap { entry in
-                let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path)
-                let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
-                return RuntimeAttachment(
-                    name: entry.displayName,
-                    fileURL: entry.fileURL,
-                    mimeType: entry.mimeType,
-                    size: size
-                )
+        // When the caller already preprocessed attachments (shrink + CDN upload),
+        // convert back to RuntimeAttachment with the processed data/URLs.
+        // Otherwise fall back to the raw snapshot or the live store.
+        let attachments: [RuntimeAttachment]?
+        if let processed, !processed.isEmpty {
+            attachments = processed.map { p in
+                if let url = p.remoteURL {
+                    // Desktop path: runtime gets the CDN URL in the name field
+                    // and the actual ref as data. NeoDesktopRuntime.send will
+                    // pick up remoteURL from the attachment metadata.
+                    return RuntimeAttachment(
+                        name: p.name,
+                        fileURL: p.fileURL,
+                        mimeType: p.mimeType,
+                        size: p.size,
+                        remoteURL: url
+                    )
+                } else if !p.data.isEmpty {
+                    // Agent path: image data pre-loaded for vision API
+                    return RuntimeAttachment(name: p.name, data: p.data, mimeType: p.mimeType)
+                } else {
+                    return RuntimeAttachment(name: p.name, fileURL: p.fileURL, mimeType: p.mimeType, size: p.size)
+                }
             }
-        }()
+        } else {
+            attachments = preSnapped ?? {
+                let entries = attachmentStore.entries
+                guard !entries.isEmpty else { return nil }
+                return entries.compactMap { entry in
+                    let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path)
+                    let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+                    return RuntimeAttachment(
+                        name: entry.displayName,
+                        fileURL: entry.fileURL,
+                        mimeType: entry.mimeType,
+                        size: size
+                    )
+                }
+            }()
+        }
 
         do {
             try await runtime.send(prompt: effectiveText, attachments: attachments)

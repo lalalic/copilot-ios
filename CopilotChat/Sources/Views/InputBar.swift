@@ -393,10 +393,9 @@ private struct PhotoPickerSheet: UIViewControllerRepresentable {
                     }
                     Task {
                         let started = Date()
-                        var staged: URL?
-                        if let copied {
-                            staged = await AttachmentImageProcessor.process(at: copied)
-                        }
+                        // No shrinking here — AttachmentProcessor handles it
+                        // per-runtime before send().
+                        let staged: URL? = copied
                         // Keep the spinner visible long enough for the user to see it.
                         let elapsed = Date().timeIntervalSince(started)
                         let minSpinner: TimeInterval = 0.6
