@@ -24,6 +24,16 @@ public struct NeoDesktopSettingsSection: View {
                         .foregroundStyle(.green)
                 }
 
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(coordinator.neoDesktopOnline ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(coordinator.neoDesktopOnline ? "Desktop online" : "Desktop offline")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+
                 Toggle("Use Neo Desktop", isOn: $coordinator.useNeoDesktop)
                     .onChange(of: coordinator.useNeoDesktop) { _ in
                         coordinator.saveSharedSettings()
@@ -88,6 +98,13 @@ public struct NeoDesktopSettingsSection: View {
             Text("Neo Desktop")
         } footer: {
             Text("Pair with a Neo desktop to use its AI tools remotely")
+        }
+        .task(id: coordinator.neoDesktopPairingSecret) {
+            guard coordinator.neoDesktopPairingSecret != nil else { return }
+            while !Task.isCancelled {
+                await coordinator.refreshNeoDesktopStatus()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
         }
     }
 

@@ -295,6 +295,7 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
 
         // Stream ended — reconnect
         if !Task.isCancelled {
+            updateState(.connecting)
             #if canImport(os)
             logger.info("SSE stream ended, reconnecting in 3s...")
             #endif
@@ -442,6 +443,9 @@ public final class NeoDesktopRuntime: AgentSessionRuntime, @unchecked Sendable {
         case "connected":
             // SSE connected — Neo is ready. If we were stuck in .working from
             // a prior turn that lost events (relay restart), reset to .idle.
+            if _state == .connecting || _state == .disconnected {
+                updateState(.idle)
+            }
             if _state == .working {
                 updateState(.idle)
                 emit(.turnEnd(.init()))

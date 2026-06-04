@@ -59,6 +59,9 @@ open class BaseCoordinator: ObservableObject {
     /// Name of the paired Neo desktop instance.
     @Published public var neoDesktopName: String? = UserDefaults.standard.string(forKey: "neox.neoDesktop.name")
 
+    /// Latest online status for paired Neo desktop as reported by relay.
+    @Published public var neoDesktopOnline: Bool = false
+
     /// Whether to use the Neo desktop as the chat backend (vs direct provider).
     @Published public var useNeoDesktop: Bool = UserDefaults.standard.bool(forKey: "neox.neoDesktop.enabled")
 
@@ -1155,6 +1158,9 @@ open class BaseCoordinator: ObservableObject {
         defaults.set(desktopName, forKey: "neox.neoDesktop.name")
         defaults.set(true, forKey: "neox.neoDesktop.enabled")
 
+        // Prime status immediately after successful pairing.
+        await refreshNeoDesktopStatus()
+
         return desktopName
     }
 
@@ -1162,11 +1168,41 @@ open class BaseCoordinator: ObservableObject {
     public func unpairNeoDesktop() {
         neoDesktopPairingSecret = nil
         neoDesktopName = nil
+        neoDesktopOnline = false
         useNeoDesktop = false
 
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: "neox.neoDesktop.pairingSecret")
         defaults.removeObject(forKey: "neox.neoDesktop.name")
         defaults.set(false, forKey: "neox.neoDesktop.enabled")
+    }
+
+    /// Refresh paired desktop online status from relay `/api/neo/status`.
+    public func refreshNeoDesktopStatus() async {
+        guard let secret = neoDesktopPairingSecret, !secret.isEmpty else {
+            neoDesktopOnline = false
+            return
+        }
+        guard let url = URL(string: "https://relay.ai.qili2.com/api/neo/status") else {
+            neoDesktopOnline = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                neoDesktopOnline = false
+                return
+            }
+            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            neoDesktopOnline = (json["online"] as? Bool) == true
+        } catch {
+            neoDesktopOnline = false
+        }
     }
 }
